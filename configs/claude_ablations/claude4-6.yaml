@@ -1,0 +1,6 @@
+import:
+  - configs/llms.yaml
+  - configs/default.yaml
+
+prover:
+  prover_llm: ${llm_configs.claude_opus_4_6}

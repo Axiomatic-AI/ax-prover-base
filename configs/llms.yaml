@@ -1,0 +1,93 @@
+# Reusable LLM configurations
+# Import this file and reference configs using OmegaConf interpolation: ${llm_configs.xxx}
+#
+# Example usage in experiment.yaml:
+#   import:
+#     - configs/llms.yaml
+#   prover:
+#     prover_llm: ${llm_configs.claude_opus_4_5}
+
+llm_configs:
+  # Anthropic Claude models
+  claude_opus_4_6:
+    model: "anthropic:claude-opus-4-6"
+    provider_config:
+      temperature: 1.0 # Must be set to 1.0 for thinking
+      max_tokens: null
+      betas:
+        - "structured-outputs-2025-11-13"
+      thinking:
+        type: "enabled"
+        budget_tokens: 10000
+
+  claude_opus_4_5:
+    model: "anthropic:claude-opus-4-5"
+    provider_config:
+      temperature: 1.0 # Must be set to 1.0 for thinking
+      max_tokens: null
+      betas:
+        - "structured-outputs-2025-11-13"
+      thinking:
+        type: "enabled"
+        budget_tokens: 10000
+
+  claude_sonnet_4_5:
+    model: "anthropic:claude-sonnet-4-5"
+    provider_config:
+      temperature: 1.0
+      max_tokens: null
+      betas:
+        - "structured-outputs-2025-11-13"
+      thinking:
+        type: "enabled"
+        budget_tokens: 10000
+
+  claude_haiku_4_5:
+    model: "anthropic:claude-haiku-4-5-20251001"
+    provider_config:
+      temperature: 0.7
+      max_tokens: null
+
+  # Google Gemini models
+  gemini_3_pro:
+    model: "google_genai:gemini-3-pro-preview"
+    provider_config:
+      temperature: 1.0
+      max_tokens: null
+      include_thoughts: true
+      thinking_level: "high"
+
+  gemini_3_flash:
+    model: "google_genai:gemini-3-flash-preview"
+    provider_config:
+      temperature: 1.0
+      max_tokens: null
+      include_thoughts: true
+      thinking_level: "high"
+
+  # OpenAI models
+  gpt_5_2:
+    model: "openai:gpt-5.2"
+    provider_config:
+      temperature: null
+      max_tokens: null
+      reasoning:
+        effort: "high"
+        # summary: "auto"  # We don't support summaries yet because we are not verified
+
+  gpt_5_nano:
+    model: "openai:gpt-5-nano"
+    provider_config:
+      temperature: null
+      max_tokens: null
+      reasoning:
+        effort: "high"
+        # summary: "auto"
+
+  qwen:
+    model: "qwen3-max"
+    provider_config:
+      temperature: null
+      max_tokens: null
+      base_url: "https://api.mulerouter.ai/vendors/openai/v1"
+      model_provider: "openai"

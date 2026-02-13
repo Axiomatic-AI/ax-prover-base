@@ -1,0 +1,50 @@
+timeout: 7200s  # 2 hours for Lean + mathlib build
+
+options:
+  machineType: E2_HIGHCPU_32  # 32 vCPUs, 32GB RAM
+  diskSizeGb: 200
+
+substitutions:
+  _AR_REGION: europe-west1
+  _AR_REPO: ax-containers
+  _IMAGE_NAME: leanbench-base
+  _BENCH_REPO_SSH: git@github.com:AxiomaticX/lean_benchmarks.git
+  _BENCH_REF: main
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/LEANBENCH_DEPLOY_KEY/versions/latest
+      env: LEANBENCH_SSH_KEY
+
+steps:
+  - name: gcr.io/cloud-builders/git
+    entrypoint: bash
+    secretEnv: [LEANBENCH_SSH_KEY]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        mkdir -p /root/.ssh
+        printf '%s\n' "$$LEANBENCH_SSH_KEY" > /root/.ssh/id_ed25519
+        chmod 600 /root/.ssh/id_ed25519
+        ssh-keyscan github.com >> /root/.ssh/known_hosts
+
+        # Clone into build context so Dockerfile.base can COPY it
+        rm -rf lean_benchmarks
+        GIT_SSH_COMMAND="ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" \
+          git clone "$_BENCH_REPO_SSH" lean_benchmarks
+        cd lean_benchmarks
+        git checkout "$_BENCH_REF"
+        git rev-parse HEAD | tee /workspace/LEANBENCH_COMMIT.txt
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - gcp/docker/Dockerfile.base
+      - -t
+      - ${_AR_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:${_BENCH_REF}
+      - .
+
+images:
+  - ${_AR_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:${_BENCH_REF}

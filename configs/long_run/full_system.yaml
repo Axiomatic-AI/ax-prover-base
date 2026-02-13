@@ -1,0 +1,5 @@
+import:
+  - configs/default.yaml
+
+prover:
+  max_iterations: 100

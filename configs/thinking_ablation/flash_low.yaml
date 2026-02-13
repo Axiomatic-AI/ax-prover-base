@@ -1,0 +1,7 @@
+import:
+  - configs/llm_comparison/flash.yaml
+
+prover:
+  prover_llm:
+    provider_config:
+      thinking_level: "low"

@@ -1,0 +1,8 @@
+import:
+  - configs/long_run/default_long_run.yaml
+
+prover:
+  memory_config:
+    class_name: PreviousKProcessor
+    init_args:
+      k: 5
