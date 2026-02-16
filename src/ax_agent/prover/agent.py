@@ -436,9 +436,7 @@ class ProverAgent:
 
                 stripped_code = strip_comments(state.last_proposal.code)
 
-                axiom_count, axiom_locations = count_sorries(
-                    stripped_code, pattern=r"\baxiom\b"
-                )
+                axiom_count, axiom_locations = count_sorries(stripped_code, pattern=r"\baxiom\b")
                 if axiom_count:
                     self.logger.info("The proposed code introduces axiom declarations.")
                     formatted = "\n".join(ctx for _, ctx in axiom_locations)
