@@ -180,6 +180,45 @@ class SorriesGoalStateFeedback(FeedbackMessage):
         )
 
 
+class AxiomDetectedFeedback(FeedbackMessage):
+    """Proposed code introduces new axioms."""
+
+    feedback_type: Literal["axiom_detected"] = "axiom_detected"
+    count: int
+    locations: str
+    is_success: bool = False
+
+    def __init__(self, count: int, locations: str, **kwargs):
+        """Initialize with formatted axiom detection message."""
+        kwargs.pop("content", None)
+        content = (
+            f"AXIOM DETECTED: The proposed code introduces {count} new axiom declaration(s). "
+            "Introducing new axioms is forbidden — you must prove the theorem without axioms.\n\n"
+            f"Locations:\n{locations}"
+        )
+        super().__init__(content=content, count=count, locations=locations, **kwargs)
+
+
+class SearchTacticsDetectedFeedback(FeedbackMessage):
+    """Proposed code contains search tactics like apply? or exact?."""
+
+    feedback_type: Literal["search_tactics_detected"] = "search_tactics_detected"
+    count: int
+    locations: str
+    is_success: bool = False
+
+    def __init__(self, count: int, locations: str, **kwargs):
+        """Initialize with formatted search tactics detection message."""
+        kwargs.pop("content", None)
+        content = (
+            f"SEARCH TACTICS DETECTED: The proposed code contains {count} search tactic(s) "
+            "(apply?, exact?, etc.). Search tactics are not allowed in final proofs — "
+            "replace them with the concrete tactics they suggest.\n\n"
+            f"Locations:\n{locations}"
+        )
+        super().__init__(content=content, count=count, locations=locations, **kwargs)
+
+
 class StructuredOutputParsingFailedFeedback(FeedbackMessage):
     """Structured output parsing failed - LLM couldn't produce valid output."""
 
