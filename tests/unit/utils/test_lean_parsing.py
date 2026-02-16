@@ -192,6 +192,31 @@ class TestCountSorries:
         count, _ = count_sorries(code)
         assert count == 0
 
+    def test_custom_pattern_detects_axiom(self):
+        """Custom pattern detects axiom declarations."""
+        code = "axiom myAxiom : Nat → Nat\ntheorem foo : True := trivial"
+        count, locations = count_sorries(code, pattern=r"\baxiom\b")
+        assert count == 1
+        assert locations[0][0] == 1
+
+    def test_custom_pattern_detects_search_tactics(self):
+        """Custom pattern detects apply? and exact?."""
+        code = "theorem foo : P := by\n  apply?\n  exact?"
+        count, _ = count_sorries(code, pattern=r"\b(apply|exact)\?")
+        assert count == 2
+
+    def test_custom_pattern_does_not_flag_apply_without_question_mark(self):
+        """apply (without ?) is not flagged by the search tactics pattern."""
+        code = "theorem foo : P := by\n  apply some_lemma"
+        count, _ = count_sorries(code, pattern=r"\b(apply|exact)\?")
+        assert count == 0
+
+    def test_default_pattern_does_not_match_axiom(self):
+        """Default pattern only matches sorry/admit, not axiom."""
+        code = "axiom myAxiom : Nat → Nat"
+        count, _ = count_sorries(code)
+        assert count == 0
+
 
 class TestExtractFunctionFromContent:
     """Tests for extract_function_from_content function."""
