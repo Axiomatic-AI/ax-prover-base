@@ -1,0 +1,9 @@
+# Remove iterations, memory and tools
+import:
+  - default.yaml
+
+prover:
+  proposer_tools: {}
+  max_iterations: 1
+  memory_config:
+    class_name: MemorylessProcessor

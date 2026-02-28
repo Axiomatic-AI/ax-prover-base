@@ -1,0 +1,8 @@
+import:
+  - ../llm_comparison/sonnet.yaml
+
+prover:
+  prover_llm:
+    provider_config:
+      thinking:
+        budget_tokens: 32000

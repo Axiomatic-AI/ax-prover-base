@@ -1,0 +1,49 @@
+# =============================================================================
+# GCP Project & Region
+# =============================================================================
+export GCP_PROJECT_ID="ax-baku"
+export GCP_REGION="europe-west4"
+
+# =============================================================================
+# Storage Buckets
+# =============================================================================
+export GCP_CONFIG_BUCKET="ax-experiment-configs"
+export GCP_ARTIFACT_BUCKET="ax-experiment-artifacts"
+
+# =============================================================================
+# Artifact Registry (Docker images)
+# =============================================================================
+export AR_REPO="ax-containers"
+export AR_REGION="europe-west1"
+
+# Image names
+export BASE_IMAGE_NAME="leanbench-base"
+export RUNNER_IMAGE_NAME="ax-prover-runner"
+export DEFAULT_RUNNER_TAG="latest"
+
+# =============================================================================
+# Service Account (for Batch jobs)
+# =============================================================================
+export BATCH_RUNNER_SA_NAME="ax-batch-runner"
+export BATCH_RUNNER_SA_EMAIL="${BATCH_RUNNER_SA_NAME}@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
+
+# =============================================================================
+# Secrets
+# =============================================================================
+export ENV_SECRETS_SECRET_NAME="AX_ENV_SECRETS"
+
+# =============================================================================
+# Lean Benchmarks Repository (for base image build)
+# =============================================================================
+export LEANBENCH_REPO_SSH="git@github.com:AxiomaticX/lean_benchmarks.git"
+
+# =============================================================================
+# LeanSearch Cloud Run service
+# =============================================================================
+export LEANSEARCH_SERVICE="axleansearch"
+export LEANSEARCH_SERVICE_REGION="us-central1"
+
+# =============================================================================
+# Optional: Job naming prefix
+# =============================================================================
+export PREFIX="ax"

@@ -1,0 +1,40 @@
+# Reusable tool configurations
+# Import this file and reference configs using OmegaConf interpolation: ${tool_configs.xxx}
+#
+# Example usage in experiment.yaml:
+#   import:
+#     - configs/tools.yaml
+#   prover:
+#     proposer_tools:
+#       search_web: ${tool_configs.search_web}
+
+tool_configs:
+  search_web:
+    tool_type: search_web
+    max_results: 3
+    timeout: 10
+    max_content_length: 3000
+
+  search_lean_search:
+    tool_type: search_lean_search
+    server_url: "https://leansearch.net"
+    max_results: 6
+    timeout: 60
+    max_retries: 3
+    retry_delay: 2
+
+  search_lean_search_local:
+    tool_type: search_lean_search
+    server_url: "http://localhost:8080"
+    max_results: 6
+    timeout: 60
+    max_retries: 3
+    retry_delay: 2
+
+  search_lean_search_ax:
+    tool_type: search_lean_search
+    server_url: "https://axleansearch-sgyxphaitq-uc.a.run.app"
+    max_results: 6
+    timeout: 60
+    max_retries: 3
+    retry_delay: 2

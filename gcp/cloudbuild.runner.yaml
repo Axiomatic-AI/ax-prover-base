@@ -1,0 +1,27 @@
+timeout: 3600s  # 1 hour
+
+options:
+  machineType: E2_HIGHCPU_8
+  diskSizeGb: 100
+
+substitutions:
+  _AR_REGION: europe-west1
+  _AR_REPO: ax-containers
+  _IMAGE_NAME: ax-prover-runner
+  _BASE_IMAGE: europe-west1-docker.pkg.dev/$PROJECT_ID/ax-containers/leanbench-base:main
+  _AX_TAG: latest
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - gcp/docker/Dockerfile.runner
+      - --build-arg
+      - BASE_IMAGE=${_BASE_IMAGE}
+      - -t
+      - ${_AR_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:${_AX_TAG}
+      - .
+
+images:
+  - ${_AR_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:${_AX_TAG}

@@ -1,0 +1,9 @@
+import:
+  - ../llms.yaml
+  - ../default.yaml
+
+prover:
+  prover_llm: ${llm_configs.claude_opus_4_6}
+  memory_config:
+    init_args:
+      llm_config: ${llm_configs.gemini_3_flash}

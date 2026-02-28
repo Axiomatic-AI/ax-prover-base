@@ -1,0 +1,17 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+WORKDIR /opt/ax-prover
+COPY dist/*.whl /opt/ax-prover/
+COPY configs/ /opt/ax-prover/configs/
+
+RUN pip install --no-cache-dir /opt/ax-prover/*.whl \
+  && pip install --no-cache-dir google-cloud-secret-manager google-cloud-storage
+
+COPY gcp/docker/entrypoint.sh /entrypoint.sh
+COPY gcp/docker/bootstrap_envsecrets.py /opt/bootstrap_envsecrets.py
+COPY gcp/docker/upload_artifacts.py /opt/upload_artifacts.py
+RUN chmod +x /entrypoint.sh
+
+WORKDIR /opt/lean_benchmarks
+ENTRYPOINT ["/entrypoint.sh"]

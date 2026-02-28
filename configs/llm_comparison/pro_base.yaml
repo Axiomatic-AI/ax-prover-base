@@ -1,0 +1,6 @@
+import:
+  - ../llms.yaml
+  - ../default_base_llm.yaml
+
+prover:
+  prover_llm: ${llm_configs.gemini_3_pro}

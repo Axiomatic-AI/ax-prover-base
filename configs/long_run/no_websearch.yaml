@@ -1,0 +1,6 @@
+import:
+  - default_long_run.yaml
+
+prover:
+  proposer_tools:
+    search_web: null

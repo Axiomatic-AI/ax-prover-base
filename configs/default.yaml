@@ -1,0 +1,22 @@
+import:
+  - llms.yaml
+  - tools.yaml
+
+prover:
+  prover_llm: ${llm_configs.claude_opus_4_5}
+  proposer_tools:
+    search_lean: ${tool_configs.search_lean_search}
+    search_web: ${tool_configs.search_web}
+  max_iterations: 50
+  memory_config:
+    class_name: ExperienceProcessor
+    init_args:
+      llm_config: ${prover.prover_llm}
+  summarize_output:
+    enabled: true
+    llm: ${prover.prover_llm}
+runtime:
+  max_tool_calling_iterations: 1
+  lean:
+    max_concurrent_builds: 12
+  log_level: "INFO"

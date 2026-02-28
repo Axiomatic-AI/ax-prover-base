@@ -1,0 +1,7 @@
+# Set iterations to 100 and remove all the tools
+import:
+  - ../default.yaml
+
+prover:
+  proposer_tools: {}
+  max_iterations: 100

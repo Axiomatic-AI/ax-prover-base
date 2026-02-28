@@ -1,0 +1,6 @@
+import:
+  - ../llms.yaml
+  - ../default.yaml
+
+prover:
+  prover_llm: ${llm_configs.gemini_3_flash}
