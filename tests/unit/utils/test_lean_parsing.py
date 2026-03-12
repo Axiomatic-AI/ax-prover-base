@@ -29,6 +29,9 @@ lemma helper_lemma(n : Nat) : n + 0 = n := by
   sorry
 """
 
+# Trailing whitespace in content comes from strip_comments replacing doc comments
+# and block comments with spaces (to preserve byte offsets), then the parser
+# appending those whitespace-only lines as part of the preceding declaration's content.
 EXPECTED_DECLARATIONS: list[Declaration] = [
     Declaration(
         declaration_type=DeclarationType.Import,
