@@ -25,7 +25,7 @@ theorem add_comm (a b : Nat) : add a b = add b a := by
   simp [add]
   omega
 
-lemma helper_lemma (n : Nat) : n + 0 = n := by
+lemma helper_lemma(n : Nat) : n + 0 = n := by
   sorry
 """
 
@@ -61,7 +61,7 @@ EXPECTED_EXTRACTIONS: list[tuple[str, str | None]] = [
         "  simp [add]\n"
         "  omega",
     ),
-    ("helper_lemma", "lemma helper_lemma (n : Nat) : n + 0 = n := by\n  sorry"),
+    ("helper_lemma", "lemma helper_lemma(n : Nat) : n + 0 = n := by\n  sorry"),
     ("nonexistent", None),
 ]
 
@@ -200,7 +200,7 @@ class TestExtractTheoremName:
         "stmt, expected",
         [
             ("theorem foo : P := sorry", "foo"),
-            ("lemma bar (n : Nat) : n > 0 := by sorry", "bar"),
+            ("lemma bar(n : Nat) : n > 0 := by sorry", "bar"),
             ("def baz := 42", "baz"),
             (
                 "theorem Polynomial.not_isPrincipalIdealRing : P := sorry",
