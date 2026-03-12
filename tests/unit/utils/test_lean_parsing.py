@@ -241,6 +241,19 @@ class TestListAllDeclarationsInLeanCode:
         assert expected.name in by_name
         assert by_name[expected.name].declaration_type == expected.declaration_type
 
+    @pytest.mark.parametrize(
+        "expected",
+        EXPECTED_DECLARATIONS,
+        ids=[d.name for d in EXPECTED_DECLARATIONS],
+    )
+    def test_declaration_content_correct(self, expected):
+        """Each declaration has the expected content (ignoring trailing whitespace)."""
+        declarations = list_all_declarations_in_lean_code(SAMPLE_LEAN_CODE)
+        by_name = {d.name: d for d in declarations}
+        assert expected.name in by_name
+        # Compare the content ignoring the trailing whitespaces
+        assert by_name[expected.name].content.strip() == expected.content.strip()
+
     def test_import_detected(self):
         """Import statements are listed as declarations."""
         declarations = list_all_declarations_in_lean_code(SAMPLE_LEAN_CODE)
