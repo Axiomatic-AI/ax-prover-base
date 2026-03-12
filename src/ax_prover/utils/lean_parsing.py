@@ -326,7 +326,12 @@ def list_all_declarations_in_lean_code(raw_code: str) -> list[Declaration]:
     code = strip_comments(raw_code)
 
     for line in code.split("\n"):
-        line_keywords = line.strip().split()
+        # Split on any whitespace or any non-word, non-number character (preserve underscores, numbers, and unicode letters)
+        line_keywords = [
+            tok
+            for tok in re.split(r"[\s]|([^A-Za-z0-9_])", line.strip())
+            if tok and not tok.isspace()
+        ]
         if len(line_keywords) >= 2 and line_keywords[0] in list(DeclarationType):
             # Extract just the name, splitting on punctuation that can follow it
             name = re.split(r"[:({[\[]", line_keywords[1])[0]
