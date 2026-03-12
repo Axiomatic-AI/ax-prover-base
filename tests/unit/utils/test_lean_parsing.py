@@ -29,6 +29,42 @@ lemma helper_lemma (n : Nat) : n + 0 = n := by
   sorry
 """
 
+EXPECTED_DECLARATIONS: list[Declaration] = [
+    Declaration(
+        declaration_type=DeclarationType.Import,
+        name="Mathlib",
+        content=". Topology . Basic\n\n                            ",
+    ),
+    Declaration(
+        declaration_type=DeclarationType.Definition,
+        name="add",
+        content="( a b : Nat ) : Nat : =\n  a + b\n\n                                 ",
+    ),
+    Declaration(
+        declaration_type=DeclarationType.Theorem,
+        name="add_comm",
+        content="( a b : Nat ) : add a b = add b a : = by\n  simp [add]\n  omega\n",
+    ),
+    Declaration(
+        declaration_type=DeclarationType.Lemma,
+        name="helper_lemma",
+        content="( n : Nat ) : n + 0 = n : = by\n  sorry\n",
+    ),
+]
+
+EXPECTED_EXTRACTIONS: list[tuple[str, str | None]] = [
+    ("add", "/-- Addition of naturals. -/\ndef add (a b : Nat) : Nat :=\n  a + b"),
+    (
+        "add_comm",
+        "/-- Commutativity of addition. -/\n"
+        "theorem add_comm (a b : Nat) : add a b = add b a := by\n"
+        "  simp [add]\n"
+        "  omega",
+    ),
+    ("helper_lemma", "lemma helper_lemma (n : Nat) : n + 0 = n := by\n  sorry"),
+    ("nonexistent", None),
+]
+
 NESTED_COMMENT_CODE = """\
 /- outer /- inner -/ still outer -/
 def foo := 1
@@ -142,50 +178,19 @@ class TestCountSorries:
 class TestExtractFunctionFromContent:
     """Tests for extract_function_from_content function."""
 
-    def test_extract_def(self):
-        """Extracts a def with its body."""
-        result = extract_function_from_content(SAMPLE_LEAN_CODE, "add")
-        assert result is not None
-        assert "def add" in result
-        assert "a + b" in result
-
-    def test_extract_theorem(self):
-        """Extracts a theorem with its proof."""
-        result = extract_function_from_content(SAMPLE_LEAN_CODE, "add_comm")
-        assert result is not None
-        assert "theorem add_comm" in result
-        assert "omega" in result
-
-    def test_extract_lemma(self):
-        """Extracts a lemma."""
-        result = extract_function_from_content(SAMPLE_LEAN_CODE, "helper_lemma")
-        assert result is not None
-        assert "lemma helper_lemma" in result
-        assert "sorry" in result
-
-    def test_extract_with_doc_comment(self):
-        """Doc comment is included in the extraction."""
-        result = extract_function_from_content(SAMPLE_LEAN_CODE, "add")
-        assert result is not None
-        assert "Addition of naturals" in result
-
-    def test_nonexistent_function(self):
-        """Returns None for function not in the code."""
-        result = extract_function_from_content(SAMPLE_LEAN_CODE, "nonexistent")
-        assert result is None
-
-    def test_extract_last_function(self):
-        """Last function in file extends to end of content."""
-        result = extract_function_from_content(SAMPLE_LEAN_CODE, "helper_lemma")
-        assert result is not None
-        assert "sorry" in result
+    @pytest.mark.parametrize(
+        "name, expected",
+        EXPECTED_EXTRACTIONS,
+        ids=[name for name, _ in EXPECTED_EXTRACTIONS],
+    )
+    def test_extract_function(self, name, expected):
+        """Extracts the exact expected text for each declaration."""
+        assert extract_function_from_content(SAMPLE_LEAN_CODE, name) == expected
 
     def test_namespaced_function(self):
         """Functions with dots in names can be extracted."""
         code = "theorem Poly.not_principal : P := by sorry"
-        result = extract_function_from_content(code, "Poly.not_principal")
-        assert result is not None
-        assert "Poly.not_principal" in result
+        assert extract_function_from_content(code, "Poly.not_principal") == code
 
 
 class TestExtractTheoremName:
@@ -214,32 +219,39 @@ class TestExtractTheoremName:
 class TestListAllDeclarationsInLeanCode:
     """Tests for list_all_declarations_in_lean_code function."""
 
-    def test_finds_all_declaration_types(self):
-        """Finds def, theorem, and lemma declarations."""
+    def test_finds_all_declarations(self):
+        """Finds exactly the expected declarations in order."""
         declarations = list_all_declarations_in_lean_code(SAMPLE_LEAN_CODE)
         names = [d.name for d in declarations]
-        assert "add" in names
-        assert "add_comm" in names
-        assert "helper_lemma" in names
+        expected_names = [d.name for d in EXPECTED_DECLARATIONS]
+        assert names == expected_names
 
-    def test_empty_code(self):
-        """Empty code returns empty list."""
-        assert list_all_declarations_in_lean_code("") == []
-
-    def test_declaration_types_correct(self):
+    @pytest.mark.parametrize(
+        "expected",
+        EXPECTED_DECLARATIONS,
+        ids=[d.name for d in EXPECTED_DECLARATIONS],
+    )
+    def test_declaration_type_correct(self, expected):
         """Each declaration has the correct type."""
         declarations = list_all_declarations_in_lean_code(SAMPLE_LEAN_CODE)
         by_name = {d.name: d for d in declarations}
-        assert by_name["add"].declaration_type == DeclarationType.Definition
-        assert by_name["add_comm"].declaration_type == DeclarationType.Theorem
-        assert by_name["helper_lemma"].declaration_type == DeclarationType.Lemma
+        assert expected.name in by_name
+        assert by_name[expected.name].declaration_type == expected.declaration_type
 
     def test_import_detected(self):
         """Import statements are listed as declarations."""
         declarations = list_all_declarations_in_lean_code(SAMPLE_LEAN_CODE)
-        imports = [d for d in declarations if d.declaration_type == DeclarationType.Import]
-        assert len(imports) >= 1
-        assert imports[0].name == "Mathlib.Topology.Basic"
+        expected_imports = [
+            d for d in EXPECTED_DECLARATIONS if d.declaration_type == DeclarationType.Import
+        ]
+        actual_imports = [d for d in declarations if d.declaration_type == DeclarationType.Import]
+        assert len(actual_imports) == len(expected_imports)
+        for actual, expected in zip(actual_imports, expected_imports, strict=True):
+            assert actual.name == expected.name
+
+    def test_empty_code(self):
+        """Empty code returns empty list."""
+        assert list_all_declarations_in_lean_code("") == []
 
     def test_comments_ignored(self):
         """Declarations inside comments are not detected."""
