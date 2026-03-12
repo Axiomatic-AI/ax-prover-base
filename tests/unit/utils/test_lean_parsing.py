@@ -52,7 +52,7 @@ EXPECTED_DECLARATIONS: list[Declaration] = [
     ),
 ]
 
-EXPECTED_EXTRACTIONS: list[tuple[str, str | None]] = [
+EXPECTED_FUNCTION_EXTRACTIONS: list[tuple[str, str | None]] = [
     ("add", "/-- Addition of naturals. -/\ndef add (a b : Nat) : Nat :=\n  a + b"),
     (
         "add_comm",
@@ -180,8 +180,8 @@ class TestExtractFunctionFromContent:
 
     @pytest.mark.parametrize(
         "name, expected",
-        EXPECTED_EXTRACTIONS,
-        ids=[name for name, _ in EXPECTED_EXTRACTIONS],
+        EXPECTED_FUNCTION_EXTRACTIONS,
+        ids=[name for name, _ in EXPECTED_FUNCTION_EXTRACTIONS],
     )
     def test_extract_function(self, name, expected):
         """Extracts the exact expected text for each declaration."""
