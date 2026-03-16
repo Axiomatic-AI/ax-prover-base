@@ -27,6 +27,11 @@ theorem add_comm (a b : Nat) : add a b = add b a := by
 
 lemma helper_lemma(n : Nat) : n + 0 = n := by
   sorry
+
+def αβ_γ := 42
+
+theorem Some.Nested.Theorem : P :=
+    sorry
 """
 
 # Trailing whitespace in content comes from strip_comments replacing doc comments
@@ -52,6 +57,16 @@ EXPECTED_DECLARATIONS: list[Declaration] = [
         declaration_type=DeclarationType.Lemma,
         name="helper_lemma",
         content="(n : Nat) : n + 0 = n := by\n  sorry",
+    ),
+    Declaration(
+        declaration_type=DeclarationType.Definition,
+        name="αβ_γ",
+        content=":= 42",
+    ),
+    Declaration(
+        declaration_type=DeclarationType.Theorem,
+        name="Some.Nested.Theorem",
+        content=": P :=\n    sorry",
     ),
 ]
 
