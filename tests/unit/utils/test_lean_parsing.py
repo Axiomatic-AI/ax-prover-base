@@ -28,9 +28,9 @@ theorem add_comm (a b : Nat) : add a b = add b a := by
 lemma helper_lemma(n : Nat) : n + 0 = n := by
   sorry
 
-def αβ_γ := 42
+def αβ_γ' := 42
 
-theorem Some.Nested.Theorem: P :=
+theorem Some.Nested.Theorem?: P :=
     sorry
 """
 
@@ -60,12 +60,12 @@ EXPECTED_DECLARATIONS: list[Declaration] = [
     ),
     Declaration(
         declaration_type=DeclarationType.Definition,
-        name="αβ_γ",
+        name="αβ_γ'",
         content=":= 42",
     ),
     Declaration(
         declaration_type=DeclarationType.Theorem,
-        name="Some.Nested.Theorem",
+        name="Some.Nested.Theorem?",
         content=": P :=\n    sorry",
     ),
 ]
