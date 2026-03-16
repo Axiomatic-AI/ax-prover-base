@@ -35,23 +35,23 @@ lemma helper_lemma(n : Nat) : n + 0 = n := by
 EXPECTED_DECLARATIONS: list[Declaration] = [
     Declaration(
         declaration_type=DeclarationType.Import,
-        name="Mathlib",
-        content=". Topology . Basic\n\n                            ",
+        name="Mathlib.Topology.Basic",
+        content="",
     ),
     Declaration(
         declaration_type=DeclarationType.Definition,
         name="add",
-        content="( a b : Nat ) : Nat : =\n  a + b\n\n                                 ",
+        content="(a b : Nat) : Nat :=\n  a + b",
     ),
     Declaration(
         declaration_type=DeclarationType.Theorem,
         name="add_comm",
-        content="( a b : Nat ) : add a b = add b a : = by\n  simp [add]\n  omega\n",
+        content="(a b : Nat) : add a b = add b a := by\n  simp [add]\n  omega",
     ),
     Declaration(
         declaration_type=DeclarationType.Lemma,
         name="helper_lemma",
-        content="( n : Nat ) : n + 0 = n : = by\n  sorry\n",
+        content="(n : Nat) : n + 0 = n := by\n  sorry",
     ),
 ]
 
@@ -251,8 +251,7 @@ class TestListAllDeclarationsInLeanCode:
         declarations = list_all_declarations_in_lean_code(SAMPLE_LEAN_CODE)
         by_name = {d.name: d for d in declarations}
         assert expected.name in by_name
-        # Compare the content ignoring the trailing whitespaces
-        assert by_name[expected.name].content.strip() == expected.content.strip()
+        assert str(by_name[expected.name]) == str(expected)
 
     def test_import_detected(self):
         """Import statements are listed as declarations."""
