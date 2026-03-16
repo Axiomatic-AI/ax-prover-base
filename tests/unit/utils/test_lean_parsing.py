@@ -30,7 +30,7 @@ lemma helper_lemma(n : Nat) : n + 0 = n := by
 
 def αβ_γ := 42
 
-theorem Some.Nested.Theorem : P :=
+theorem Some.Nested.Theorem: P :=
     sorry
 """
 
