@@ -15,6 +15,8 @@ logger = get_logger(__name__)
 
 # Lean keywords for declarations
 LEAN_KEYWORDS = [d.value for d in DeclarationType]
+LEAN_KEYWORDS_SET = set(LEAN_KEYWORDS)
+ANONYMOUS_KEYWORDS = {d.value for d in DeclarationType if d.is_anonymous}
 
 
 def count_sorries(content: str, context_lines: int = 1) -> tuple[int, list[tuple[int, str]]]:
@@ -132,7 +134,11 @@ def extract_function_from_content(content: str, function_name: str) -> str | Non
         The complete definition block including doc comments, or None
     """
     keywords_pattern = "|".join(LEAN_KEYWORDS)
-    pattern = rf"^(\s*)({keywords_pattern})\s+{re.escape(function_name)}\b"
+
+    if function_name in ANONYMOUS_KEYWORDS:
+        pattern = rf"^(\s*)({re.escape(function_name)})\b"
+    else:
+        pattern = rf"^(\s*)({keywords_pattern})\s+{re.escape(function_name)}\b"
 
     match = re.search(pattern, content, re.MULTILINE)
     if not match:
@@ -304,10 +310,13 @@ def extract_theorem_name(theorem_statement: str) -> str | None:
     theorem_statement = strip_comments(theorem_statement)
 
     keywords_pattern = "|".join(re.escape(kw) for kw in LEAN_KEYWORDS)
-    match = re.search(rf"\b(?:{keywords_pattern})\s+([\w.]+)", theorem_statement)
-    if match:
-        return match.group(1)
-    return None
+    match = re.search(rf"\b({keywords_pattern})(?:\s+([\w.]+))?", theorem_statement)
+    if not match:
+        return None
+    keyword, name = match.group(1), match.group(2)
+    if name:
+        return name
+    return keyword if keyword in ANONYMOUS_KEYWORDS else None
 
 
 def list_all_declarations_in_lean_code(raw_code: str) -> list[Declaration]:
@@ -327,14 +336,19 @@ def list_all_declarations_in_lean_code(raw_code: str) -> list[Declaration]:
 
     for line in code.split("\n"):
         line_keywords = line.strip().split()
-        if len(line_keywords) >= 2 and line_keywords[0] in list(DeclarationType):
-            # Extract just the name, splitting on punctuation that can follow it
-            name = re.split(r"[:({[\[]", line_keywords[1])[0]
-            content = line_keywords[2:]
+        keyword = line_keywords[0] if line_keywords else None
+        is_anon = keyword in ANONYMOUS_KEYWORDS
+        if keyword in LEAN_KEYWORDS_SET and (is_anon or len(line_keywords) >= 2):
+            if is_anon:
+                name = keyword
+                content = line_keywords[1:]
+            else:
+                name = re.split(r"[:({[\[]", line_keywords[1])[0]
+                content = line_keywords[2:]
             if declaration is not None:
                 declarations.append(declaration)
             declaration = Declaration(
-                declaration_type=line_keywords[0],
+                declaration_type=keyword,
                 name=name,
                 content=" ".join(content),
             )
@@ -435,24 +449,28 @@ def find_declaration_at_line(content: str, line_number: int) -> str | None:
         return None
 
     keywords_pattern = "|".join(LEAN_KEYWORDS)
-    pattern = rf"^(\s*)({keywords_pattern})\s+([\w.]+)"
+    pattern = rf"^(\s*)({keywords_pattern})(?:\s+([\w.]+))?"
 
     declarations: list[tuple[str, int, int]] = []
 
     for i, line in enumerate(lines):
         match = re.match(pattern, line)
-        if match:
-            name = match.group(3)
-            # Split on punctuation that can follow the name
-            name = re.split(r"[:({[\[]", name)[0]
-            start_line = i + 1  # Convert to 1-indexed
+        if not match:
+            continue
+        keyword, name = match.group(2), match.group(3)
+        if not name:
+            if keyword not in ANONYMOUS_KEYWORDS:
+                continue
+            name = keyword
+        name = re.split(r"[:({[\[]", name)[0]
+        start_line = i + 1  # Convert to 1-indexed
 
-            # Close previous declaration at same or lower indent
-            if declarations:
-                prev_name, prev_start, _ = declarations[-1]
-                declarations[-1] = (prev_name, prev_start, i + 1)  # end is exclusive, 1-indexed
+        # Close previous declaration at same or lower indent
+        if declarations:
+            prev_name, prev_start, _ = declarations[-1]
+            declarations[-1] = (prev_name, prev_start, i + 1)  # end is exclusive, 1-indexed
 
-            declarations.append((name, start_line, len(lines) + 1))
+        declarations.append((name, start_line, len(lines) + 1))
 
     for name, start, end in declarations:
         if start <= line_number < end:

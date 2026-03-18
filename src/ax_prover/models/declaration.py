@@ -31,6 +31,15 @@ class DeclarationType(StrEnum):
     Section = "section"
     Namespace = "namespace"
     Import = "import"
+    Example = "example"
+
+    @property
+    def is_anonymous(self) -> bool:
+        """Whether this declaration type has no name (e.g., example)."""
+        return self in _ANONYMOUS_TYPES
+
+
+_ANONYMOUS_TYPES = {DeclarationType.Example}
 
 
 class Declaration(BaseModel):

@@ -34,6 +34,16 @@ lemma helper_lemma (n : Nat) : n + 0 = n := by
   sorry
 """
 
+EXAMPLE_LEAN_CODE = """\
+import Mathlib.Topology.Basic
+
+example : 2 + 3 = 5 := by
+  sorry
+
+theorem after_example (n : Nat) : n = n := by
+  rfl
+"""
+
 NESTED_COMMENT_CODE = """\
 /- outer /- inner -/ still outer -/
 def foo := 1
@@ -201,6 +211,20 @@ class TestExtractFunctionFromContent:
         assert result is not None
         assert "Poly.not_principal" in result
 
+    def test_extract_example(self):
+        """Extracts an example declaration from Lean code."""
+        code = "example : 2 + 3 = 5 := by\n  sorry"
+        result = extract_function_from_content(code, "example")
+        assert result is not None
+        assert "2 + 3 = 5" in result
+
+    def test_example_does_not_break_surrounding_declarations(self):
+        """Declarations after an example are still extractable."""
+        result = extract_function_from_content(EXAMPLE_LEAN_CODE, "after_example")
+        assert result is not None
+        assert "theorem after_example" in result
+        assert "rfl" in result
+
 
 # --- extract_theorem_name ---
 
@@ -226,6 +250,10 @@ class TestExtractTheoremName:
     def test_extract_theorem_name(self, stmt, expected):
         """Extracts theorem name from various declaration types."""
         assert extract_theorem_name(stmt) == expected
+
+    def test_extract_example_name(self):
+        """extract_theorem_name returns 'example' for anonymous example declarations."""
+        assert extract_theorem_name("example : 2 + 3 = 5 := by sorry") == "example"
 
 
 # --- list_all_declarations_in_lean_code ---
@@ -268,6 +296,19 @@ class TestListAllDeclarationsInLeanCode:
         names = [d.name for d in declarations]
         assert "visible" in names
         assert "hidden" not in names
+
+    def test_example_declaration_detected(self):
+        """Example declarations are detected by list_all_declarations_in_lean_code."""
+        code = "example : 2 + 3 = 5 := by\n  sorry\n\ntheorem foo : True := trivial"
+        declarations = list_all_declarations_in_lean_code(code)
+        types = [d.declaration_type for d in declarations]
+        assert DeclarationType.Example in types
+
+    def test_declarations_after_example_still_found(self):
+        """Declarations following an example are still correctly parsed."""
+        declarations = list_all_declarations_in_lean_code(EXAMPLE_LEAN_CODE)
+        names = [d.name for d in declarations]
+        assert "after_example" in names
 
 
 # --- normalize_location ---
