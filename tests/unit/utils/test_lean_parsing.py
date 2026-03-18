@@ -13,7 +13,7 @@ from ax_prover.utils.lean_parsing import (
     strip_comments,
 )
 
-SAMPLE_LEAN_CODE = """\
+SAMPLE_LEAN_CODE = r"""
 import Mathlib.Topology.Basic
 
 /-- Addition of naturals. -/
@@ -25,10 +25,10 @@ theorem add_comm (a b : Nat) : add a b = add b a := by
   simp [add]
   omega
 
-lemma helper_lemma(n : Nat) : n + 0 = n := by
+lemma helper_lemma{n : Nat} : n + 0 = n := by
   sorry
 
-def αβ_γ' := 42
+def Κατ.Μοδ.αβ_γ'δε₀₁₂³_ℕtoℤ_φψ''ωΩ_über_café_∂Δ_Привет?! := 42
 
 theorem Some.Nested.Theorem?: P :=
     sorry
@@ -56,11 +56,11 @@ EXPECTED_DECLARATIONS: list[Declaration] = [
     Declaration(
         declaration_type=DeclarationType.Lemma,
         name="helper_lemma",
-        content="(n : Nat) : n + 0 = n := by\n  sorry",
+        content=r"{n : Nat} : n + 0 = n := by" + "\n  sorry",
     ),
     Declaration(
         declaration_type=DeclarationType.Definition,
-        name="αβ_γ'",
+        name="Κατ.Μοδ.αβ_γ'δε₀₁₂³_ℕtoℤ_φψ''ωΩ_über_café_∂Δ_Привет?!",
         content=":= 42",
     ),
     Declaration(
@@ -79,7 +79,7 @@ EXPECTED_FUNCTION_EXTRACTIONS: list[tuple[str, str | None]] = [
         "  simp [add]\n"
         "  omega",
     ),
-    ("helper_lemma", "lemma helper_lemma(n : Nat) : n + 0 = n := by\n  sorry"),
+    ("helper_lemma", "lemma helper_lemma{n : Nat} : n + 0 = n := by" + "\n  sorry"),
     ("nonexistent", None),
 ]
 
