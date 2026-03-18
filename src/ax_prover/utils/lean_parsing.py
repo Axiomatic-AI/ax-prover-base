@@ -323,7 +323,7 @@ def list_all_declarations_in_lean_code(raw_code: str) -> list[Declaration]:
 
     declarations = []
     declaration = None
-    declaration_pattern = re.compile(r"(\w+)\s+([\w.?'!]+)\s*(.*)")
+    declaration_pattern = re.compile(r"(\w+)\s+([^\s:({[\]},]+)\s*(.*)")
     code = strip_comments(raw_code)
 
     for line in code.split("\n"):
