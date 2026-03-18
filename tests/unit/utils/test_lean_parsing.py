@@ -30,7 +30,7 @@ lemma helper_lemma{n : Nat} : n + 0 = n := by
 
 def Κατ.Μοδ.αβ_γ'δε₀₁₂³_ℕtoℤ_φψ''ωΩ_über_café_∂Δ_Привет?! := 42
 
-theorem Some.Nested.Theorem?: P :=
+theorem Some.Very.«Nested.Theorem»?: P :=
     sorry
 """
 
@@ -65,7 +65,7 @@ EXPECTED_DECLARATIONS: list[Declaration] = [
     ),
     Declaration(
         declaration_type=DeclarationType.Theorem,
-        name="Some.Nested.Theorem?",
+        name="Some.Very.«Nested.Theorem»?",
         content=": P :=\n    sorry",
     ),
 ]
