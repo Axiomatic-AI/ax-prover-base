@@ -323,20 +323,18 @@ def list_all_declarations_in_lean_code(raw_code: str) -> list[Declaration]:
 
     declarations = []
     declaration = None
+    declaration_pattern = re.compile(r"(\w+)\s+([^\s:({[\]},]+)\s*(.*)")
     code = strip_comments(raw_code)
 
     for line in code.split("\n"):
-        line_keywords = line.strip().split()
-        if len(line_keywords) >= 2 and line_keywords[0] in list(DeclarationType):
-            # Extract just the name, splitting on punctuation that can follow it
-            name = re.split(r"[:({[\[]", line_keywords[1])[0]
-            content = line_keywords[2:]
+        declaration_match = declaration_pattern.match(line.strip())
+        if declaration_match and declaration_match.group(1) in DeclarationType:
             if declaration is not None:
                 declarations.append(declaration)
             declaration = Declaration(
-                declaration_type=line_keywords[0],
-                name=name,
-                content=" ".join(content),
+                declaration_type=declaration_match.group(1),
+                name=declaration_match.group(2),
+                content=declaration_match.group(3),
             )
         elif declaration is not None:
             declaration.content += "\n" + line
