@@ -123,7 +123,7 @@ def get_reasoning(response: AIMessage) -> str:
 
 
 class LLMClient:
-    """Dynamically create a retryable Runnable that handles structured output and tool calling.
+    """Dynamically create a Runnable to invoke LLMs with structured output, tool calling and retry.
 
     Usage:
         client = LLMClient(config)
@@ -134,21 +134,22 @@ class LLMClient:
         # With tools only
         response = await client.ainvoke(messages, tools=my_tools)
 
-        # With structured output only (returns AIMessage with JSON .text)
+        # With structured output only
         response = await client.ainvoke(messages, output_schema=MyModel)
 
-        # With both tools and structured output
+        # With retry only
+        response = await client.ainvoke(messages, retry_config=retry_config)
+
+        # With tools and structured output
         response = await client.ainvoke(messages, tools=my_tools, output_schema=MyModel)
 
-        # Pre-build a runnable for repeated use in a loop
-        runnable = client.get_runnable(tools=my_tools, output_schema=MyModel)
-        response = await runnable.ainvoke(messages)
+        # With tools, structured output and retry
+        response = await client.ainvoke(messages, tools=my_tools, output_schema=MyModel, retry_config=retry_config)
     """
 
     def __init__(self, config: LLMConfig):
         """Initialize the LLMClient with a configuration."""
         self._base_llm: BaseChatModel = create_llm(config)
-        self._retry_config: dict = config.retry_config
 
     async def ainvoke(
         self,
@@ -181,7 +182,6 @@ class LLMClient:
         if output_schema:
             model = model.bind(**self._structured_output_bind_kwargs(output_schema))
 
-        retry_config = retry_config or self._retry_config
         if retry_config:
             model = model.with_retry(**retry_config)
 
