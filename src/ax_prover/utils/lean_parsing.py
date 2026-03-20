@@ -17,10 +17,10 @@ logger = get_logger(__name__)
 LEAN_KEYWORDS = [d.value for d in DeclarationType]
 
 
-def count_sorries(
+def count_pattern(
     content: str,
+    pattern: str,
     context_lines: int = 1,
-    pattern: str = r"\b(sorry|admit)\b",
 ) -> tuple[int, list[tuple[int, str]]]:
     """Count pattern matches in Lean code with context.
 

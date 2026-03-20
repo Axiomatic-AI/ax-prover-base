@@ -4,7 +4,7 @@ import pytest
 
 from ax_prover.models.declaration import Declaration, DeclarationType
 from ax_prover.utils.lean_parsing import (
-    count_sorries,
+    count_pattern,
     extract_function_from_content,
     extract_theorem_name,
     find_declaration_by_name,
@@ -149,39 +149,41 @@ class TestStripComments:
         assert "def foo := 1" in result
 
 
-class TestCountSorries:
-    """Tests for count_sorries function."""
+class TestCountPattern:
+    """Tests for count_pattern function."""
+
+    SORRY_PATTERN = r"\b(sorry|admit)\b"
 
     def test_no_sorries(self):
         """Clean code returns count 0."""
         code = "def foo := 42\ndef bar := 1 + 2"
-        count, locations = count_sorries(code)
+        count, locations = count_pattern(code, pattern=self.SORRY_PATTERN)
         assert count == 0
         assert locations == []
 
     def test_single_sorry(self):
         """One sorry is detected with correct line number."""
         code = "def foo := by\n  sorry"
-        count, locations = count_sorries(code)
+        count, locations = count_pattern(code, pattern=self.SORRY_PATTERN)
         assert count == 1
         assert locations[0][0] == 2  # line number
 
     def test_multiple_sorries(self):
         """Multiple sorries on different lines are all found."""
         code = "def foo := by\n  sorry\ndef bar := by\n  sorry"
-        count, _ = count_sorries(code)
+        count, _ = count_pattern(code, pattern=self.SORRY_PATTERN)
         assert count == 2
 
     def test_sorry_and_admit(self):
         """Both 'sorry' and 'admit' are detected."""
         code = "def foo := by\n  sorry\ndef bar := by\n  admit"
-        count, locations = count_sorries(code)
+        count, locations = count_pattern(code, pattern=self.SORRY_PATTERN)
         assert count == 2
 
     def test_context_lines(self):
         """Context lines around sorry are included."""
         code = "-- before\ndef foo := by\n  sorry\n-- after"
-        _, locations = count_sorries(code, context_lines=1)
+        _, locations = count_pattern(code, pattern=self.SORRY_PATTERN, context_lines=1)
         context_text = locations[0][1]
         assert "def foo" in context_text
         assert "sorry" in context_text
@@ -189,32 +191,32 @@ class TestCountSorries:
     def test_sorry_in_word_not_counted(self):
         """Words containing 'sorry' (e.g., 'sorry_lemma') are not counted."""
         code = "def sorry_lemma := 42"
-        count, _ = count_sorries(code)
+        count, _ = count_pattern(code, pattern=self.SORRY_PATTERN)
         assert count == 0
 
     def test_custom_pattern_detects_axiom(self):
         """Custom pattern detects axiom declarations."""
         code = "axiom myAxiom : Nat → Nat\ntheorem foo : True := trivial"
-        count, locations = count_sorries(code, pattern=r"\baxiom\b")
+        count, locations = count_pattern(code, pattern=r"\baxiom\b")
         assert count == 1
         assert locations[0][0] == 1
 
     def test_custom_pattern_detects_search_tactics(self):
         """Custom pattern detects apply? and exact?."""
         code = "theorem foo : P := by\n  apply?\n  exact?"
-        count, _ = count_sorries(code, pattern=r"\b(apply|exact)\?")
+        count, _ = count_pattern(code, pattern=r"\b(apply|exact)\?")
         assert count == 2
 
     def test_custom_pattern_does_not_flag_apply_without_question_mark(self):
         """apply (without ?) is not flagged by the search tactics pattern."""
         code = "theorem foo : P := by\n  apply some_lemma"
-        count, _ = count_sorries(code, pattern=r"\b(apply|exact)\?")
+        count, _ = count_pattern(code, pattern=r"\b(apply|exact)\?")
         assert count == 0
 
-    def test_default_pattern_does_not_match_axiom(self):
-        """Default pattern only matches sorry/admit, not axiom."""
+    def test_sorry_pattern_does_not_match_axiom(self):
+        """Sorry/admit pattern does not match axiom."""
         code = "axiom myAxiom : Nat → Nat"
-        count, _ = count_sorries(code)
+        count, _ = count_pattern(code, pattern=self.SORRY_PATTERN)
         assert count == 0
 
 
