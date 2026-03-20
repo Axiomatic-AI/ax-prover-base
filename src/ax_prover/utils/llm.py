@@ -195,27 +195,29 @@ class LLMClient:
         to be an instance of the schema.
         """
         # LANGCHAIN ALLOW ME TO DO STRUCTURED OUTPUT WITH TOOL BINDINGS PLSSS
-        json_schema = schema.model_json_schema()
 
         if isinstance(self._base_llm, ChatAnthropic):
             model_name = getattr(self._base_llm, "model", "")  # Need to check 4.5 or 4.6+
-            return _anthropic_structured_kwargs(model_name, json_schema)
+            return _anthropic_structured_kwargs(model_name, schema)
 
         if isinstance(self._base_llm, ChatGoogleGenerativeAI):
-            return _google_structured_kwargs(json_schema)
+            return _google_structured_kwargs(schema.model_json_schema())
 
         if isinstance(self._base_llm, ChatOpenAI):
-            return _openai_structured_kwargs(json_schema)
+            return _openai_structured_kwargs(schema)
 
         raise NotImplementedError(
             f"Structured output bind kwargs not implemented for {type(self._base_llm).__name__}."
         )
 
 
-def _anthropic_structured_kwargs(model_name: str, json_schema: dict) -> dict:
+def _anthropic_structured_kwargs(model_name: str, schema: BaseModel) -> dict:
+    json_schema = schema.model_json_schema()
+    json_schema = transform_schema(json_schema)
+
     is_46 = "4-6" in model_name or "4.6" in model_name
 
-    schema_payload = {"type": "json_schema", "schema": transform_schema(json_schema)}
+    schema_payload = {"type": "json_schema", "schema": json_schema}
 
     if is_46:
         # Claude 4.6+: output_config.format (output_format is deprecated)
@@ -225,18 +227,14 @@ def _anthropic_structured_kwargs(model_name: str, json_schema: dict) -> dict:
         return {"output_format": schema_payload}
 
 
-def _openai_structured_kwargs(json_schema: dict) -> dict:
-    return {
-        "response_format": {
-            "type": "json_schema",
-            "strict": True,
-            "schema": json_schema,
-        }
-    }
+def _google_structured_kwargs(schema: BaseModel) -> dict:
+    json_schema = schema.model_json_schema()
 
-
-def _google_structured_kwargs(json_schema: dict) -> dict:
     return {
         "response_mime_type": "application/json",
         "response_json_schema": json_schema,
     }
+
+
+def _openai_structured_kwargs(schema: BaseModel) -> dict:
+    return {"response_format": schema}
