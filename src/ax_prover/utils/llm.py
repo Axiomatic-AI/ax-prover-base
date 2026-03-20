@@ -177,7 +177,10 @@ class LLMClient:
         model: Runnable = self._base_llm
 
         if tools:
-            model = self._base_llm.bind_tools(tools)
+            # OpenAI requires strict=True when combining tools with structured output
+            # other providers default to None (omit the field)
+            strict = True if isinstance(self._base_llm, ChatOpenAI) and output_schema else None
+            model = self._base_llm.bind_tools(tools, strict=strict)
 
         if output_schema:
             model = model.bind(**self._structured_output_bind_kwargs(output_schema))
