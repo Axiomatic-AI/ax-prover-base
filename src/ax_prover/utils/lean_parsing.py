@@ -17,12 +17,17 @@ logger = get_logger(__name__)
 LEAN_KEYWORDS = [d.value for d in DeclarationType]
 
 
-def count_sorries(content: str, context_lines: int = 1) -> tuple[int, list[tuple[int, str]]]:
-    """Count 'sorry' and 'admit' statements in Lean code with context.
+def count_pattern(
+    content: str,
+    pattern: str,
+    context_lines: int = 1,
+) -> tuple[int, list[tuple[int, str]]]:
+    """Count pattern matches in Lean code with context.
 
     Args:
         content: The Lean file content
         context_lines: Number of lines to show before and after
+        pattern: Regex pattern to search for (default: sorry/admit)
 
     Returns:
         Tuple of (count, locations) where locations is a list of (line_num, formatted_context)
@@ -31,7 +36,7 @@ def count_sorries(content: str, context_lines: int = 1) -> tuple[int, list[tuple
     lines = content.splitlines()
 
     for i, line in enumerate(lines):
-        for match in re.finditer(r"\b(sorry|admit)\b", line):
+        for match in re.finditer(pattern, line):
             line_num = i + 1
             col = match.start()
 

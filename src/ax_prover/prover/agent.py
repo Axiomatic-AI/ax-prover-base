@@ -13,6 +13,7 @@ from langgraph.graph.state import CompiledStateGraph
 from ..config import ProverConfig, RuntimeConfig
 from ..models import ProverAgentState
 from ..models.messages import (
+    AxiomDetectedFeedback,
     BuildFailedFeedback,
     BuildSuccessFeedback,
     FeedbackMessage,
@@ -22,6 +23,7 @@ from ..models.messages import (
     ProposalMessage,
     ReviewApprovedFeedback,
     ReviewRejectedFeedback,
+    SearchTacticsDetectedFeedback,
     SorriesGoalStateFeedback,
     StructuredOutputParsingFailedFeedback,
 )
@@ -30,7 +32,7 @@ from ..tools import create_tool
 from ..utils import (
     attach_builder_files,
     attach_prover_logs_if_enabled,
-    count_sorries,
+    count_pattern,
     get_function_from_location,
     get_git_hash,
     get_logger,
@@ -48,6 +50,7 @@ from ..utils.lean_interact import get_goal_state_at_sorries
 from ..utils.lean_parsing import (
     find_declaration_by_name,
     list_all_declarations_in_lean_code,
+    strip_comments,
 )
 from ..utils.llm import (
     ainvoke_retry_with_structured_output,
@@ -400,7 +403,9 @@ class ProverAgent:
             if build_success:
                 self.logger.info("Build successful")
 
-                if sorry_count := count_sorries(state.last_proposal.code)[0]:
+                if sorry_count := count_pattern(
+                    state.last_proposal.code, pattern=r"\b(sorry|admit)\b"
+                )[0]:
                     self.logger.info("The proposed code contains sorries.")
                     goal_state_at_sorries = await get_goal_state_at_sorries(
                         self.base_folder,
@@ -410,6 +415,26 @@ class ProverAgent:
                     feedback = SorriesGoalStateFeedback(
                         sorry_count=sorry_count,
                         goal_state_at_sorries=goal_state_at_sorries,
+                    )
+                    return {"messages": [feedback]}
+
+                stripped_code = strip_comments(state.last_proposal.code)
+
+                axiom_count, axiom_locations = count_pattern(stripped_code, pattern=r"\baxiom\b")
+                if axiom_count:
+                    self.logger.info("The proposed code introduces axiom declarations.")
+                    formatted = "\n".join(ctx for _, ctx in axiom_locations)
+                    feedback = AxiomDetectedFeedback(count=axiom_count, locations=formatted)
+                    return {"messages": [feedback]}
+
+                tactic_count, tactic_locations = count_pattern(
+                    stripped_code, pattern=r"\b(apply|exact)\?"
+                )
+                if tactic_count:
+                    self.logger.info("The proposed code contains search tactics.")
+                    formatted = "\n".join(ctx for _, ctx in tactic_locations)
+                    feedback = SearchTacticsDetectedFeedback(
+                        count=tactic_count, locations=formatted
                     )
                     return {"messages": [feedback]}
 
