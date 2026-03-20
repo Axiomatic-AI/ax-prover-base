@@ -403,7 +403,9 @@ class ProverAgent:
             if build_success:
                 self.logger.info("Build successful")
 
-                if sorry_count := count_pattern(state.last_proposal.code, pattern=r"\b(sorry|admit)\b")[0]:
+                if sorry_count := count_pattern(
+                    state.last_proposal.code, pattern=r"\b(sorry|admit)\b"
+                )[0]:
                     self.logger.info("The proposed code contains sorries.")
                     goal_state_at_sorries = await get_goal_state_at_sorries(
                         self.base_folder,

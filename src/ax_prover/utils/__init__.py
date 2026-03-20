@@ -63,7 +63,7 @@ __all__ = [
     "is_git_dirty",
     # Lean
     "LEAN_KEYWORDS",
-    "count_sorries",
+    "count_pattern",
     "strip_comments",
     # Proving
     "get_item_from_line",
