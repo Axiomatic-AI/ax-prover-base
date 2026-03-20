@@ -9,6 +9,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.runnables import Runnable
 from langchain_core.runnables.retry import RunnableRetry
 from langchain_core.tools import BaseTool
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -44,6 +45,7 @@ async def ainvoke_retry_with_structured_output(
     "Invoke an LLM with retry enforcing native structured output for each provider."
     chat_model = _get_base_chat_model_from_binding(llm)
 
+    # LANGCHAIN PLS ALLOW ME TO DO STRUCTURED OUTPUT WITH TOOL BINDINGS
     if isinstance(chat_model, ChatAnthropic):
         return await llm.ainvoke(
             messages, output_format={"type": "json_schema", "schema": transform_schema(schema)}
@@ -118,3 +120,123 @@ def get_reasoning(response: AIMessage) -> str:
         [msg.get("reasoning", "") for msg in response.content_blocks if msg["type"] == "reasoning"]
     )
     return reasoning
+
+
+class LLMClient:
+    """Dynamically create a retryable Runnable that handles structured output and tool calling.
+
+    Usage:
+        client = LLMClient(config)
+
+        # Plain call
+        response = await client.ainvoke(messages)
+
+        # With tools only
+        response = await client.ainvoke(messages, tools=my_tools)
+
+        # With structured output only (returns AIMessage with JSON .text)
+        response = await client.ainvoke(messages, output_schema=MyModel)
+
+        # With both tools and structured output
+        response = await client.ainvoke(messages, tools=my_tools, output_schema=MyModel)
+
+        # Pre-build a runnable for repeated use in a loop
+        runnable = client.get_runnable(tools=my_tools, output_schema=MyModel)
+        response = await runnable.ainvoke(messages)
+    """
+
+    def __init__(self, config: LLMConfig):
+        """Initialize the LLMClient with a configuration."""
+        self._base_llm: BaseChatModel = create_llm(config)
+        self._retry_config: dict = config.retry_config
+
+    async def ainvoke(
+        self,
+        messages: LanguageModelInput,
+        tools: list[BaseTool] | None = None,
+        output_schema: BaseModel | None = None,
+        retry_config: dict | None = None,
+    ) -> AIMessage:
+        """Invoke with optional tools, structured output, and retry."""
+        runnable = self._get_runnable(
+            tools=tools, output_schema=output_schema, retry_config=retry_config
+        )
+        return await runnable.ainvoke(messages)
+
+    def _get_runnable(
+        self,
+        tools: list[BaseTool] | None = None,
+        output_schema: BaseModel | None = None,
+        retry_config: dict | None = None,
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        """Build a retryable Runnable that always returns AIMessage.
+
+        Layers are applied in order: bind_tools → bind structured output → with_retry.
+        """
+        model: Runnable = self._base_llm
+
+        if tools:
+            model = self._base_llm.bind_tools(tools)
+
+        if output_schema:
+            model = model.bind(**self._structured_output_bind_kwargs(output_schema))
+
+        retry_config = retry_config or self._retry_config
+        if retry_config:
+            model = model.with_retry(**retry_config)
+
+        return model
+
+    def _structured_output_bind_kwargs(self, schema: BaseModel) -> dict:
+        """Return provider-specific kwargs that constrain the output to a JSON schema.
+
+        These kwargs are passed via bind() so the response stays as an AIMessage, unlike
+        `with_structured_output`, which prevents the use of any tools and forces the output
+        to be an instance of the schema.
+        """
+        # LANGCHAIN ALLOW ME TO DO STRUCTURED OUTPUT WITH TOOL BINDINGS PLSSS
+        json_schema = schema.model_json_schema()
+
+        if isinstance(self._base_llm, ChatAnthropic):
+            model_name = getattr(self._base_llm, "model", "")  # Need to check 4.5 or 4.6+
+            return _anthropic_structured_kwargs(model_name, json_schema)
+
+        if isinstance(self._base_llm, ChatGoogleGenerativeAI):
+            return _google_structured_kwargs(json_schema)
+
+        if isinstance(self._base_llm, ChatOpenAI):
+            return _openai_structured_kwargs(json_schema)
+
+        raise NotImplementedError(
+            f"Structured output bind kwargs not implemented for {type(self._base_llm).__name__}."
+        )
+
+
+def _anthropic_structured_kwargs(model_name: str, json_schema: dict) -> dict:
+    is_46 = "4-6" in model_name or "4.6" in model_name
+
+    schema_payload = {"type": "json_schema", "schema": transform_schema(json_schema)}
+
+    if is_46:
+        # Claude 4.6+: output_config.format (output_format is deprecated)
+        return {"output_config": {"format": schema_payload}}
+    else:
+        # Claude 4.5 and earlier: output_format
+        return {"output_format": schema_payload}
+
+
+def _openai_structured_kwargs(json_schema: dict) -> dict:
+    return {
+        "response_format": {
+            "type": "json_schema",
+            "strict": True,
+            "schema": json_schema,
+        }
+    }
+
+
+def _google_structured_kwargs(json_schema: dict) -> dict:
+    return {
+        "response_mime_type": "application/json",
+        "response_json_schema": json_schema,
+    }
