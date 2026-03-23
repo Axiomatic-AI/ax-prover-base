@@ -46,9 +46,6 @@ async def agentic_loop(
 ) -> tuple[AIMessage, list[BaseMessage]]:
     """Invoke an LLM with tools, executing tool calls in a loop until the model stops calling tools.
 
-    On the last allowed iteration the tools are dropped and a "NO MORE TOOL CALLS ALLOWED."
-    message is injected so the model produces a final text/structured response.
-
     Returns:
         A tuple of (final_response, all_new_messages) where all_new_messages includes every
         intermediate AI message, tool result, and the final response.
@@ -69,6 +66,7 @@ async def agentic_loop(
         is_last_iteration = iteration == max_tool_iterations - 1
         invoke_messages = messages + all_new_messages
         if is_last_iteration:
+            # Prevent hallucinated tool calls with this message
             invoke_messages = invoke_messages + [
                 HumanMessage(content="NO MORE TOOL CALLS ALLOWED.")
             ]
