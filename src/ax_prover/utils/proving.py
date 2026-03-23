@@ -9,7 +9,7 @@ from ..models import TargetItem
 from ..models.files import Location
 from ..models.proving import ProverAgentState
 from .lean_parsing import (
-    count_sorries,
+    count_pattern,
     find_declaration_at_line,
     get_function_from_location,
     get_unproven,
@@ -35,7 +35,7 @@ def get_item_from_location(folder: str, location_str: str) -> TargetItem | None:
         logger.error(f"Theorem not found: {location.formatted_context}")
         return None
 
-    sorry_count, _ = count_sorries(theorem_content)
+    sorry_count, _ = count_pattern(theorem_content, pattern=r"\b(sorry|admit)\b")
     logger.debug(f"Found theorem with {sorry_count} sorrie(s)")
 
     item = TargetItem(
