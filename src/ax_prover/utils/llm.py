@@ -51,7 +51,7 @@ async def agentic_loop(
         intermediate AI message, tool result, and the final response.
     """
     response = await client.ainvoke(messages, tools=tools, output_schema=output_schema)
-    all_new_messages: list[BaseMessage] = [response]
+    new_messages: list[BaseMessage] = [response]
 
     tool_node = ToolNode(tools)
 
@@ -59,12 +59,12 @@ async def agentic_loop(
         if not response.tool_calls:
             break
 
-        result = await tool_node.ainvoke({"messages": messages + all_new_messages})
+        result = await tool_node.ainvoke({"messages": messages + new_messages})
         tool_messages = result["messages"]
-        all_new_messages += tool_messages
+        new_messages += tool_messages
 
         is_last_iteration = iteration == max_tool_iterations - 1
-        invoke_messages = messages + all_new_messages
+        invoke_messages = messages + new_messages
         if is_last_iteration:
             # Prevent hallucinated tool calls with this message
             invoke_messages = invoke_messages + [
@@ -76,9 +76,9 @@ async def agentic_loop(
                 invoke_messages, tools=tools, output_schema=output_schema
             )
 
-        all_new_messages.append(response)
+        new_messages.append(response)
 
-    return response, all_new_messages
+    return response, new_messages
 
 
 def get_reasoning(response: AIMessage) -> str:
@@ -109,7 +109,6 @@ class LLMClient:
 
         # With structured output only
         response = await client.ainvoke(messages, output_schema=MyModel)
-
 
         # With tools and structured output
         response = await client.ainvoke(messages, tools=my_tools, output_schema=MyModel)
