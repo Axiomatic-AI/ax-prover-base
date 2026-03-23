@@ -135,7 +135,7 @@ class LLMClient:
         self,
         messages: LanguageModelInput,
         tools: list[BaseTool] | None = None,
-        output_schema: BaseModel | None = None,
+        output_schema: type[BaseModel] | None = None,
         retry_config: dict | None | object = _UNSET,
     ) -> AIMessage:
         """Invoke with optional tools, structured output, and retry."""
@@ -148,7 +148,7 @@ class LLMClient:
     def _get_runnable(
         self,
         tools: list[BaseTool] | None = None,
-        output_schema: BaseModel | None = None,
+        output_schema: type[BaseModel] | None = None,
         retry_config: dict | None = None,
     ) -> Runnable[LanguageModelInput, AIMessage]:
         """Build a retryable Runnable that always returns AIMessage.
@@ -171,7 +171,7 @@ class LLMClient:
 
         return model
 
-    def _structured_output_bind_kwargs(self, schema: BaseModel) -> dict:
+    def _structured_output_bind_kwargs(self, schema: type[BaseModel]) -> dict:
         """Return provider-specific kwargs that constrain the output to a JSON schema.
 
         These kwargs are passed via bind() so the response stays as an AIMessage, unlike
@@ -195,7 +195,7 @@ class LLMClient:
         )
 
 
-def _anthropic_structured_kwargs(model_name: str, schema: BaseModel) -> dict:
+def _anthropic_structured_kwargs(model_name: str, schema: type[BaseModel]) -> dict:
     json_schema = schema.model_json_schema()
     json_schema = transform_schema(json_schema)
 
@@ -211,7 +211,7 @@ def _anthropic_structured_kwargs(model_name: str, schema: BaseModel) -> dict:
         return {"output_format": schema_payload}
 
 
-def _google_structured_kwargs(schema: BaseModel) -> dict:
+def _google_structured_kwargs(schema: type[BaseModel]) -> dict:
     json_schema = schema.model_json_schema()
 
     return {
@@ -220,5 +220,5 @@ def _google_structured_kwargs(schema: BaseModel) -> dict:
     }
 
 
-def _openai_structured_kwargs(schema: BaseModel) -> dict:
+def _openai_structured_kwargs(schema: type[BaseModel]) -> dict:
     return {"response_format": schema}
