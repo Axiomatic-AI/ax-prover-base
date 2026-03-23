@@ -122,13 +122,19 @@ def get_reasoning(response: AIMessage) -> str:
     return reasoning
 
 
+_UNSET = object()
+
+
 class LLMClient:
     """Dynamically create a Runnable to invoke LLMs with structured output, tool calling and retry.
+
+    Retry is applied by default using the config's retry_config. Pass retry_config=None
+    to disable, or pass a custom dict to override.
 
     Usage:
         client = LLMClient(config)
 
-        # Plain call
+        # Plain call (uses default retry from config)
         response = await client.ainvoke(messages)
 
         # With tools only
@@ -137,30 +143,38 @@ class LLMClient:
         # With structured output only
         response = await client.ainvoke(messages, output_schema=MyModel)
 
-        # With retry only
-        response = await client.ainvoke(messages, retry_config=retry_config)
 
         # With tools and structured output
         response = await client.ainvoke(messages, tools=my_tools, output_schema=MyModel)
 
-        # With tools, structured output and retry
-        response = await client.ainvoke(messages, tools=my_tools, output_schema=MyModel, retry_config=retry_config)
+        # Override retry
+        response = await client.ainvoke(messages, retry_config={"stop_after_attempt": 3})
+
+        # Disable retry
+        response = await client.ainvoke(messages, retry_config=None)
     """
 
     def __init__(self, config: LLMConfig):
         """Initialize the LLMClient with a configuration."""
         self._base_llm: BaseChatModel = create_llm(config)
+        self._retry_config: dict | None = config.retry_config or None
+
+    @property
+    def profile(self) -> dict:
+        """Model metadata (max_input_tokens, max_output_tokens, capabilities, etc.)."""
+        return getattr(self._base_llm, "profile", {})
 
     async def ainvoke(
         self,
         messages: LanguageModelInput,
         tools: list[BaseTool] | None = None,
         output_schema: BaseModel | None = None,
-        retry_config: dict | None = None,
+        retry_config: dict | None | object = _UNSET,
     ) -> AIMessage:
         """Invoke with optional tools, structured output, and retry."""
+        effective_retry = self._retry_config if retry_config is _UNSET else retry_config
         runnable = self._get_runnable(
-            tools=tools, output_schema=output_schema, retry_config=retry_config
+            tools=tools, output_schema=output_schema, retry_config=effective_retry
         )
         return await runnable.ainvoke(messages)
 
