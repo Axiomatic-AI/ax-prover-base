@@ -29,3 +29,10 @@ build-base:
 
 build-runner:
 	@cd "$(REPO_ROOT)" && bash gcp/scripts/build_runner.sh "$(or $(AX_TAG),latest)" "$(or $(BASE_TAG),main)"
+
+submit:
+	@cd "$(REPO_ROOT)" && bash gcp/scripts/submit_batch_job.sh \
+		--dataset "$(DATASET)" \
+		--config-file "$(CONFIG)" \
+		$(if $(NAME),--name "$(NAME)") \
+		$(if $(EXTRA),-- $(EXTRA))
