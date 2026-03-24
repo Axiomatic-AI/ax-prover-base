@@ -14,6 +14,7 @@ help:
 	@echo "  make sync-envfile                     # sync .env.secrets.gcp to Secret Manager"
 	@echo "  make build-base                       # build base image (default: BENCH_REF=main)"
 	@echo "  make build-runner                     # build runner image (defaults: AX_TAG=latest, BASE_TAG=main)"
+	@echo "  make submit DATASET=... CONFIG=...    # submit a batch job (optional: NAME=..., EXTRA='--max-concurrency 35')"
 
 bootstrap:
 	@cd "$(REPO_ROOT)" && bash gcp/scripts/bootstrap.sh
