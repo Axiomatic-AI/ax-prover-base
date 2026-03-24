@@ -89,9 +89,6 @@ def get_reasoning(response: AIMessage) -> str:
     return reasoning
 
 
-_UNSET = object()
-
-
 class LLMClient:
     """Dynamically create a Runnable to invoke LLMs with structured output, tool calling and retry.
 
@@ -115,15 +112,12 @@ class LLMClient:
 
         # Override retry
         response = await client.ainvoke(messages, retry_config={"stop_after_attempt": 3})
-
-        # Disable retry
-        response = await client.ainvoke(messages, retry_config=None)
     """
 
     def __init__(self, config: LLMConfig):
         """Initialize the LLMClient with a configuration."""
         self._base_llm: BaseChatModel = create_llm(config)
-        self._retry_config: dict | None = config.retry_config or None
+        self._retry_config: dict = config.retry_config
 
     @property
     def profile(self) -> dict:
@@ -135,10 +129,10 @@ class LLMClient:
         messages: LanguageModelInput,
         tools: list[BaseTool] | None = None,
         output_schema: type[BaseModel] | None = None,
-        retry_config: dict | None | object = _UNSET,
+        retry_config: dict | None = None,
     ) -> AIMessage:
         """Invoke with optional tools, structured output, and retry."""
-        effective_retry = self._retry_config if retry_config is _UNSET else retry_config
+        effective_retry = retry_config or self._retry_config
         runnable = self._get_runnable(
             tools=tools, output_schema=output_schema, retry_config=effective_retry
         )
