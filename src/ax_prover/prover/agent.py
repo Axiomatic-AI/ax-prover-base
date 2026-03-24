@@ -3,10 +3,8 @@
 from asyncio import Semaphore
 from collections.abc import Sequence
 
-from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_core.runnables.retry import RunnableRetry
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -52,12 +50,7 @@ from ..utils.lean_parsing import (
     list_all_declarations_in_lean_code,
     strip_comments,
 )
-from ..utils.llm import (
-    ainvoke_retry_with_structured_output,
-    create_llm,
-    get_reasoning,
-    run_tools_and_respond,
-)
+from ..utils.llm import LLMClient, agentic_loop, get_reasoning
 from . import memory as memory_module
 from .memory import BaseMemory
 from .prompts import (
@@ -78,7 +71,7 @@ class ProverAgent:
     A Lean4 theorem prover
     """
 
-    llm: RunnableRetry
+    llm_client: LLMClient
     memory: BaseMemory
     app: CompiledStateGraph
 
@@ -100,19 +93,15 @@ class ProverAgent:
 
         self.proposer_tools = []
 
-        self.llm = create_llm(self.config.prover_llm).with_retry(
-            **self.config.prover_llm.retry_config
-        )
+        self.llm_client = LLMClient(self.config.prover_llm)
 
         memory_class = getattr(memory_module, self.config.memory_config.class_name)
         self.memory = memory_class(**self.config.memory_config.init_args)
 
         summary_llm_config = self.config.summarize_output.llm or self.config.prover_llm
-        self.summary_llm = create_llm(summary_llm_config).with_retry(
-            **summary_llm_config.retry_config
-        )
+        self.summary_llm_client = LLMClient(summary_llm_config)
 
-        self.max_input_tokens = self.llm.bound.profile.get("max_input_tokens")
+        self.max_input_tokens = self.llm_client.profile.get("max_input_tokens")
         if self.max_input_tokens < 1000:
             self.logger.error("Error: max_input_tokens abnormally small")
 
@@ -296,37 +285,13 @@ class ProverAgent:
             HumanMessage(content=query),
         ]
 
-        llm_with_tools_retry = self.llm.bound.bind_tools(self.proposer_tools).with_retry(
-            **self.config.prover_llm.retry_config
+        response = await agentic_loop(
+            self.llm_client,
+            context_messages,
+            tools=self.proposer_tools,
+            output_schema=ProverResult,
+            max_tool_iterations=self.runtime_config.max_tool_calling_iterations,
         )
-
-        async def proposer_agent(msg: LanguageModelInput, llm: RunnableRetry):
-            return await ainvoke_retry_with_structured_output(msg, llm, ProverResult)
-
-        response = await proposer_agent(context_messages, llm_with_tools_retry)
-        all_new_messages = [response]
-
-        for iteration in range(self.runtime_config.max_tool_calling_iterations):
-            if not response.tool_calls:
-                break
-
-            if iteration == self.runtime_config.max_tool_calling_iterations - 1:
-                llm = self.llm
-                extra_message = "NO MORE TOOL CALLS ALLOWED."  # Prevent hallucinated tool calls
-            else:
-                llm = llm_with_tools_retry
-                extra_message = None
-
-            new_msgs = await run_tools_and_respond(
-                response,
-                self.proposer_tools,
-                context_messages + all_new_messages[:-1],
-                proposer_agent,
-                llm,
-                extra_message,
-            )
-            response = new_msgs[-1]
-            all_new_messages += new_msgs
 
         try:
             result = ProverResult.model_validate_json(response.text)
@@ -472,7 +437,7 @@ class ProverAgent:
             HumanMessage(content=query),
         ]
 
-        response = await ainvoke_retry_with_structured_output(messages, self.llm, ReviewDecision)
+        response = await self.llm_client.ainvoke(messages, output_schema=ReviewDecision)
         try:
             review_result = ReviewDecision.model_validate_json(response.text)
         except Exception as e:
@@ -560,7 +525,7 @@ class ProverAgent:
             experience=state.experience or "No experience recorded",
         )
 
-        response = await self.summary_llm.ainvoke(
+        response = await self.summary_llm_client.ainvoke(
             [
                 SystemMessage(content=SUMMARIZE_OUTPUT_SYSTEM_PROMPT),
                 HumanMessage(content=query),

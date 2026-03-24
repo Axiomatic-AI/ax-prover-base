@@ -3,24 +3,23 @@
 from abc import ABC, abstractmethod
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.runnables.retry import RunnableRetry
 
 from ..config import LLMConfig
 from ..models import ProverAgentState
 from ..models.messages import FeedbackMessage, ProposalMessage
 from ..utils import get_logger
-from ..utils.llm import create_llm
+from ..utils.llm import LLMClient
 from .prompts import ATTEMPT_TEMPLATE
 
 
 class BaseMemory(ABC):
     """Base class for prover memory processing strategies."""
 
-    llm: RunnableRetry | None = None
+    llm: LLMClient | None = None
 
     def __init__(self, llm_config: LLMConfig | None = None):
         if llm_config:
-            self.llm = create_llm(LLMConfig(**llm_config))
+            self.llm = LLMClient(LLMConfig(**llm_config))
 
         self.logger = get_logger(__name__)
 

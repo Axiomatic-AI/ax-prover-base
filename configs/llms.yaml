@@ -14,11 +14,18 @@ llm_configs:
     provider_config:
       temperature: 1.0 # Must be set to 1.0 for thinking
       max_tokens: null
-      betas:
-        - "structured-outputs-2025-11-13"
+      effort: "medium"  # "low", "medium", "high" (default), "max"
       thinking:
-        type: "enabled"
-        budget_tokens: 10000
+        type: "adaptive"
+
+  claude_sonnet_4_6:
+    model: "anthropic:claude-sonnet-4-6"
+    provider_config:
+      temperature: 1.0 # Must be set to 1.0 for thinking
+      max_tokens: null
+      effort: "medium"  
+      thinking:
+        type: "adaptive"
 
   claude_opus_4_5:
     model: "anthropic:claude-opus-4-5"
