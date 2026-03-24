@@ -177,7 +177,8 @@ class LLMClient:
         `with_structured_output`, which prevents the use of any tools and forces the output
         to be an instance of the schema.
         """
-        # LANGCHAIN ALLOW ME TO DO STRUCTURED OUTPUT WITH TOOL BINDINGS PLSSS
+        # LANGCHAIN PLSSS ALLOW ME TO DO STRUCTURED OUTPUT WITH TOOL BINDINGS
+        # LOOK AT WHAT IT NEED TO DO C'MONNNNN
 
         if isinstance(self._base_llm, ChatAnthropic):
             model_name = getattr(self._base_llm, "model", "")  # Need to check 4.5 or 4.6+
