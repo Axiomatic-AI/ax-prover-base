@@ -78,7 +78,7 @@ async def agentic_loop(
 
         new_messages.append(response)
 
-    return response, new_messages
+    return response
 
 
 def get_reasoning(response: AIMessage) -> str:

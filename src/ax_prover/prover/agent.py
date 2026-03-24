@@ -285,7 +285,7 @@ class ProverAgent:
             HumanMessage(content=query),
         ]
 
-        response, _ = await agentic_loop(
+        response = await agentic_loop(
             self.llm_client,
             context_messages,
             tools=self.proposer_tools,
