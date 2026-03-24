@@ -3,7 +3,7 @@ SHELL := /bin/bash
 # Get repo root (parent of gcp/)
 REPO_ROOT := $(shell cd "$(dir $(lastword $(MAKEFILE_LIST)))/.." && pwd)
 
-.PHONY: help bootstrap put-secret sync-envfile build-base build-runner
+.PHONY: help bootstrap put-secret sync-envfile build-base build-runner submit
 
 help:
 	@echo "Run from gcp/ directory: cd gcp && make <target>"
