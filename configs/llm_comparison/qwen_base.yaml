@@ -1,0 +1,9 @@
+import:
+  - ../llms.yaml
+  - ../default_base_llm.yaml
+
+prover:
+  prover_llm: ${llm_configs.qwen_3_5}
+  proposer_tools:
+    search_lean: ${tool_configs.search_lean_search_ax}
+    search_web: ${tool_configs.search_web}

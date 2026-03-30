@@ -91,10 +91,14 @@ llm_configs:
         effort: "high"
         # summary: "auto"
 
-  qwen:
-    model: "qwen3-max"
+  # Auth via Google ADC (automatic on GCP Batch; locally: gcloud auth application-default login)
+  qwen_3_5:
+    model: "openai:Qwen/Qwen3.5-35B-A3B"
     provider_config:
       temperature: null
-      max_tokens: null
-      base_url: "https://api.mulerouter.ai/vendors/openai/v1"
-      model_provider: "openai"
+      max_tokens: 65536    # thinking budget (8192) + proof output; prevents LengthFinishReasonError
+      base_url: "https://4278949610606559232.asia-southeast1-136811191949.prediction.vertexai.goog/v1beta1/projects/136811191949/locations/asia-southeast1/endpoints/4278949610606559232"
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: true
+        thinking_token_budget: 8192
