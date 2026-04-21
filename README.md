@@ -6,6 +6,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![PyPI version](https://img.shields.io/pypi/v/ax-prover)](https://pypi.org/project/ax-prover/)
+[![arXiv](https://img.shields.io/badge/arXiv-2602.24273-b31b1b.svg)](https://arxiv.org/abs/2602.24273)
 
 A simple, modular agent that proves Lean 4 theorems through iterative refinement.
 It uses off-the-shelf LLMs (no fine-tuning) with a feedback loop, a memory system, and library search tools to achieve competitive results against highly-engineered systems that rely on specialized training and orders of magnitude more compute.
@@ -173,6 +174,9 @@ If you use ax-prover in your research, please cite:
 @article{axproverbase2026,
   title={A Minimal Agent for Automated Theorem Proving},
   author={Requena Pozo, Borja and Letson, Austin and Nowakowski, Krystian and Beltran Ferreiro, Izan and Sarra, Leopoldo},
-  year={2026}
+  year={2026},
+  eprint={2602.24273},
+  archivePrefix={arXiv},
+  url={https://arxiv.org/abs/2602.24273}
 }
 ```
