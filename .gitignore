@@ -165,3 +165,4 @@ outputs/experiment_analysis/
 
 # Generated version file (setuptools-scm)
 src/ax_prover/_version.py
+.claude/settings.json

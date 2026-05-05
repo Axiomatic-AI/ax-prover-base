@@ -102,7 +102,7 @@ class ProverAgent:
         self.summary_llm_client = LLMClient(summary_llm_config)
 
         self.max_input_tokens = self.llm_client.profile.get("max_input_tokens")
-        if self.max_input_tokens < 1000:
+        if self.max_input_tokens and self.max_input_tokens < 1000:
             self.logger.error("Error: max_input_tokens abnormally small")
 
     # TODO: this is creating extra confusion. But we require some things to be run asynchronously
@@ -229,7 +229,7 @@ class ProverAgent:
         length = len(message)
         # Below we are using length as an upper bound for tokens. We want to ensure that tokens <= self.max_input_tokens,
         # but we know that tokens <= length, therefore, length <= self.max_input_tokens implies tokens <= self.max_input_tokens
-        if length <= self.max_input_tokens:
+        if not self.max_input_tokens or length <= self.max_input_tokens:
             return message
         message_separator = "\n... (build output too long, lines ommited)\n"
         half = (self.max_input_tokens - len(message_separator)) // 2
@@ -285,13 +285,18 @@ class ProverAgent:
             HumanMessage(content=query),
         ]
 
-        response = await agentic_loop(
-            self.llm_client,
-            context_messages,
-            tools=self.proposer_tools,
-            output_schema=ProverResult,
-            max_tool_iterations=self.runtime_config.max_tool_calling_iterations,
-        )
+        try:
+            response = await agentic_loop(
+                self.llm_client,
+                context_messages,
+                tools=self.proposer_tools,
+                output_schema=ProverResult,
+                max_tool_iterations=self.runtime_config.max_tool_calling_iterations,
+            )
+        except Exception as e:
+            self.logger.error(f"LLM call failed: {e}")
+            feedback = StructuredOutputParsingFailedFeedback(error_message=str(e))
+            return {"messages": [feedback]}
 
         try:
             result = ProverResult.model_validate_json(response.text)

@@ -127,5 +127,10 @@ else
   echo "==> Skipping Cloud Run invoker grant (LEANSEARCH_SERVICE / REGION not set)"
 fi
 
+# Vertex AI endpoint prediction
+gcloud projects add-iam-policy-binding "${GCP_PROJECT_ID}" \
+  --member="serviceAccount:${BATCH_RUNNER_SA_EMAIL}" \
+  --role="roles/aiplatform.user" >/dev/null
+
 echo "✅ Bootstrap complete."
 echo "Next: put secrets with:  make put-secret NAME=LANGSMITH_API_KEY  (then paste value, ctrl-d)"
