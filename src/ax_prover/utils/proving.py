@@ -1,13 +1,14 @@
 """Utilities for creating proving targets."""
 
 import re
-from asyncio import Semaphore
 from pathlib import Path
 
 from ..config import Config
 from ..models import TargetItem
 from ..models.files import Location
 from ..models.proving import ProverAgentState
+from ..prover.agent import ProverAgent
+from ..runtime import Runtime
 from .lean_parsing import (
     count_pattern,
     find_declaration_at_line,
@@ -130,13 +131,12 @@ def parse_prove_target(folder: str, target: str) -> list[TargetItem]:
 
 async def prove_single_item(
     config: Config,
-    folder: str,
+    runtime: Runtime,
     item: TargetItem,
-    lean_semaphore: Semaphore | None = None,
     thread_id: str | None = None,
 ) -> ProverAgentState:
     """Prove a single item and return the full state."""
-    prover = await config.create_prover(lean_semaphore=lean_semaphore, base_folder=folder)
+    prover = await ProverAgent.create(config=config.prover, runtime=runtime)
     initial_state = ProverAgentState(item=item)
     run_name = f"prove:{item.title}"
     return await prover.chat(initial_state, run_name=run_name, thread_id=thread_id)

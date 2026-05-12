@@ -11,15 +11,9 @@ Example:
     >>> prover = ProverAgent(config=cfg.prover)
 """
 
-from asyncio import Semaphore
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
-
-from omegaconf import DictConfig, OmegaConf
-
-if TYPE_CHECKING:
-    from .prover import ProverAgent
+from typing import Any
 
 __all__ = [
     "LLMConfig",
@@ -132,43 +126,3 @@ class Config:
 
     prover: ProverConfig = field(default_factory=ProverConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
-
-    async def create_prover(
-        self,
-        lean_semaphore: Semaphore | None = None,
-        base_folder: str = ".",
-    ) -> "ProverAgent":
-        """Create a prover instance from the config.
-
-        Args:
-            lean_semaphore: Optional semaphore for limiting concurrent Lean operations (default: None).
-            base_folder: Base folder for the Lean project (default: ".")
-
-        Returns:
-            ProverAgent: A fully initialized prover instance ready to use
-
-        Raises:
-            ValueError: If prover.prover_llm is not set (e.g. when no YAML config was provided).
-        """
-        from .prover import ProverAgent
-
-        prover_config = (
-            OmegaConf.to_object(self.prover) if isinstance(self.prover, DictConfig) else self.prover
-        )
-        runtime_config = (
-            OmegaConf.to_object(self.runtime)
-            if isinstance(self.runtime, DictConfig)
-            else self.runtime
-        )
-
-        if prover_config.prover_llm is None:
-            raise ValueError(
-                "prover.prover_llm must be set in config (e.g. pass a YAML file with prover.prover_llm)"
-            )
-
-        return await ProverAgent.create(
-            config=prover_config,
-            runtime_config=runtime_config,
-            lean_semaphore=lean_semaphore,
-            base_folder=base_folder,
-        )
