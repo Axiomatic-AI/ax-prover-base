@@ -36,7 +36,7 @@ class LeanInteractServer:
     async def aclose(self) -> None:
         "Close the server."
         if self._server is not None:
-            await self._server.kill()
+            self._server.kill()
             self._server = None
 
     async def _get_server(self) -> AutoLeanServer:
