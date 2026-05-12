@@ -34,6 +34,18 @@ class LogLevel(StrEnum):
     CRITICAL = "CRITICAL"
 
 
+DEFAULT_LLM_RETRY_CONFIG = {
+    "stop_after_attempt": 10000,  # 10k attempts at 3s is about 8h 20min.
+    "wait_exponential_jitter": True,
+    "exponential_jitter_params": {
+        "initial": 0.5,
+        "max": 3,
+        "exp_base": 2.0,
+        "jitter": 1.0,
+    },
+}
+
+
 @dataclass
 class LLMConfig:
     """
@@ -45,18 +57,7 @@ class LLMConfig:
 
     model: str
     provider_config: dict[str, Any] = field(default_factory=dict)
-    retry_config: dict[str, Any] = field(
-        default_factory=lambda: {
-            "stop_after_attempt": 10000,  # 10k attempts at 3s is about 8h 20min.
-            "wait_exponential_jitter": True,
-            "exponential_jitter_params": {
-                "initial": 0.5,
-                "max": 3,
-                "exp_base": 2.0,
-                "jitter": 1.0,
-            },
-        }
-    )
+    retry_config: dict[str, Any] = field(default_factory=lambda: DEFAULT_LLM_RETRY_CONFIG)
 
 
 @dataclass
