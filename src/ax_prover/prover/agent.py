@@ -360,9 +360,9 @@ class ProverAgent:
                 )[0]:
                     self.logger.info("The proposed code contains sorries.")
                     goal_state_at_sorries = await get_goal_state_at_sorries(
+                        self.runtime.lean_interact_server,
                         self.runtime.base_folder,
                         applier.location.path,
-                        self.runtime.config.lean_interact,
                     )
                     feedback = SorriesGoalStateFeedback(
                         sorry_count=sorry_count,
