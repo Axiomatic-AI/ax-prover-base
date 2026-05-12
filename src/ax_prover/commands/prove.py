@@ -5,6 +5,8 @@ from pathlib import Path
 
 from ..config import Config
 from ..models import ProverAgentState, ProverOutput, TargetItem
+from ..prover.agent import ProverAgent
+from ..runtime import Runtime
 from ..tools.lean_search import lean_search_session_manager
 from ..utils import get_logger, parse_prove_target, prove_single_item, write_json_output
 
@@ -50,40 +52,41 @@ async def _prove_all_items(
 ) -> int:
     """Prove all items in the list."""
     async with lean_search_session_manager():
-        failed = False
-        outputs: dict[str, ProverOutput] = {}
+        async with Runtime.open(config.runtime, folder) as rt:
+            failed = False
+            outputs: dict[str, ProverOutput] = {}
 
-        for item in items:
-            if item.proven and not overwrite:
-                logger.info(f"Already proven: {item.location.formatted_context}")
-                continue
+            for item in items:
+                if item.proven and not overwrite:
+                    logger.info(f"Already proven: {item.location.formatted_context}")
+                    continue
 
-            key = item.location.formatted_context
+                key = item.location.formatted_context
 
-            try:
-                result_state = await _prove_item(config, folder, item)
+                try:
+                    result_state = await _prove_item(config, rt, item)
 
-                if not result_state.item.proven:
+                    if not result_state.item.proven:
+                        failed = True
+
+                    outputs[key] = ProverOutput.from_prover_state(result_state)
+
+                except Exception as e:
+                    logger.exception(f"Error proving {key}")
                     failed = True
+                    outputs[key] = ProverOutput.from_exception(e)
+                    if not output_file:
+                        raise
 
-                outputs[key] = ProverOutput.from_prover_state(result_state)
+            if output_file:
+                write_json_output(outputs, output_file)
 
-            except Exception as e:
-                logger.exception(f"Error proving {key}")
-                failed = True
-                outputs[key] = ProverOutput.from_exception(e)
-                if not output_file:
-                    raise
-
-        if output_file:
-            write_json_output(outputs, output_file)
-
-        return 1 if failed else 0
+            return 1 if failed else 0
 
 
 async def _prove_item(
     config: Config,
-    folder: str,
+    runtime: Runtime,
     item: TargetItem,
 ) -> ProverAgentState:
     """Prove a single item."""
@@ -94,7 +97,9 @@ async def _prove_item(
     thread_id = f"prove_{item.location.name}_{timestamp}"
     logger.debug(f"Using thread_id: {thread_id}")
 
-    result = await prove_single_item(config, folder, item, thread_id=thread_id)
+    prover = await ProverAgent.create(config=config.prover, runtime=runtime)
+
+    result = await prove_single_item(prover, item, thread_id=thread_id)
 
     if result.item.proven:
         logger.info(f"✓ Proven: {result.item.location.formatted_context}")
