@@ -242,7 +242,7 @@ async def create_search_lean_search_tool(
 
     Returns None if warmup fails.
     """
-    session = runtime.get_tool_lifespan(LEAN_SEARCH_TOOL_TYPE)
+    session = runtime.get_tool_resources(LEAN_SEARCH_TOOL_TYPE)
     global _lean_search_warmup_result
 
     async with _lean_search_warmup_lock:

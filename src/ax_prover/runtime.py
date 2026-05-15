@@ -14,7 +14,7 @@ class Runtime:
     base_folder: str
     lean_interact_server: LeanInteractServer
     lean_semaphore: asyncio.Semaphore
-    _tool_lifespans: dict[str, AbstractAsyncContextManager[Any]]
+    _tool_resources: dict[str, Any]
 
     def __init__(self, config: RuntimeConfig, base_folder: str) -> None:
         # Do not use __init__, the intended use is through Runtime.open(...)
@@ -38,12 +38,12 @@ class Runtime:
             )
             rt.lean_semaphore = asyncio.Semaphore(config.lean.max_concurrent_builds)
 
-            rt._tool_lifespans = {}
+            rt._tool_resources = {}
             for tool_type, tool_lifespan in tool_lifespans.items():
-                rt._tool_lifespans[tool_type] = await stack.enter_async_context(tool_lifespan)
+                rt._tool_resources[tool_type] = await stack.enter_async_context(tool_lifespan)
 
             yield rt
 
-    def get_tool_lifespan(self, tool_type: str) -> AbstractAsyncContextManager[Any] | None:
-        """Get the lifespan for a tool type."""
-        return self._tool_lifespans.get(tool_type)
+    def get_tool_resources(self, tool_type: str) -> Any | None:
+        """Get the resources for a tool type."""
+        return self._tool_resources.get(tool_type)
