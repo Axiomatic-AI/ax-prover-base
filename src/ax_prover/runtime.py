@@ -28,7 +28,7 @@ class Runtime:
         cls,
         config: RuntimeConfig,
         base_folder: str,
-        tool_lifespans: dict[str, AbstractAsyncContextManager[Any]],
+        tool_lifespans: dict[str, AbstractAsyncContextManager[Any]] | None = None,
     ) -> AsyncIterator["Runtime"]:
         rt = cls(config, base_folder)
 
@@ -39,7 +39,7 @@ class Runtime:
             rt.lean_semaphore = asyncio.Semaphore(config.lean.max_concurrent_builds)
 
             rt._tool_resources = {}
-            for tool_type, tool_lifespan in tool_lifespans.items():
+            for tool_type, tool_lifespan in (tool_lifespans or {}).items():
                 rt._tool_resources[tool_type] = await stack.enter_async_context(tool_lifespan)
 
             yield rt
