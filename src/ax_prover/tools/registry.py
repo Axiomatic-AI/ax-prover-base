@@ -82,7 +82,7 @@ async def create_tool(
     registration = TOOL_REGISTRY.get(tool_type)
 
     # Call factory (handle both sync and async)
-    tool = registration.factory(config)
+    tool = registration.factory(config, runtime)
     if inspect.iscoroutine(tool):
         tool = await tool
 
@@ -92,15 +92,24 @@ async def create_tool(
     return tool
 
 
-async def create_tool_lifespan(
-    tool_config: dict[str, Any],
-) -> AbstractAsyncContextManager[Any] | None:
-    """Create a lifespan from a tool config dict with a tool_type discriminator."""
-    tool_type, config = await _get_tool_type_and_typed_config(tool_config)
+async def create_tool_lifespans(
+    tool_configs: dict[str, dict[str, Any]],
+) -> dict[str, AbstractAsyncContextManager[Any]]:
+    """Create the necessary tool lifespans from a tool config dict.
 
-    registration = TOOL_REGISTRY.get(tool_type)
+    Args:
+        tool_configs: Dict with tool_type keys and their tool-specific config dicts.
 
-    return registration.lifespan(config) if registration.lifespan else None
+    Returns:
+        Dict with tool_type keys and their corresponding lifespan only for those that have one.
+    """
+    tool_lifespans = {}
+    for tool_config in tool_configs.values():
+        lifespan = await _create_tool_lifespan(tool_config)
+        if lifespan is not None:
+            tool_lifespans[tool_config["tool_type"]] = lifespan
+
+    return tool_lifespans
 
 
 async def _get_tool_type_and_typed_config(tool_config: dict[str, Any]) -> tuple[str, Any]:
@@ -117,3 +126,14 @@ async def _get_tool_type_and_typed_config(tool_config: dict[str, Any]) -> tuple[
         )
 
     return tool_type, registration.config_class(**tool_config)
+
+
+async def _create_tool_lifespan(
+    tool_config: dict[str, Any],
+) -> AbstractAsyncContextManager[Any] | None:
+    """Create a lifespan from a tool config dict with a tool_type discriminator."""
+    tool_type, config = await _get_tool_type_and_typed_config(tool_config)
+
+    registration = TOOL_REGISTRY.get(tool_type)
+
+    return registration.lifespan(config) if registration.lifespan else None

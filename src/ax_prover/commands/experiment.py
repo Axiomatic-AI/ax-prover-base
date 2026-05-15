@@ -20,6 +20,7 @@ from ..models import ProverOutput, TargetItem
 from ..models.proving import ProverAgentState
 from ..prover.agent import ProverAgent
 from ..runtime import Runtime
+from ..tools import create_tool_lifespans
 from ..tools.lean_search import lean_search_session_manager
 from ..utils import get_logger, parse_prove_target, prove_single_item, write_json_output
 from ..utils.git import get_git_hash, is_git_dirty
@@ -78,8 +79,9 @@ async def experiment(
             "git_dirty": is_git_dirty(),
         }
 
+        necessary_tool_lifespans = await create_tool_lifespans(config.prover.proposer_tools)
         async with lean_search_session_manager():
-            async with Runtime.open(config.runtime, base_path, config.prover.proposer_tools) as rt:
+            async with Runtime.open(config.runtime, base_path, necessary_tool_lifespans) as rt:
                 # Create a wrapper function that includes the config and runtime. We need to use a
                 # lambda instead of partial to avoid LangSmith's internal config parameter collision.
                 @traceable

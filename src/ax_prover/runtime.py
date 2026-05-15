@@ -4,7 +4,6 @@ from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontext
 from typing import Any
 
 from .config import RuntimeConfig
-from .tools.registry import create_tool_lifespan
 from .utils.lean_interact import LeanInteractServer
 
 
@@ -26,7 +25,10 @@ class Runtime:
     @classmethod
     @asynccontextmanager
     async def open(
-        cls, config: RuntimeConfig, base_folder: str, tool_configs: dict[str, Any] | None = None
+        cls,
+        config: RuntimeConfig,
+        base_folder: str,
+        tool_lifespans: dict[str, AbstractAsyncContextManager[Any]],
     ) -> AsyncIterator["Runtime"]:
         rt = cls(config, base_folder)
 
@@ -37,10 +39,8 @@ class Runtime:
             rt.lean_semaphore = asyncio.Semaphore(config.lean.max_concurrent_builds)
 
             rt._tool_lifespans = {}
-            for tool_type, tool_config in (tool_configs or {}).items():
-                lifespan = await create_tool_lifespan(tool_config)
-                if lifespan is not None:
-                    rt._tool_lifespans[tool_type] = await stack.enter_async_context(lifespan)
+            for tool_type, tool_lifespan in tool_lifespans.items():
+                rt._tool_lifespans[tool_type] = await stack.enter_async_context(tool_lifespan)
 
             yield rt
 

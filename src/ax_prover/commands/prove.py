@@ -7,6 +7,7 @@ from ..config import Config
 from ..models import ProverAgentState, ProverOutput, TargetItem
 from ..prover.agent import ProverAgent
 from ..runtime import Runtime
+from ..tools import create_tool_lifespans
 from ..tools.lean_search import lean_search_session_manager
 from ..utils import get_logger, parse_prove_target, prove_single_item, write_json_output
 
@@ -51,8 +52,14 @@ async def _prove_all_items(
     output_file: str | None = None,
 ) -> int:
     """Prove all items in the list."""
+    necessary_tool_lifespans = await create_tool_lifespans(config.prover.proposer_tools)
+    print("########################")
+    print("########################")
+    print(necessary_tool_lifespans)
+    print("########################")
+    print("########################")
     async with lean_search_session_manager():
-        async with Runtime.open(config.runtime, folder, config.prover.proposer_tools) as rt:
+        async with Runtime.open(config.runtime, folder, necessary_tool_lifespans) as rt:
             failed = False
             outputs: dict[str, ProverOutput] = {}
 
