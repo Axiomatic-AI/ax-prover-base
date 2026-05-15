@@ -1,9 +1,9 @@
 """LeanSearch tool for searching Lean 4/Mathlib theorems and definitions."""
 
 import asyncio
-import contextlib
 import random
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -63,7 +63,7 @@ async def get_lean_search_session() -> aiohttp.ClientSession:
     return _lean_search_session
 
 
-@contextlib.asynccontextmanager
+@asynccontextmanager
 async def lean_search_session_manager() -> AsyncIterator[None]:
     """Manage LeanSearch session lifecycle (creation/cleanup)."""
     try:
@@ -215,11 +215,21 @@ async def lean_search(query: str, config: SearchLeanSearchConfig) -> str:
         return str(e)
 
 
+@asynccontextmanager
+async def _lean_search_lifespan(
+    config: SearchLeanSearchConfig,
+) -> AsyncIterator[aiohttp.ClientSession]:
+    """Create a lifespan for the LeanSearch tool."""
+    connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        yield session
+
+
 class SearchQueryInput(BaseModel):
     query: str = Field(..., description="Search query string")
 
 
-@register_tool(LEAN_SEARCH_TOOL_TYPE, SearchLeanSearchConfig)
+@register_tool(LEAN_SEARCH_TOOL_TYPE, SearchLeanSearchConfig, _lean_search_lifespan)
 async def create_search_lean_search_tool(config: SearchLeanSearchConfig) -> StructuredTool | None:
     """Create a LeanSearch tool with warmup (once per process).
 
