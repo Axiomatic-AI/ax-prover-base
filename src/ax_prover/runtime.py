@@ -36,6 +36,7 @@ class Runtime:
             )
             rt.lean_semaphore = asyncio.Semaphore(config.lean.max_concurrent_builds)
 
+            rt._tool_lifespans = {}
             for tool_type, tool_config in (tool_configs or {}).items():
                 lifespan = await create_tool_lifespan(tool_config)
                 if lifespan is not None:
