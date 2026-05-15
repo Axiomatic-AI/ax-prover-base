@@ -7,6 +7,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 from tavily import TavilyClient
 
+from ..runtime import Runtime
 from ..utils import get_logger
 from .registry import register_tool, tool_name_from_type
 
@@ -84,7 +85,7 @@ class SearchInput(BaseModel):
 
 
 @register_tool(WEB_SEARCH_TOOL_TYPE, SearchWebConfig)
-def create_search_web_tool(config: SearchWebConfig) -> StructuredTool:
+def create_search_web_tool(config: SearchWebConfig, _: Runtime) -> StructuredTool:
     """Create a web search tool with the given configuration."""
     return StructuredTool(
         name=tool_name_from_type(WEB_SEARCH_TOOL_TYPE),

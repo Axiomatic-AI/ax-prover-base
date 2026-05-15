@@ -8,6 +8,7 @@ from typing import Any
 
 from langchain_core.tools import BaseTool
 
+from ..runtime import Runtime
 from ..utils import get_logger
 
 logger = get_logger(__name__)
@@ -43,6 +44,10 @@ def register_tool(
         @register_tool("search_web", SearchWebConfig)
         def create_search_web_tool(config: SearchWebConfig) -> StructuredTool:
             ...
+
+        @register_tool("lean_search", SearchLeanSearchConfig, _lean_search_lifespan)
+        def create_search_lean_search_tool(config: SearchLeanSearchConfig) -> StructuredTool:
+            ...
     """
 
     def decorator(factory: Callable) -> Callable:
@@ -58,6 +63,7 @@ def register_tool(
 
 async def create_tool(
     tool_config: dict[str, Any],
+    runtime: Runtime,
 ) -> BaseTool | None:
     """Create a tool from a config dict with a tool_type discriminator.
 

@@ -12,6 +12,7 @@ import aiohttp
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
+from ..runtime import Runtime
 from ..utils import get_logger
 from .registry import register_tool, tool_name_from_type
 
@@ -92,10 +93,10 @@ async def _retry_with_backoff(
 async def _make_lean_search_request_with_retry(
     query: str,
     config: SearchLeanSearchConfig,
+    session: aiohttp.ClientSession,
 ) -> list[list[dict[str, Any]]]:
     """Make async HTTP request to LeanSearch API with retry logic."""
     url = f"{config.server_url}/search"
-    session = await get_lean_search_session()
 
     headers = {
         "accept": "application/json",
@@ -190,14 +191,18 @@ def _process_lean_search_response(
     return "\n".join(output)
 
 
-async def lean_search(query: str, config: SearchLeanSearchConfig) -> str:
+async def lean_search(
+    query: str, config: SearchLeanSearchConfig, session: aiohttp.ClientSession
+) -> str:
     """Search for Lean 4/Mathlib theorems using module paths or natural language."""
     logger.debug(
         f"lean_search() - server: {config.server_url}, "
         f"max_results: {config.max_results}, timeout: {config.timeout}s"
     )
     try:
-        result_data = await _make_lean_search_request_with_retry(query=query, config=config)
+        result_data = await _make_lean_search_request_with_retry(
+            query=query, config=config, session=session
+        )
         return _process_lean_search_response(query, result_data)
     except aiohttp.ClientError as e:
         logger.error(f"LeanSearch ClientError: {type(e).__name__} - {e}")
@@ -230,11 +235,14 @@ class SearchQueryInput(BaseModel):
 
 
 @register_tool(LEAN_SEARCH_TOOL_TYPE, SearchLeanSearchConfig, _lean_search_lifespan)
-async def create_search_lean_search_tool(config: SearchLeanSearchConfig) -> StructuredTool | None:
+async def create_search_lean_search_tool(
+    config: SearchLeanSearchConfig, runtime: Runtime
+) -> StructuredTool | None:
     """Create a LeanSearch tool with warmup (once per process).
 
     Returns None if warmup fails.
     """
+    session = runtime.get_tool_lifespan(LEAN_SEARCH_TOOL_TYPE)
     global _lean_search_warmup_result
 
     async with _lean_search_warmup_lock:
@@ -243,7 +251,7 @@ async def create_search_lean_search_tool(config: SearchLeanSearchConfig) -> Stru
 
         if _lean_search_warmup_result is None:
             try:
-                await warmup_lean_search(config)
+                await warmup_lean_search(config, session)
                 _lean_search_warmup_result = True
             except Exception as e:
                 logger.warning(f"LeanSearch warm-up failed: {e}")
@@ -252,7 +260,7 @@ async def create_search_lean_search_tool(config: SearchLeanSearchConfig) -> Stru
 
     async def _search(query: str) -> str:
         logger.debug(f"LeanSearch tool invoked with query: '{query}'")
-        return await lean_search(query, config)
+        return await lean_search(query, config, session)
 
     return StructuredTool(
         name=tool_name_from_type(LEAN_SEARCH_TOOL_TYPE),
@@ -275,11 +283,13 @@ Examples of natural language:
     )
 
 
-async def warmup_lean_search(config: SearchLeanSearchConfig) -> None:
+async def warmup_lean_search(
+    config: SearchLeanSearchConfig, session: aiohttp.ClientSession
+) -> None:
     """Warm up LeanSearch server with a test query."""
     from dataclasses import replace
 
     logger.info(f"Warming up LeanSearch server at {config.server_url}...")
     warmup_config = replace(config, timeout=120)
-    await _make_lean_search_request_with_retry(query="Nat", config=warmup_config)
+    await _make_lean_search_request_with_retry(query="Nat", config=warmup_config, session=session)
     logger.info("LeanSearch warm-up successful")
