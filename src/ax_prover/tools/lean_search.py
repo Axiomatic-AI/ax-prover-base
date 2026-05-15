@@ -36,10 +36,6 @@ class SearchLeanSearchConfig:
     retry_delay: int = 2
 
 
-_lean_search_warmup_result: bool | None = None
-_lean_search_warmup_lock: asyncio.Lock = asyncio.Lock()
-
-
 async def _retry_with_backoff(
     attempt: int, config: SearchLeanSearchConfig, error_detail: str
 ) -> None:
@@ -189,6 +185,11 @@ async def _lean_search_lifespan(
     """Create a lifespan for the LeanSearch tool."""
     connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
     async with aiohttp.ClientSession(connector=connector) as session:
+        try:
+            await _warmup_lean_search(config, session)
+        except Exception as e:
+            logger.warning(f"LeanSearch warm-up failed: {e}")
+            raise
         yield session
 
 
@@ -205,20 +206,6 @@ async def create_search_lean_search_tool(
     Returns None if warmup fails.
     """
     session = runtime.get_tool_resources(LEAN_SEARCH_TOOL_TYPE)
-    global _lean_search_warmup_result
-
-    async with _lean_search_warmup_lock:
-        if _lean_search_warmup_result is False:
-            return None
-
-        if _lean_search_warmup_result is None:
-            try:
-                await warmup_lean_search(config, session)
-                _lean_search_warmup_result = True
-            except Exception as e:
-                logger.warning(f"LeanSearch warm-up failed: {e}")
-                _lean_search_warmup_result = False
-                return None
 
     async def _search(query: str) -> str:
         logger.debug(f"LeanSearch tool invoked with query: '{query}'")
@@ -245,7 +232,7 @@ Examples of natural language:
     )
 
 
-async def warmup_lean_search(
+async def _warmup_lean_search(
     config: SearchLeanSearchConfig, session: aiohttp.ClientSession
 ) -> None:
     """Warm up LeanSearch server with a test query."""

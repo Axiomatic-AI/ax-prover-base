@@ -450,7 +450,7 @@ class TestWarmup:
             ) as mock_request,
             patch("dataclasses.replace", return_value=warmup_config_result),
         ):
-            await lean_search.warmup_lean_search(mock_config)
+            await lean_search._warmup_lean_search(mock_config)
 
             mock_request.assert_called_once()
             call_args = mock_request.call_args
@@ -472,7 +472,7 @@ class TestWarmup:
             patch("dataclasses.replace", return_value=warmup_config_result),
             pytest.raises(TimeoutError),
         ):
-            await lean_search.warmup_lean_search(mock_config)
+            await lean_search._warmup_lean_search(mock_config)
 
 
 class TestToolCreation:
