@@ -1,7 +1,6 @@
 """LeanInteract tools for goal state extraction."""
 
 import asyncio
-from pathlib import Path
 
 from lean_interact import (
     AutoLeanServer,
@@ -12,7 +11,7 @@ from lean_interact import (
 from lean_interact.interface import CommandResponse, LeanError
 
 from ..config import LeanInteractConfig
-from ..utils import get_logger
+from .logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -62,37 +61,3 @@ class LeanInteractServer:
     async def __aexit__(self, exc_type, exc_value, traceback) -> None:
         "Exit the context manager."
         await self.aclose()
-
-
-async def get_goal_state_at_sorries(
-    server: LeanInteractServer, base_folder: str, file_path: str
-) -> str:
-    """Extract goal states at all sorry locations using LeanInteract (async).
-
-    Uses a shared AutoLeanServer instance for efficient resource usage across
-    multiple concurrent experiment runs. The server is thread-safe and processes
-    requests sequentially.
-
-    Args:
-        server: LeanInteractServer instance
-        base_folder: Base folder of the Lean project
-        file_path: Relative path to the Lean file (relative to base_folder)
-
-    Returns:
-        Formatted string with goal states at each sorry location
-    """
-    lean_code = (Path(base_folder) / file_path).read_text()
-
-    response = await server.async_run(Command(cmd=lean_code))
-
-    if not response.sorries:
-        return "No sorries found in code."
-
-    goal_states = []
-    for idx, sorry in enumerate(response.sorries, start=1):
-        goal_states.append(
-            f"Sorry #{idx} at line {sorry.start_pos.line}, column {sorry.start_pos.column}:\n"
-            f"{sorry.goal}\n"
-        )
-
-    return "\n".join(goal_states)

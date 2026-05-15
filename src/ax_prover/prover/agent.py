@@ -44,9 +44,9 @@ from ..utils.build import (
 )
 from ..utils.files import read_file
 from ..utils.git import get_repo_metadata
-from ..utils.lean_interact import get_goal_state_at_sorries
 from ..utils.lean_parsing import (
     find_declaration_by_name,
+    get_goal_state_at_sorries,
     list_all_declarations_in_lean_code,
     strip_comments,
 )
