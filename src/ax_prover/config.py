@@ -57,7 +57,7 @@ class LLMConfig:
 
     model: str
     provider_config: dict[str, Any] = field(default_factory=dict)
-    retry_config: dict[str, Any] = field(default_factory=lambda: DEFAULT_LLM_RETRY_CONFIG)
+    retry_config: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_LLM_RETRY_CONFIG))
 
 
 @dataclass
