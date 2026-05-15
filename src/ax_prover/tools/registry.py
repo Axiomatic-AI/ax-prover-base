@@ -2,6 +2,7 @@
 
 import inspect
 from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,6 +19,7 @@ class ToolRegistration:
 
     factory: Callable
     config_class: type
+    lifespan: Callable[[Any], AbstractAsyncContextManager[Any]] | None = None
 
 
 # Registry populated by @register_tool decorator
@@ -29,7 +31,11 @@ def tool_name_from_type(tool_type: str) -> str:
     return f"{tool_type}_tool"
 
 
-def register_tool(tool_type: str, config_class: type):
+def register_tool(
+    tool_type: str,
+    config_class: type,
+    lifespan: Callable[[Any], AbstractAsyncContextManager[Any]] | None = None,
+):
     """Decorator to register a tool factory with its config class.
     The factory must take a single argument, the config object it is registered with.
 
@@ -42,7 +48,9 @@ def register_tool(tool_type: str, config_class: type):
     def decorator(factory: Callable) -> Callable:
         if tool_type in TOOL_REGISTRY:
             raise ValueError(f"Duplicate tool registration: {tool_type}")
-        TOOL_REGISTRY[tool_type] = ToolRegistration(factory=factory, config_class=config_class)
+        TOOL_REGISTRY[tool_type] = ToolRegistration(
+            factory=factory, config_class=config_class, lifespan=lifespan
+        )
         return factory
 
     return decorator
