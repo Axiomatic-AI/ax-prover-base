@@ -78,8 +78,8 @@ async def experiment(
             "git_dirty": is_git_dirty(),
         }
 
-        necessary_tool_lifespans = await create_tool_lifespans(config.prover.proposer_tools)
-        async with Runtime.open(config.runtime, base_path, necessary_tool_lifespans) as rt:
+        tool_lifespans = await create_tool_lifespans(config.prover.proposer_tools)
+        async with Runtime.open(config.runtime, base_path, tool_lifespans) as rt:
             # Create a wrapper function that includes the config and runtime. We need to use a
             # lambda instead of partial to avoid LangSmith's internal config parameter collision.
             @traceable

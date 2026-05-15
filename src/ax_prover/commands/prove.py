@@ -51,8 +51,8 @@ async def _prove_all_items(
     output_file: str | None = None,
 ) -> int:
     """Prove all items in the list."""
-    necessary_tool_lifespans = await create_tool_lifespans(config.prover.proposer_tools)
-    async with Runtime.open(config.runtime, folder, necessary_tool_lifespans) as rt:
+    tool_lifespans = await create_tool_lifespans(config.prover.proposer_tools)
+    async with Runtime.open(config.runtime, folder, tool_lifespans) as rt:
         failed = False
         outputs: dict[str, ProverOutput] = {}
 
