@@ -77,7 +77,7 @@ async def create_tool(
         ValueError: If tool_type is missing or unknown.
         TypeError: If config parameters don't match the tool's config class.
     """
-    tool_type, config = await _get_tool_type_and_typed_config(tool_config)
+    tool_type, config = _get_tool_type_and_typed_config(tool_config)
 
     registration = TOOL_REGISTRY.get(tool_type)
 
@@ -105,14 +105,14 @@ async def create_tool_lifespans(
     """
     tool_lifespans = {}
     for tool_config in tool_configs.values():
-        lifespan = await _create_tool_lifespan(tool_config)
+        lifespan = _create_tool_lifespan(tool_config)
         if lifespan is not None:
             tool_lifespans[tool_config["tool_type"]] = lifespan
 
     return tool_lifespans
 
 
-async def _get_tool_type_and_typed_config(tool_config: dict[str, Any]) -> tuple[str, Any]:
+def _get_tool_type_and_typed_config(tool_config: dict[str, Any]) -> tuple[str, Any]:
     """Get the tool type and typed config from a tool config dict."""
     tool_config = dict(tool_config)  # Make a copy to avoid modifying the original
     tool_type = tool_config.pop("tool_type", None)
@@ -128,11 +128,11 @@ async def _get_tool_type_and_typed_config(tool_config: dict[str, Any]) -> tuple[
     return tool_type, registration.config_class(**tool_config)
 
 
-async def _create_tool_lifespan(
+def _create_tool_lifespan(
     tool_config: dict[str, Any],
 ) -> AbstractAsyncContextManager[Any] | None:
     """Create a lifespan from a tool config dict with a tool_type discriminator."""
-    tool_type, config = await _get_tool_type_and_typed_config(tool_config)
+    tool_type, config = _get_tool_type_and_typed_config(tool_config)
 
     registration = TOOL_REGISTRY.get(tool_type)
 
