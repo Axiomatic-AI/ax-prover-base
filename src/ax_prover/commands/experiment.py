@@ -79,7 +79,7 @@ async def experiment(
         }
 
         async with lean_search_session_manager():
-            async with Runtime.open(config.runtime, base_path) as rt:
+            async with Runtime.open(config.runtime, base_path, config.prover.proposer_tools) as rt:
                 # Create a wrapper function that includes the config and runtime. We need to use a
                 # lambda instead of partial to avoid LangSmith's internal config parameter collision.
                 @traceable

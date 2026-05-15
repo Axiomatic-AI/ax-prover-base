@@ -52,7 +52,7 @@ async def _prove_all_items(
 ) -> int:
     """Prove all items in the list."""
     async with lean_search_session_manager():
-        async with Runtime.open(config.runtime, folder) as rt:
+        async with Runtime.open(config.runtime, folder, config.prover.proposer_tools) as rt:
             failed = False
             outputs: dict[str, ProverOutput] = {}
 
