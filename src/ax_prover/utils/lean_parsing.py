@@ -486,7 +486,7 @@ async def get_goal_state_at_sorries(
     """
     lean_code = (Path(base_folder) / file_path).read_text()
 
-    response = await server.async_run(Command(cmd=lean_code))
+    response = await server.run(Command(cmd=lean_code))
 
     if not response.sorries:
         return "No sorries found in code."
