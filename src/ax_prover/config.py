@@ -81,7 +81,7 @@ class ProverConfig:
     """Configuration for ProverAgent."""
 
     prover_llm: LLMConfig | None = None  # None is a placeholder to allow merging configs in main
-    proposer_tools: dict[str, Any] = field(default_factory=dict)
+    proposer_tools: dict[str, dict[str, Any]] = field(default_factory=dict)
     max_iterations: int = 0
     memory_config: MemoryConfig = field(
         default_factory=lambda: MemoryConfig(class_name="ExperienceProcessor")
