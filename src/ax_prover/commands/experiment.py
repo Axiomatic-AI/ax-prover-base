@@ -21,7 +21,6 @@ from ..models.proving import ProverAgentState
 from ..prover.agent import ProverAgent
 from ..runtime import Runtime
 from ..tools import create_tool_lifespans
-from ..tools.lean_search import lean_search_session_manager
 from ..utils import get_logger, parse_prove_target, prove_single_item, write_json_output
 from ..utils.git import get_git_hash, is_git_dirty
 
@@ -80,69 +79,66 @@ async def experiment(
         }
 
         necessary_tool_lifespans = await create_tool_lifespans(config.prover.proposer_tools)
-        async with lean_search_session_manager():
-            async with Runtime.open(config.runtime, base_path, necessary_tool_lifespans) as rt:
-                # Create a wrapper function that includes the config and runtime. We need to use a
-                # lambda instead of partial to avoid LangSmith's internal config parameter collision.
-                @traceable
-                async def experiment_func(inputs: dict[str, str]) -> dict:
-                    return await _run_experiment_sample(inputs, config, rt)
+        async with Runtime.open(config.runtime, base_path, necessary_tool_lifespans) as rt:
+            # Create a wrapper function that includes the config and runtime. We need to use a
+            # lambda instead of partial to avoid LangSmith's internal config parameter collision.
+            @traceable
+            async def experiment_func(inputs: dict[str, str]) -> dict:
+                return await _run_experiment_sample(inputs, config, rt)
 
-                results = await client.aevaluate(
-                    experiment_func,
-                    data=dataset,
-                    evaluators=[
-                        build_timeout_count,
-                        compilation_error_count,
-                        is_proven,
-                        number_of_iterations,
-                        _tool_usage,
-                        max_iterations_reached,
-                        reviewer_rejections,
-                    ],
-                    max_concurrency=max_concurrency,
-                    experiment_prefix=experiment_prefix,
-                    metadata=experiment_metadata,
-                )
+            results = await client.aevaluate(
+                experiment_func,
+                data=dataset,
+                evaluators=[
+                    build_timeout_count,
+                    compilation_error_count,
+                    is_proven,
+                    number_of_iterations,
+                    _tool_usage,
+                    max_iterations_reached,
+                    reviewer_rejections,
+                ],
+                max_concurrency=max_concurrency,
+                experiment_prefix=experiment_prefix,
+                metadata=experiment_metadata,
+            )
 
-                await results.wait()
+            await results.wait()
 
-                error_count = 0
-                for result in results._results:
-                    outputs = result["run"].outputs
-                    if outputs and outputs.get("error") == "exception":
-                        error_count += 1
-                        logger.error(
-                            f"Experiment failed for {outputs.get('path')}: {outputs.get('message')}"
-                        )
-
-                if output_file:
-                    prover_outputs = {}
-                    for result in results._results:
-                        out = result["run"].outputs
-                        if out and out.get("error") == "exception":
-                            path = out.get("path", "unknown")
-                            prover_outputs[path] = ProverOutput(
-                                success=False, error=out.get("message")
-                            )
-                        else:
-                            state = ProverAgentState.model_validate(out)
-                            key = (
-                                state.item.location.formatted_context
-                                if state.item.location
-                                else state.item.title
-                            )
-                            prover_outputs[key] = ProverOutput.from_prover_state(state)
-                    write_json_output(prover_outputs, output_file)
-
-                if error_count > 0:
+            error_count = 0
+            for result in results._results:
+                outputs = result["run"].outputs
+                if outputs and outputs.get("error") == "exception":
+                    error_count += 1
                     logger.error(
-                        f"Experiment completed with {error_count} unhandled error(s). Marking as failed."
+                        f"Experiment failed for {outputs.get('path')}: {outputs.get('message')}"
                     )
-                    return 1
 
-                logger.info("Experiment completed successfully")
-                return 0
+            if output_file:
+                prover_outputs = {}
+                for result in results._results:
+                    out = result["run"].outputs
+                    if out and out.get("error") == "exception":
+                        path = out.get("path", "unknown")
+                        prover_outputs[path] = ProverOutput(success=False, error=out.get("message"))
+                    else:
+                        state = ProverAgentState.model_validate(out)
+                        key = (
+                            state.item.location.formatted_context
+                            if state.item.location
+                            else state.item.title
+                        )
+                        prover_outputs[key] = ProverOutput.from_prover_state(state)
+                write_json_output(prover_outputs, output_file)
+
+            if error_count > 0:
+                logger.error(
+                    f"Experiment completed with {error_count} unhandled error(s). Marking as failed."
+                )
+                return 1
+
+            logger.info("Experiment completed successfully")
+            return 0
 
     except Exception as e:
         logger.error(f"Error running experiment: {e}")

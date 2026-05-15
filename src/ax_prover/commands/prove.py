@@ -8,7 +8,6 @@ from ..models import ProverAgentState, ProverOutput, TargetItem
 from ..prover.agent import ProverAgent
 from ..runtime import Runtime
 from ..tools import create_tool_lifespans
-from ..tools.lean_search import lean_search_session_manager
 from ..utils import get_logger, parse_prove_target, prove_single_item, write_json_output
 
 logger = get_logger(__name__)
@@ -53,42 +52,36 @@ async def _prove_all_items(
 ) -> int:
     """Prove all items in the list."""
     necessary_tool_lifespans = await create_tool_lifespans(config.prover.proposer_tools)
-    print("########################")
-    print("########################")
-    print(necessary_tool_lifespans)
-    print("########################")
-    print("########################")
-    async with lean_search_session_manager():
-        async with Runtime.open(config.runtime, folder, necessary_tool_lifespans) as rt:
-            failed = False
-            outputs: dict[str, ProverOutput] = {}
+    async with Runtime.open(config.runtime, folder, necessary_tool_lifespans) as rt:
+        failed = False
+        outputs: dict[str, ProverOutput] = {}
 
-            for item in items:
-                if item.proven and not overwrite:
-                    logger.info(f"Already proven: {item.location.formatted_context}")
-                    continue
+        for item in items:
+            if item.proven and not overwrite:
+                logger.info(f"Already proven: {item.location.formatted_context}")
+                continue
 
-                key = item.location.formatted_context
+            key = item.location.formatted_context
 
-                try:
-                    result_state = await _prove_item(config, rt, item)
+            try:
+                result_state = await _prove_item(config, rt, item)
 
-                    if not result_state.item.proven:
-                        failed = True
-
-                    outputs[key] = ProverOutput.from_prover_state(result_state)
-
-                except Exception as e:
-                    logger.exception(f"Error proving {key}")
+                if not result_state.item.proven:
                     failed = True
-                    outputs[key] = ProverOutput.from_exception(e)
-                    if not output_file:
-                        raise
 
-            if output_file:
-                write_json_output(outputs, output_file)
+                outputs[key] = ProverOutput.from_prover_state(result_state)
 
-            return 1 if failed else 0
+            except Exception as e:
+                logger.exception(f"Error proving {key}")
+                failed = True
+                outputs[key] = ProverOutput.from_exception(e)
+                if not output_file:
+                    raise
+
+        if output_file:
+            write_json_output(outputs, output_file)
+
+        return 1 if failed else 0
 
 
 async def _prove_item(

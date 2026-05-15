@@ -36,46 +36,8 @@ class SearchLeanSearchConfig:
     retry_delay: int = 2
 
 
-_lean_search_session: aiohttp.ClientSession | None = None
-_lean_search_session_lock: asyncio.Lock = asyncio.Lock()
-
 _lean_search_warmup_result: bool | None = None
 _lean_search_warmup_lock: asyncio.Lock = asyncio.Lock()
-
-
-async def get_lean_search_session() -> aiohttp.ClientSession:
-    """Get or create the global LeanSearch session with connection pooling.
-
-    Safe to call from multiple concurrent tasks.
-    """
-    global _lean_search_session
-
-    if _lean_search_session is not None and not _lean_search_session.closed:
-        return _lean_search_session
-
-    async with _lean_search_session_lock:
-        if _lean_search_session is not None and not _lean_search_session.closed:
-            return _lean_search_session
-
-        connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
-        _lean_search_session = aiohttp.ClientSession(connector=connector)
-        logger.debug("Created global ClientSession for LeanSearch")
-
-    return _lean_search_session
-
-
-@asynccontextmanager
-async def lean_search_session_manager() -> AsyncIterator[None]:
-    """Manage LeanSearch session lifecycle (creation/cleanup)."""
-    try:
-        yield
-    finally:
-        global _lean_search_session, _lean_search_warmup_result
-        if _lean_search_session is not None and not _lean_search_session.closed:
-            await _lean_search_session.close()
-            logger.debug("Closed global LeanSearch session")
-        _lean_search_session = None
-        _lean_search_warmup_result = None
 
 
 async def _retry_with_backoff(

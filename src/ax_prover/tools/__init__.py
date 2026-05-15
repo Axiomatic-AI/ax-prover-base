@@ -2,7 +2,6 @@
 
 from .lean_search import (
     create_search_lean_search_tool,
-    lean_search_session_manager,
     warmup_lean_search,
 )
 from .registry import TOOL_REGISTRY, create_tool, create_tool_lifespans, tool_name_from_type
@@ -15,6 +14,5 @@ __all__ = [
     "tool_name_from_type",
     "create_search_lean_search_tool",
     "create_search_web_tool",
-    "lean_search_session_manager",
     "warmup_lean_search",
 ]
