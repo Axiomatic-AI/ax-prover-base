@@ -16,6 +16,7 @@ class Runtime:
 
     def __init__(self, config: RuntimeConfig, base_folder: str) -> None:
         # Do not use __init__, the intended use is through Runtime.open(...)
+        # Trying to access the servers or semaphores will raise an error if it's not within an open context.
         self.config = config
         self.base_folder = base_folder
 
