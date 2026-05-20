@@ -25,14 +25,17 @@ class TestRegisterToolDecorator:
         assert "search_lean_search" in TOOL_REGISTRY
 
     def test_registered_entry_has_correct_config_class(self):
+        """Test that the registered entry has the correct config class."""
         assert TOOL_REGISTRY["search_web"].config_class is SearchWebConfig
         assert TOOL_REGISTRY["search_lean_search"].config_class is SearchLeanSearchConfig
 
     def test_registered_entry_has_callable_factory(self):
+        """Test that the registered entry has a callable factory."""
         assert callable(TOOL_REGISTRY["search_web"].factory)
         assert callable(TOOL_REGISTRY["search_lean_search"].factory)
 
     def test_duplicate_registration_raises(self):
+        """Test that duplicate registration raises ValueError."""
         with pytest.raises(ValueError, match="Duplicate tool registration"):
 
             @register_tool("search_web", SearchWebConfig)
