@@ -93,7 +93,7 @@ async def create_tool(
 
 
 async def create_tool_lifespans(
-    tool_configs: dict[str, dict[str, Any]],
+    tool_configs: dict[str, dict[str, Any] | None],
 ) -> dict[str, AbstractAsyncContextManager[Any]]:
     """Create the necessary tool lifespans from a tool config dict.
 
@@ -105,6 +105,9 @@ async def create_tool_lifespans(
     """
     tool_lifespans = {}
     for tool_config in tool_configs.values():
+        if tool_config is None:
+            continue
+
         lifespan = _create_tool_lifespan(tool_config)
         if lifespan is not None:
             tool_lifespans[tool_config["tool_type"]] = lifespan
