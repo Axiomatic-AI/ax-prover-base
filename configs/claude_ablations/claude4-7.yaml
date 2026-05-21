@@ -1,6 +1,9 @@
 import:
   - ../llms.yaml
+  - ../tools.yaml
   - ../default.yaml
 
 prover:
   prover_llm: ${llm_configs.claude_opus_4_7}
+  proposer_tools:
+    search_lean: ${tool_configs.search_lean_search_ax}
