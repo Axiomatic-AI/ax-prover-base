@@ -72,6 +72,30 @@ Resolved once per tool instance and cached:
    - none → search unavailable (see Errors).
 3. Always **exclude `.lake/`** from both the downward search and the file scan.
 
+## Where `base_folder` comes from
+
+`base_folder` is **not** derived from the theorem. It is the CLI `--folder`
+argument (default: current directory):
+
+```
+ax-prover prove <target> --folder /path/to/project
+```
+
+Chain: `--folder` → `prove()` → `prove_single_item(..., folder)` →
+`config.create_prover(base_folder=folder)` → `agent.base_folder`. The `<target>`
+theorem location is interpreted relative to `base_folder`.
+
+`base_folder` is the **starting point** for root resolution, not necessarily the
+root itself: it may be the lakefile dir (walk-up finds it in 0 steps) or a parent
+of it (walk-down fallback finds it). In the Treap case study, `--folder
+.../AI4Math/challenges` resolves immediately; `--folder .../AI4Math` resolves via
+the downward search to `challenges/`.
+
+Mathlib and all dependencies live under `.lake/packages/` inside the lakefile dir
+(verified: 8,132 Mathlib `.lean` files under `.lake/packages/mathlib/`). Excluding
+`.lake/` therefore skips all of Mathlib, every vendored dependency, and build
+artifacts — only the project's own sources are searched.
+
 ## Wiring: injecting `base_folder` into the tool
 
 Today `ProverAgent._create_tools()` passes only the static YAML config dict to
