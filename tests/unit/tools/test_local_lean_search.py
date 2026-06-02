@@ -134,6 +134,23 @@ class TestScanHelpers:
     def test_matching_names_no_match_returns_empty(self):
         assert _matching_declaration_names(SAMPLE_LEAN, "nonexistent") == []
 
+    def test_matching_names_multiword_query_requires_all_tokens(self):
+        # "Treap insert" should match names containing BOTH "treap" and "insert",
+        # not require the literal two-word substring (which never matches a name).
+        names = _matching_declaration_names(SAMPLE_LEAN, "Treap insert")
+        assert names == ["Treap.insert", "treap_insert_size"]
+
+    def test_matching_names_multiword_ignores_extra_whitespace(self):
+        assert _matching_declaration_names(SAMPLE_LEAN, "  Treap   insert ") == [
+            "Treap.insert",
+            "treap_insert_size",
+        ]
+
+    def test_matching_names_multiword_excludes_partial_token_match(self):
+        # "Treap" matches all three, but "Treap missing" matches none of them
+        # because no name contains "missing".
+        assert _matching_declaration_names(SAMPLE_LEAN, "Treap missing") == []
+
     def test_declaration_line_points_at_keyword(self):
         # `structure Treap` is on line 6 (1-based) in SAMPLE_LEAN.
         assert _declaration_line(SAMPLE_LEAN, "Treap") == 6

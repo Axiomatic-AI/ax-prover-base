@@ -100,17 +100,22 @@ def _iter_lean_files(root: Path) -> Iterator[Path]:
 
 
 def _matching_declaration_names(content: str, query: str) -> list[str]:
-    """Names of searchable declarations whose name contains `query` (case-insensitive).
+    """Names of searchable declarations matching `query` (case-insensitive).
 
-    Preserves source order and de-duplicates repeated names.
+    A multi-word query matches names that contain every whitespace-separated
+    token, so "Treap insert" matches `Treap.insert` (a single-word query keeps
+    the original substring behaviour). Preserves source order, de-duplicated.
     """
-    needle = query.lower()
+    tokens = query.lower().split()
+    if not tokens:
+        return []
     names: list[str] = []
     seen: set[str] = set()
     for declaration in list_all_declarations_in_lean_code(content):
         if declaration.declaration_type not in SEARCHABLE_TYPES:
             continue
-        if needle in declaration.name.lower() and declaration.name not in seen:
+        name_lower = declaration.name.lower()
+        if all(token in name_lower for token in tokens) and declaration.name not in seen:
             seen.add(declaration.name)
             names.append(declaration.name)
     return names
@@ -224,7 +229,11 @@ class LocalLeanSearcher:
 class LocalLeanSearchInput(BaseModel):
     query: str = Field(
         ...,
-        description="Keyword to match against declaration names (case-insensitive substring).",
+        description=(
+            "Keyword(s) to match against declaration names (case-insensitive). "
+            "Multiple words match names containing all of them, e.g. 'Treap insert' "
+            "finds `Treap.insert`."
+        ),
     )
 
 
@@ -241,6 +250,9 @@ def create_search_lean_local_tool(
 Returns the full source of `def`/`theorem`/`lemma`/`structure`/etc. whose name
 contains your keyword (case-insensitive), from the project's own .lean files.
 Mathlib and other dependencies are excluded — use the lean_search tool for those.
+
+Pass a single keyword (e.g. "Treap" or "extract_min"). Multiple words match names
+containing all of them, so "Treap insert" finds `Treap.insert`.
 
 Use this to retrieve project-local definitions you need to reference in a proof,
 e.g. search "Treap" to get the definition of a local `Treap` structure.""",
