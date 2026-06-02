@@ -81,6 +81,14 @@ class TestRootResolution:
         outer.mkdir(parents=True, exist_ok=True)
         assert _walk_down_for_roots(outer) == []
 
+    @pytest.mark.parametrize("marker", ["lakefile.lean", "lake-manifest.json"])
+    def test_alternate_root_markers_recognized(self, tmp_path, marker):
+        root = tmp_path / "proj"
+        root.mkdir()
+        (root / marker).write_text("")
+        assert _walk_up_for_root(root) == root
+        assert _walk_down_for_roots(tmp_path) == [root]
+
 
 SAMPLE_LEAN = """import Mathlib
 
