@@ -143,7 +143,7 @@ class ProverAgent:
         for tool_config in self.config.proposer_tools.values():
             if tool_config is None:
                 continue
-            tool = await create_tool(tool_config)
+            tool = await create_tool(tool_config, base_folder=self.base_folder)
             if tool is not None:
                 tools.append(tool)
         return tools
