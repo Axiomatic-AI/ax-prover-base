@@ -5,7 +5,6 @@ dependencies) and returns the full declaration blocks whose names match a
 keyword. Complements the remote `lean_search` tool, which covers Mathlib.
 """
 
-# ruff: noqa: F401
 import os
 import re
 from collections.abc import Iterator
@@ -215,3 +214,31 @@ class LocalLeanSearcher:
         if not matches:
             return f'No declarations matching "{query}" found.'
         return _format_results(query, matches, self.config)
+
+
+class LocalLeanSearchInput(BaseModel):
+    query: str = Field(
+        ...,
+        description="Keyword to match against declaration names (case-insensitive substring).",
+    )
+
+
+@register_tool(LOCAL_LEAN_SEARCH_TOOL_TYPE, SearchLeanLocalConfig)
+def create_search_lean_local_tool(
+    config: SearchLeanLocalConfig, base_folder: str = "."
+) -> StructuredTool:
+    """Create the local Lean search tool, scoped to `base_folder`'s Lean project."""
+    searcher = LocalLeanSearcher(config, base_folder=base_folder)
+    return StructuredTool(
+        name=tool_name_from_type(LOCAL_LEAN_SEARCH_TOOL_TYPE),
+        description="""Search the local Lean project for declarations by name.
+
+Returns the full source of `def`/`theorem`/`lemma`/`structure`/etc. whose name
+contains your keyword (case-insensitive), from the project's own .lean files.
+Mathlib and other dependencies are excluded — use the lean_search tool for those.
+
+Use this to retrieve project-local definitions you need to reference in a proof,
+e.g. search "Treap" to get the definition of a local `Treap` structure.""",
+        func=searcher.search,
+        args_schema=LocalLeanSearchInput,
+    )

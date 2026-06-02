@@ -3,8 +3,10 @@
 from pathlib import Path
 
 import pytest
+from langchain_core.tools import StructuredTool
 
 from ax_prover.models.declaration import DeclarationType
+from ax_prover.tools import create_search_lean_local_tool
 from ax_prover.tools.local_lean_search import (
     LOCAL_LEAN_SEARCH_TOOL_TYPE,
     SEARCHABLE_TYPES,
@@ -16,6 +18,7 @@ from ax_prover.tools.local_lean_search import (
     _walk_down_for_roots,
     _walk_up_for_root,
 )
+from ax_prover.tools.registry import TOOL_REGISTRY
 
 
 class TestModuleConstants:
@@ -213,3 +216,24 @@ class TestLocalLeanSearcher:
         result = searcher.search("Treap")
         assert "Found 3 declaration(s)" in result
         assert "Additional matches" in result
+
+
+class TestRegistration:
+    def test_tool_is_registered(self):
+        # Importing ax_prover.tools triggers @register_tool.
+        assert LOCAL_LEAN_SEARCH_TOOL_TYPE in TOOL_REGISTRY
+        assert TOOL_REGISTRY[LOCAL_LEAN_SEARCH_TOOL_TYPE].config_class is SearchLeanLocalConfig
+
+    def test_factory_builds_structured_tool(self):
+        tool = create_search_lean_local_tool(SearchLeanLocalConfig(), base_folder=".")
+        assert isinstance(tool, StructuredTool)
+        assert tool.name == "search_lean_local_tool"
+
+    def test_factory_tool_is_callable_with_query(self, tmp_path):
+        proj = tmp_path / "challenges"
+        proj.mkdir()
+        (proj / "lakefile.toml").write_text('name = "x"\n')
+        (proj / "Defs.lean").write_text("def myThing := 1\n")
+        tool = create_search_lean_local_tool(SearchLeanLocalConfig(), base_folder=str(proj))
+        result = tool.func("myThing")
+        assert "def myThing" in result
