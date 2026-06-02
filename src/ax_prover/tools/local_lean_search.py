@@ -125,8 +125,9 @@ def _declaration_line(content: str, name: str) -> int:
     match = re.search(pattern, content, re.MULTILINE)
     if match is None:
         return 1
-    # match.start() may land on a preceding newline because `\s*` in the pattern
-    # can consume it; advance to the first non-whitespace character of the match.
+    # With re.MULTILINE, `^` anchors at a line start and the following `\s*` can span
+    # blank lines and indentation, so match.start() may precede the keyword line.
+    # Advance past the matched leading whitespace to the keyword itself.
     keyword_offset = match.start() + len(match.group()) - len(match.group().lstrip())
     return content[:keyword_offset].count("\n") + 1
 

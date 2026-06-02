@@ -31,7 +31,9 @@ def tool_name_from_type(tool_type: str) -> str:
 
 def register_tool(tool_type: str, config_class: type):
     """Decorator to register a tool factory with its config class.
-    The factory must take a single argument, the config object it is registered with.
+    The factory takes the config object it is registered with as its first argument.
+    It may optionally declare a second `base_folder` parameter; if present, `create_tool`
+    passes the runtime project folder to it (see `create_tool`).
 
     Usage:
         @register_tool("search_web", SearchWebConfig)
