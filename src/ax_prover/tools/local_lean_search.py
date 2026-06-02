@@ -129,3 +129,89 @@ def _declaration_line(content: str, name: str) -> int:
     # can consume it; advance to the first non-whitespace character of the match.
     keyword_offset = match.start() + len(match.group()) - len(match.group().lstrip())
     return content[:keyword_offset].count("\n") + 1
+
+
+def _format_results(
+    query: str,
+    matches: list[tuple[str, Path, int, str]],
+    config: SearchLeanLocalConfig,
+) -> str:
+    """Render matches, capping by max_results and max_chars; overflow listed by name."""
+    header = f'Found {len(matches)} declaration(s) matching "{query}":'
+    shown: list[str] = []
+    overflow: list[str] = []
+    total = len(header)
+    for name, rel_path, line, block in matches:
+        entry = f"-- {rel_path}:{line}\n{block}"
+        within_budget = total + len(entry) + 2 <= config.max_chars
+        if len(shown) < config.max_results and within_budget:
+            shown.append(entry)
+            total += len(entry) + 2
+        else:
+            overflow.append(f"{name} ({rel_path}:{line})")
+    output = header + "\n\n" + "\n\n".join(shown)
+    if overflow:
+        output += "\n\nAdditional matches (not shown, refine your query): " + ", ".join(overflow)
+    return output
+
+
+class LocalLeanSearcher:
+    """Searches a Lean project's own .lean files for declarations by name.
+
+    The project root is resolved once (from the lakefile) and cached.
+    """
+
+    def __init__(self, config: SearchLeanLocalConfig, base_folder: str = "."):
+        self.config = config
+        self.base_folder = base_folder
+        self._resolution: tuple[Path | None, str] | None = None
+
+    def _resolve_root(self) -> tuple[Path | None, str]:
+        if self._resolution is None:
+            self._resolution = self._compute_root()
+        return self._resolution
+
+    def _compute_root(self) -> tuple[Path | None, str]:
+        start = Path(self.base_folder).resolve()
+        up = _walk_up_for_root(start)
+        if up is not None:
+            return up, ""
+        down = _walk_down_for_roots(start)
+        if len(down) == 1:
+            return down[0], ""
+        if not down:
+            return None, (
+                f"Local Lean search unavailable: no lakefile found at or under {start}."
+            )
+        listed = ", ".join(str(path) for path in sorted(down))
+        return None, (
+            f"Local Lean search found multiple Lean projects under {start}: {listed}. "
+            f"Point --folder at one of them."
+        )
+
+    def search(self, query: str) -> str:
+        query = query.strip()
+        if not query:
+            return "Please provide a non-empty keyword to search for."
+
+        root, error = self._resolve_root()
+        if root is None:
+            return error
+
+        matches: list[tuple[str, Path, int, str]] = []
+        for lean_file in _iter_lean_files(root):
+            try:
+                content = lean_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                logger.debug(f"Skipping unreadable Lean file {lean_file}: {exc}")
+                continue
+            for name in _matching_declaration_names(content, query):
+                block = extract_function_from_content(content, name)
+                if block is None:
+                    continue
+                line = _declaration_line(content, name)
+                matches.append((name, lean_file.relative_to(root), line, block))
+
+        if not matches:
+            return f'No declarations matching "{query}" found.'
+        return _format_results(query, matches, self.config)
