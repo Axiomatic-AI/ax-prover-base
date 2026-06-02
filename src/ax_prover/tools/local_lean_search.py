@@ -191,11 +191,13 @@ class LocalLeanSearcher:
 
     def search(self, query: str) -> str:
         query = query.strip()
+        logger.debug(f"LocalLeanSearch tool invoked with query: '{query}'")
         if not query:
             return "Please provide a non-empty keyword to search for."
 
         root, error = self._resolve_root()
         if root is None:
+            logger.warning(f"LocalLeanSearch: {error}")
             return error
 
         matches: list[tuple[str, Path, int, str]] = []
@@ -213,7 +215,9 @@ class LocalLeanSearcher:
                 matches.append((name, lean_file.relative_to(root), line, block))
 
         if not matches:
+            logger.info(f"LocalLeanSearch: No results for '{query}'")
             return f'No declarations matching "{query}" found.'
+        logger.info(f"LocalLeanSearch: Found {len(matches)} matches for '{query}' under {root}")
         return _format_results(query, matches, self.config)
 
 
