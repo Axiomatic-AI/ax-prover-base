@@ -225,6 +225,26 @@ class TestLocalLeanSearcher:
         assert "Found 3 declaration(s)" in result
         assert "Additional matches" in result
 
+    def test_search_logs_match_count_at_info(self, treap_project, caplog):
+        import logging
+
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(treap_project))
+        with caplog.at_level(logging.INFO):
+            searcher.search("Treap")
+        assert any(
+            "LocalLeanSearch: Found 3 matches for 'Treap'" in r.message for r in caplog.records
+        )
+
+    def test_search_logs_no_results_at_info(self, treap_project, caplog):
+        import logging
+
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(treap_project))
+        with caplog.at_level(logging.INFO):
+            searcher.search("Nonexistent")
+        assert any(
+            "LocalLeanSearch: No results for 'Nonexistent'" in r.message for r in caplog.records
+        )
+
 
 class TestRegistration:
     def test_tool_is_registered(self):
