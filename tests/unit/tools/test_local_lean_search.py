@@ -1,14 +1,20 @@
 """Unit tests for the local Lean library search tool."""
 
-from pathlib import Path  # noqa: F401
+from pathlib import Path
 
-import pytest  # noqa: F401
+import pytest
 
 from ax_prover.models.declaration import DeclarationType
 from ax_prover.tools.local_lean_search import (
     LOCAL_LEAN_SEARCH_TOOL_TYPE,
     SEARCHABLE_TYPES,
+    LocalLeanSearcher,
     SearchLeanLocalConfig,
+    _declaration_line,
+    _iter_lean_files,
+    _matching_declaration_names,
+    _walk_down_for_roots,
+    _walk_up_for_root,
 )
 
 
@@ -32,13 +38,10 @@ class TestModuleConstants:
         assert DeclarationType.End not in SEARCHABLE_TYPES
 
 
-from ax_prover.tools.local_lean_search import _walk_down_for_roots, _walk_up_for_root
-
-
 def _make_lake_project(directory: Path) -> Path:
     """Create a minimal lake project (lakefile.toml) at `directory`."""
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "lakefile.toml").write_text("name = \"demo\"\n")
+    (directory / "lakefile.toml").write_text('name = "demo"\n')
     return directory
 
 
@@ -75,12 +78,6 @@ class TestRootResolution:
         outer.mkdir(parents=True, exist_ok=True)
         assert _walk_down_for_roots(outer) == []
 
-
-from ax_prover.tools.local_lean_search import (
-    _declaration_line,
-    _iter_lean_files,
-    _matching_declaration_names,
-)
 
 SAMPLE_LEAN = """import Mathlib
 
@@ -135,15 +132,12 @@ class TestScanHelpers:
         assert _declaration_line(SAMPLE_LEAN, "Treap.insert") == 10
 
 
-from ax_prover.tools.local_lean_search import LocalLeanSearcher
-
-
 @pytest.fixture
 def treap_project(tmp_path):
     """A lake project with a Treap definition file and a buried Mathlib file."""
     root = tmp_path / "challenges"
     (root / "Challenges" / "Treap").mkdir(parents=True)
-    (root / "lakefile.toml").write_text("name = \"challenges\"\n")
+    (root / "lakefile.toml").write_text('name = "challenges"\n')
     (root / "Challenges" / "Treap" / "Def_Treap.lean").write_text(SAMPLE_LEAN)
     buried = root / ".lake" / "packages" / "mathlib" / "Mathlib"
     buried.mkdir(parents=True)
@@ -177,7 +171,7 @@ class TestLocalLeanSearcher:
         assert searcher.search("   ") == "Please provide a non-empty keyword to search for."
 
     def test_search_resolves_root_via_walk_down(self, tmp_path, treap_project):
-        # base_folder is the OUTER dir; root is the `challenges` subdir.
+        # `treap_project` created `tmp_path/"challenges"`; base_folder is the parent `tmp_path`.
         searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(tmp_path))
         assert "structure Treap where" in searcher.search("Treap")
 
@@ -192,13 +186,15 @@ class TestLocalLeanSearcher:
         for name in ("a", "b"):
             proj = tmp_path / "outer" / name
             proj.mkdir(parents=True)
-            (proj / "lakefile.toml").write_text("name = \"x\"\n")
+            (proj / "lakefile.toml").write_text('name = "x"\n')
         searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(tmp_path / "outer"))
         result = searcher.search("Treap")
         assert "multiple Lean projects" in result
 
     def test_caps_overflow_lists_names_only(self, treap_project):
-        searcher = LocalLeanSearcher(SearchLeanLocalConfig(max_results=1), base_folder=str(treap_project))
+        searcher = LocalLeanSearcher(
+            SearchLeanLocalConfig(max_results=1), base_folder=str(treap_project)
+        )
         result = searcher.search("Treap")
         assert "Found 3 declaration(s)" in result
         shown_section, _, overflow_section = result.partition("Additional matches")
@@ -208,3 +204,12 @@ class TestLocalLeanSearcher:
         # The two un-shown matches are named in the overflow, not rendered as blocks.
         assert "Treap.insert" in overflow_section
         assert "treap_insert_size" in overflow_section
+
+    def test_caps_overflow_via_max_chars(self, treap_project):
+        # A tiny char budget forces overflow even though max_results is high.
+        searcher = LocalLeanSearcher(
+            SearchLeanLocalConfig(max_results=10, max_chars=60), base_folder=str(treap_project)
+        )
+        result = searcher.search("Treap")
+        assert "Found 3 declaration(s)" in result
+        assert "Additional matches" in result
