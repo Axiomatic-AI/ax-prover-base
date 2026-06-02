@@ -50,11 +50,13 @@ def register_tool(tool_type: str, config_class: type):
 
 async def create_tool(
     tool_config: dict[str, Any],
+    base_folder: str = ".",
 ) -> BaseTool | None:
     """Create a tool from a config dict with a tool_type discriminator.
 
     Args:
         tool_config: Dict with 'tool_type' key plus tool-specific parameters.
+        base_folder: Project base folder passed to factories that declare it.
 
     Returns:
         BaseTool instance, or None if creation failed (e.g., warmup failed).
@@ -76,8 +78,13 @@ async def create_tool(
 
     config = registration.config_class(**tool_config)
 
-    # Call factory (handle both sync and async)
-    tool = registration.factory(config)
+    # Call factory (handle both sync and async). Factories that declare a
+    # `base_folder` parameter receive the runtime project folder; others don't.
+    factory = registration.factory
+    if "base_folder" in inspect.signature(factory).parameters:
+        tool = factory(config, base_folder=base_folder)
+    else:
+        tool = factory(config)
     if inspect.iscoroutine(tool):
         tool = await tool
 
