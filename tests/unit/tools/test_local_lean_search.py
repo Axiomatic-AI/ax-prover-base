@@ -74,3 +74,62 @@ class TestRootResolution:
         _make_lake_project(buried)
         outer.mkdir(parents=True, exist_ok=True)
         assert _walk_down_for_roots(outer) == []
+
+
+from ax_prover.tools.local_lean_search import (
+    _declaration_line,
+    _iter_lean_files,
+    _matching_declaration_names,
+)
+
+SAMPLE_LEAN = """import Mathlib
+
+namespace Treaps
+
+/-- A treap node. -/
+structure Treap where
+  key : Nat
+  priority : Nat
+
+def Treap.insert (t : Treap) (k : Nat) : Treap :=
+  t
+
+theorem treap_insert_size (t : Treap) : True := by
+  trivial
+
+end Treaps
+"""
+
+
+class TestScanHelpers:
+    def test_iter_lean_files_excludes_dot_lake(self, tmp_path):
+        (tmp_path / "A.lean").write_text("def a := 1\n")
+        sub = tmp_path / "Lib"
+        sub.mkdir()
+        (sub / "B.lean").write_text("def b := 1\n")
+        buried = tmp_path / ".lake" / "packages" / "mathlib"
+        buried.mkdir(parents=True)
+        (buried / "M.lean").write_text("def m := 1\n")
+
+        found = {p.name for p in _iter_lean_files(tmp_path)}
+        assert found == {"A.lean", "B.lean"}
+
+    def test_matching_names_case_insensitive_substring(self):
+        names = _matching_declaration_names(SAMPLE_LEAN, "treap")
+        assert names == ["Treap", "Treap.insert", "treap_insert_size"]
+
+    def test_matching_names_excludes_structural_keywords(self):
+        # "Treaps" (the namespace) must not be returned even though it matches.
+        names = _matching_declaration_names(SAMPLE_LEAN, "Treap")
+        assert "Treaps" not in names
+
+    def test_matching_names_no_match_returns_empty(self):
+        assert _matching_declaration_names(SAMPLE_LEAN, "nonexistent") == []
+
+    def test_declaration_line_points_at_keyword(self):
+        # `structure Treap` is on line 6 (1-based) in SAMPLE_LEAN.
+        assert _declaration_line(SAMPLE_LEAN, "Treap") == 6
+
+    def test_declaration_line_distinguishes_dotted_name(self):
+        # `def Treap.insert` is on line 10.
+        assert _declaration_line(SAMPLE_LEAN, "Treap.insert") == 10
