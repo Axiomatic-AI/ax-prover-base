@@ -58,3 +58,30 @@ class SearchLeanLocalConfig:
 
     max_results: int = 6
     max_chars: int = 4000
+
+
+def _has_lake_marker(directory: Path) -> bool:
+    return any((directory / marker).exists() for marker in LAKE_ROOT_MARKERS)
+
+
+def _walk_up_for_root(start: Path) -> Path | None:
+    """Nearest ancestor (including `start`) containing a lake marker, or None."""
+    for directory in (start, *start.parents):
+        if _has_lake_marker(directory):
+            return directory
+    return None
+
+
+def _walk_down_for_roots(start: Path) -> list[Path]:
+    """Lake-project directories at or below `start`, skipping `.lake/`.
+
+    Does not descend into a project once found (nested lake projects are rare
+    and would only add noise).
+    """
+    roots: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(start):
+        dirnames[:] = [d for d in dirnames if d != EXCLUDED_DIR]
+        if any(marker in filenames for marker in LAKE_ROOT_MARKERS):
+            roots.append(Path(dirpath))
+            dirnames[:] = []  # don't descend into a found project
+    return roots
