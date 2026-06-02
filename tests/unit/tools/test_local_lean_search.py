@@ -133,3 +133,78 @@ class TestScanHelpers:
     def test_declaration_line_distinguishes_dotted_name(self):
         # `def Treap.insert` is on line 10.
         assert _declaration_line(SAMPLE_LEAN, "Treap.insert") == 10
+
+
+from ax_prover.tools.local_lean_search import LocalLeanSearcher
+
+
+@pytest.fixture
+def treap_project(tmp_path):
+    """A lake project with a Treap definition file and a buried Mathlib file."""
+    root = tmp_path / "challenges"
+    (root / "Challenges" / "Treap").mkdir(parents=True)
+    (root / "lakefile.toml").write_text("name = \"challenges\"\n")
+    (root / "Challenges" / "Treap" / "Def_Treap.lean").write_text(SAMPLE_LEAN)
+    buried = root / ".lake" / "packages" / "mathlib" / "Mathlib"
+    buried.mkdir(parents=True)
+    (buried / "Shadow.lean").write_text("def OnlyInMathlib := 1\n")
+    return root
+
+
+class TestLocalLeanSearcher:
+    def test_search_returns_full_declaration_block(self, treap_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(treap_project))
+        result = searcher.search("Treap")
+        assert "Found 3 declaration(s)" in result
+        assert "structure Treap where" in result
+        assert "key : Nat" in result
+        assert "Challenges/Treap/Def_Treap.lean:" in result
+
+    def test_search_is_case_insensitive(self, treap_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(treap_project))
+        assert "structure Treap where" in searcher.search("treap")
+
+    def test_search_excludes_dot_lake(self, treap_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(treap_project))
+        assert searcher.search("OnlyInMathlib") == 'No declarations matching "OnlyInMathlib" found.'
+
+    def test_search_no_match_message(self, treap_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(treap_project))
+        assert searcher.search("Nonexistent") == 'No declarations matching "Nonexistent" found.'
+
+    def test_search_empty_query_message(self, treap_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(treap_project))
+        assert searcher.search("   ") == "Please provide a non-empty keyword to search for."
+
+    def test_search_resolves_root_via_walk_down(self, tmp_path, treap_project):
+        # base_folder is the OUTER dir; root is the `challenges` subdir.
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(tmp_path))
+        assert "structure Treap where" in searcher.search("Treap")
+
+    def test_search_no_lakefile_message(self, tmp_path):
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(plain))
+        result = searcher.search("Treap")
+        assert "no lakefile found" in result.lower()
+
+    def test_search_multiple_projects_message(self, tmp_path):
+        for name in ("a", "b"):
+            proj = tmp_path / "outer" / name
+            proj.mkdir(parents=True)
+            (proj / "lakefile.toml").write_text("name = \"x\"\n")
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(tmp_path / "outer"))
+        result = searcher.search("Treap")
+        assert "multiple Lean projects" in result
+
+    def test_caps_overflow_lists_names_only(self, treap_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(max_results=1), base_folder=str(treap_project))
+        result = searcher.search("Treap")
+        assert "Found 3 declaration(s)" in result
+        shown_section, _, overflow_section = result.partition("Additional matches")
+        assert overflow_section  # overflow present
+        # The single shown block is the structure (first match).
+        assert "structure Treap where" in shown_section
+        # The two un-shown matches are named in the overflow, not rendered as blocks.
+        assert "Treap.insert" in overflow_section
+        assert "treap_insert_size" in overflow_section
