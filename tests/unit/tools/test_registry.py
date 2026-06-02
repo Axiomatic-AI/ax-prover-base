@@ -152,3 +152,37 @@ class TestCreateTool:
             await create_tool(input_copy)
 
         assert input_copy == original
+
+
+class TestCreateToolBaseFolder:
+    """Tests for base_folder injection into factories that declare it."""
+
+    @pytest.mark.asyncio
+    async def test_passes_base_folder_when_factory_declares_it(self):
+        received = {}
+
+        def factory(config, base_folder="."):
+            received["base_folder"] = base_folder
+            return MagicMock()
+
+        with patch.dict(
+            TOOL_REGISTRY,
+            {"needs_folder": ToolRegistration(factory=factory, config_class=SearchWebConfig)},
+        ):
+            await create_tool({"tool_type": "needs_folder"}, base_folder="/some/path")
+
+        assert received["base_folder"] == "/some/path"
+
+    @pytest.mark.asyncio
+    async def test_omits_base_folder_when_factory_does_not_declare_it(self):
+        def factory(config):
+            return MagicMock()
+
+        with patch.dict(
+            TOOL_REGISTRY,
+            {"no_folder": ToolRegistration(factory=factory, config_class=SearchWebConfig)},
+        ):
+            # Must not raise TypeError despite base_folder being supplied.
+            result = await create_tool({"tool_type": "no_folder"}, base_folder="/x")
+
+        assert result is not None
