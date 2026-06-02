@@ -8,6 +8,7 @@ keyword. Complements the remote `lean_search` tool, which covers Mathlib.
 # ruff: noqa: F401
 import os
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -90,7 +91,7 @@ def _walk_down_for_roots(start: Path) -> list[Path]:
 _KEYWORDS_PATTERN = "|".join(re.escape(keyword) for keyword in LEAN_KEYWORDS)
 
 
-def _iter_lean_files(root: Path):
+def _iter_lean_files(root: Path) -> Iterator[Path]:
     """Yield every .lean file under `root`, skipping the `.lake/` directory."""
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d != EXCLUDED_DIR]
@@ -172,6 +173,7 @@ class LocalLeanSearcher:
         return self._resolution
 
     def _compute_root(self) -> tuple[Path | None, str]:
+        """Return (root, "") on success, or (None, error_message) on failure."""
         start = Path(self.base_folder).resolve()
         up = _walk_up_for_root(start)
         if up is not None:
@@ -180,9 +182,7 @@ class LocalLeanSearcher:
         if len(down) == 1:
             return down[0], ""
         if not down:
-            return None, (
-                f"Local Lean search unavailable: no lakefile found at or under {start}."
-            )
+            return None, (f"Local Lean search unavailable: no lakefile found at or under {start}.")
         listed = ", ".join(str(path) for path in sorted(down))
         return None, (
             f"Local Lean search found multiple Lean projects under {start}: {listed}. "
