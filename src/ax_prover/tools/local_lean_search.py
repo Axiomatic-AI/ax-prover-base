@@ -85,3 +85,47 @@ def _walk_down_for_roots(start: Path) -> list[Path]:
             roots.append(Path(dirpath))
             dirnames[:] = []  # don't descend into a found project
     return roots
+
+
+_KEYWORDS_PATTERN = "|".join(re.escape(keyword) for keyword in LEAN_KEYWORDS)
+
+
+def _iter_lean_files(root: Path):
+    """Yield every .lean file under `root`, skipping the `.lake/` directory."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != EXCLUDED_DIR]
+        for filename in filenames:
+            if filename.endswith(".lean"):
+                yield Path(dirpath) / filename
+
+
+def _matching_declaration_names(content: str, query: str) -> list[str]:
+    """Names of searchable declarations whose name contains `query` (case-insensitive).
+
+    Preserves source order and de-duplicates repeated names.
+    """
+    needle = query.lower()
+    names: list[str] = []
+    seen: set[str] = set()
+    for declaration in list_all_declarations_in_lean_code(content):
+        if declaration.declaration_type not in SEARCHABLE_TYPES:
+            continue
+        if needle in declaration.name.lower() and declaration.name not in seen:
+            seen.add(declaration.name)
+            names.append(declaration.name)
+    return names
+
+
+def _declaration_line(content: str, name: str) -> int:
+    """1-based line number where the declaration of `name` begins (keyword line).
+
+    Falls back to 1 if the declaration keyword cannot be located.
+    """
+    pattern = rf"^\s*(?:{_KEYWORDS_PATTERN})\s+{re.escape(name)}\b"
+    match = re.search(pattern, content, re.MULTILINE)
+    if match is None:
+        return 1
+    # match.start() may land on a preceding newline because `\s*` in the pattern
+    # can consume it; advance to the first non-whitespace character of the match.
+    keyword_offset = match.start() + len(match.group()) - len(match.group().lstrip())
+    return content[:keyword_offset].count("\n") + 1
