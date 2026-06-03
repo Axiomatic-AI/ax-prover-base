@@ -46,6 +46,7 @@ from ..utils.files import read_file
 from ..utils.git import get_repo_metadata
 from ..utils.lean_interact import get_goal_state_at_sorries
 from ..utils.lean_parsing import (
+    SEARCH_TACTIC_PATTERN,
     find_declaration_by_name,
     list_all_declarations_in_lean_code,
     strip_comments,
@@ -393,7 +394,7 @@ class ProverAgent:
                     return {"messages": [feedback]}
 
                 tactic_count, tactic_locations = count_pattern(
-                    stripped_code, pattern=r"\b(apply|exact)\?"
+                    stripped_code, pattern=SEARCH_TACTIC_PATTERN
                 )
                 if tactic_count:
                     self.logger.info("The proposed code contains search tactics.")

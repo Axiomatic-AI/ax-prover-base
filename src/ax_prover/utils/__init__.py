@@ -7,6 +7,7 @@ from .git import get_git_hash, get_repo_metadata, is_git_dirty
 # Export Lean parsing utilities
 from .lean_parsing import (
     LEAN_KEYWORDS,
+    SEARCH_TACTIC_PATTERN,
     count_pattern,
     extract_function_from_content,
     extract_theorem_name,
@@ -63,6 +64,7 @@ __all__ = [
     "is_git_dirty",
     # Lean
     "LEAN_KEYWORDS",
+    "SEARCH_TACTIC_PATTERN",
     "count_pattern",
     "strip_comments",
     # Proving
