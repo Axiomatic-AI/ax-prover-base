@@ -8,6 +8,7 @@ from enum import Enum
 from pathlib import Path
 
 from lean_interact import Command
+from lean_interact.interface import DeclarationInfo
 
 from ..models.declaration import Declaration, DeclarationType
 from ..models.files import Location
@@ -499,3 +500,19 @@ async def get_goal_state_at_sorries(
         )
 
     return "\n".join(goal_states)
+
+
+async def list_declarations_from_code(
+    server: LeanInteractServer, code: str
+) -> list[DeclarationInfo]:
+    """List all declarations from a code snippet."""
+    response = await server.run(Command(cmd=code, declarations=True))
+    return response.declarations
+
+
+async def list_declarations_from_file(
+    server: LeanInteractServer, file_path: str
+) -> list[DeclarationInfo]:
+    """List all declarations from a file."""
+    code = Path(file_path).read_text()
+    return await list_declarations_from_code(server, code)
