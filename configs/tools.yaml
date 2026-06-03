@@ -38,8 +38,3 @@ tool_configs:
     timeout: 60
     max_retries: 3
     retry_delay: 2
-
-  search_lean_local:
-    tool_type: search_lean_local
-    max_results: 6
-    max_chars: 4000
