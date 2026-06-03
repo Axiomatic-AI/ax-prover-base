@@ -1,0 +1,9 @@
+# Adds the local Lean library search tool to the default proposer tools.
+# Use with: ax-prover --config configs/experiment_local_search.yaml experiment ...
+# Deep-merges into the default proposer_tools (search_lean + search_web stay enabled).
+prover:
+  proposer_tools:
+    search_lean_local:
+      tool_type: search_lean_local
+      max_results: 6
+      max_chars: 4000
