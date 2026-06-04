@@ -300,6 +300,26 @@ class ProverAgent:
             result = ProverResult.model_validate_json(response.text)
         except Exception as e:
             self.logger.error(f"Structured output parsing failed: {e}")
+            # TEMP DIAG: dump the real response shape so we can see where the JSON went.
+            try:
+                content = response.content
+                self.logger.error(f"DIAG text repr: {response.text!r}")
+                self.logger.error(f"DIAG content type: {type(content).__name__}")
+                if isinstance(content, list):
+                    for i, b in enumerate(content):
+                        if isinstance(b, dict):
+                            self.logger.error(
+                                f"DIAG block[{i}] type={b.get('type')} keys={list(b.keys())} "
+                                f"text={b.get('text')!r}"
+                            )
+                        else:
+                            self.logger.error(f"DIAG block[{i}] {type(b).__name__}: {b!r}")
+                else:
+                    self.logger.error(f"DIAG content repr: {content!r}")
+                rm = getattr(response, "response_metadata", {}) or {}
+                self.logger.error(f"DIAG stop_reason={rm.get('stop_reason')} tool_calls={response.tool_calls}")
+            except Exception as diag_err:
+                self.logger.error(f"DIAG dump failed: {diag_err}")
             feedback = StructuredOutputParsingFailedFeedback(error_message=str(e))
             return {"messages": [feedback]}
 
