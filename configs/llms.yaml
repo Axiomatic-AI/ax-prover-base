@@ -13,10 +13,7 @@ llm_configs:
     model: "anthropic:claude-opus-4-8"
     provider_config:
       temperature: 1.0 # Must be set to 1.0 for thinking
-      # langchain-anthropic has no profile for this model yet, so max_tokens=null
-      # falls back to 4096 — too small; thinking alone exhausts it and the response
-      # is truncated (stop_reason=max_tokens) before any structured JSON. Set explicitly.
-      max_tokens: 64000
+      max_tokens: null
       effort: "high"  # "low", "medium", "high" (default), "xhigh", "max"
       thinking:
         type: "adaptive"
@@ -25,9 +22,7 @@ llm_configs:
     model: "anthropic:claude-opus-4-7"
     provider_config:
       temperature: 1.0 # Must be set to 1.0 for thinking
-      # No langchain-anthropic profile for this model yet -> max_tokens=null falls back
-      # to 4096 (too small for thinking). Set explicitly to avoid truncation.
-      max_tokens: 64000
+      max_tokens: null
       effort: "high"  # "low", "medium", "high" (default), "max"
       thinking:
         type: "adaptive"
