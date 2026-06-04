@@ -237,6 +237,24 @@ class TestExtractFunctionFromContent:
         code = "theorem Poly.not_principal : P := by sorry"
         assert extract_function_from_content(code, "Poly.not_principal") == code
 
+    def test_prefix_name_not_confused_with_longer_namespaced_name(self):
+        """Extracting 'Treap' must not match an earlier 'Treap.insert' declaration."""
+        code = (
+            "def Treap.insert (t : Treap) : Treap :=\n"
+            "  t\n"
+            "\n"
+            "structure Treap where\n"
+            "  key : Nat\n"
+        )
+        treap = extract_function_from_content(code, "Treap")
+        assert treap is not None
+        assert treap.startswith("structure Treap where")
+        assert "def Treap.insert" not in treap
+        # The longer name is still extractable on its own.
+        insert = extract_function_from_content(code, "Treap.insert")
+        assert insert is not None
+        assert insert.startswith("def Treap.insert")
+
 
 class TestExtractTheoremName:
     """Tests for extract_theorem_name function."""

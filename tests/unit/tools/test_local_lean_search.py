@@ -159,6 +159,18 @@ class TestScanHelpers:
         # `def Treap.insert` is on line 10.
         assert _declaration_line(SAMPLE_LEAN, "Treap.insert") == 10
 
+    def test_declaration_line_prefix_name_not_confused(self):
+        # `def Treap.insert` (line 1) must not be matched when locating `Treap` (line 4).
+        code = (
+            "def Treap.insert (t : Treap) : Treap :=\n"
+            "  t\n"
+            "\n"
+            "structure Treap where\n"
+            "  key : Nat\n"
+        )
+        assert _declaration_line(code, "Treap") == 4
+        assert _declaration_line(code, "Treap.insert") == 1
+
 
 @pytest.fixture
 def treap_project(tmp_path):

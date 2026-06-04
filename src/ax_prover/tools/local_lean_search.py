@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from ..models.declaration import DeclarationType
 from ..utils import get_logger
 from ..utils.lean_parsing import (
+    DECL_NAME_END,
     LEAN_KEYWORDS,
     extract_function_from_content,
     list_all_declarations_in_lean_code,
@@ -126,7 +127,7 @@ def _declaration_line(content: str, name: str) -> int:
 
     Falls back to 1 if the declaration keyword cannot be located.
     """
-    pattern = rf"^\s*(?:{_KEYWORDS_PATTERN})\s+{re.escape(name)}\b"
+    pattern = rf"^\s*(?:{_KEYWORDS_PATTERN})\s+{re.escape(name)}{DECL_NAME_END}"
     match = re.search(pattern, content, re.MULTILINE)
     if match is None:
         return 1

@@ -16,6 +16,12 @@ logger = get_logger(__name__)
 # Lean keywords for declarations
 LEAN_KEYWORDS = [d.value for d in DeclarationType]
 
+# Assertion that a declaration name has ended. A name token runs until whitespace or
+# one of these delimiters (matching list_all_declarations_in_lean_code's name pattern).
+# Use this after a name instead of `\b`: `\b` treats `.` as a boundary, so "Treap" would
+# wrongly match the earlier "Treap.insert" declaration.
+DECL_NAME_END = r"(?![^\s:({\[\]},])"
+
 
 def count_pattern(
     content: str,
@@ -137,7 +143,7 @@ def extract_function_from_content(content: str, function_name: str) -> str | Non
         The complete definition block including doc comments, or None
     """
     keywords_pattern = "|".join(LEAN_KEYWORDS)
-    pattern = rf"^(\s*)({keywords_pattern})\s+{re.escape(function_name)}\b"
+    pattern = rf"^(\s*)({keywords_pattern})\s+{re.escape(function_name)}{DECL_NAME_END}"
 
     match = re.search(pattern, content, re.MULTILINE)
     if not match:
