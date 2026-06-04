@@ -1,6 +1,7 @@
 """LLM factory functions."""
 
 import os
+import re
 
 from anthropic import transform_schema
 from langchain.chat_models import init_chat_model
@@ -197,15 +198,17 @@ def _anthropic_structured_kwargs(model_name: str, schema: type[BaseModel]) -> di
     json_schema = schema.model_json_schema()
     json_schema = transform_schema(json_schema)
 
-    is_46 = "4-6" in model_name or "4.6" in model_name
-
     schema_payload = {"type": "json_schema", "schema": json_schema}
 
-    if is_46:
-        # Claude 4.6+: output_config.format (output_format is deprecated)
+    # Claude 4.6+ uses output_config.format; 4.5 and earlier use the (now-deprecated)
+    # output_format. Parse the major-minor version so 4.7/4.8/... are handled too — a
+    # literal "4.6" check left 4.7/4.8 on the wrong format, yielding empty responses.
+    version = re.search(r"(\d+)[-.](\d+)", model_name)
+    is_new_format = bool(version) and (int(version.group(1)), int(version.group(2))) >= (4, 6)
+
+    if is_new_format:
         return {"output_config": {"format": schema_payload}}
     else:
-        # Claude 4.5 and earlier: output_format
         return {"output_format": schema_payload}
 
 
