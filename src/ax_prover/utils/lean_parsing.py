@@ -346,7 +346,10 @@ def list_all_declarations_in_lean_code(raw_code: str) -> list[Declaration]:
 
     for line in code.split("\n"):
         declaration_match = declaration_pattern.match(line.strip())
-        if declaration_match and declaration_match.group(1) in DeclarationType:
+        # Match against the keyword values (not `in DeclarationType`): on Python 3.11
+        # `str in EnumClass` raises TypeError; 3.12 changed it. LEAN_KEYWORDS is the
+        # list of DeclarationType values, so this works on all supported versions.
+        if declaration_match and declaration_match.group(1) in LEAN_KEYWORDS:
             if declaration is not None:
                 declarations.append(declaration)
             declaration = Declaration(
