@@ -9,6 +9,24 @@
 
 llm_configs:
   # Anthropic Claude models
+  claude_opus_4_8:
+    model: "anthropic:claude-opus-4-8"
+    provider_config:
+      temperature: 1.0 # Must be set to 1.0 for thinking
+      max_tokens: null
+      effort: "high"  # "low", "medium", "high" (default), "xhigh", "max"
+      thinking:
+        type: "adaptive"
+
+  claude_opus_4_7:
+    model: "anthropic:claude-opus-4-7"
+    provider_config:
+      temperature: 1.0 # Must be set to 1.0 for thinking
+      max_tokens: null
+      effort: "high"  # "low", "medium", "high" (default), "max"
+      thinking:
+        type: "adaptive"
+
   claude_opus_4_6:
     model: "anthropic:claude-opus-4-6"
     provider_config:
