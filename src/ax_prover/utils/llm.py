@@ -121,8 +121,12 @@ class LLMClient:
 
     @property
     def profile(self) -> dict:
-        """Model metadata (max_input_tokens, max_output_tokens, capabilities, etc.)."""
-        return getattr(self._base_llm, "profile", {})
+        """Model metadata (max_input_tokens, max_output_tokens, capabilities, etc.).
+
+        Empty dict when the model has no profile (langchain sets `.profile` to None
+        for models it doesn't know yet, e.g. very new releases).
+        """
+        return getattr(self._base_llm, "profile", None) or {}
 
     async def ainvoke(
         self,

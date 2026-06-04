@@ -102,7 +102,9 @@ class ProverAgent:
         summary_llm_config = self.config.summarize_output.llm or self.config.prover_llm
         self.summary_llm_client = LLMClient(summary_llm_config)
 
-        self.max_input_tokens = self.llm_client.profile.get("max_input_tokens")
+        # New models (e.g. claude-opus-4-8) may have no langchain profile / no
+        # max_input_tokens; fall back to the standard Claude context window.
+        self.max_input_tokens = self.llm_client.profile.get("max_input_tokens") or 200_000
         if self.max_input_tokens < 1000:
             self.logger.error("Error: max_input_tokens abnormally small")
 
