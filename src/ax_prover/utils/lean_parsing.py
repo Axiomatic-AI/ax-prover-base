@@ -22,6 +22,13 @@ LEAN_KEYWORDS = [d.value for d in DeclarationType]
 # wrongly match the earlier "Treap.insert" declaration.
 DECL_NAME_END = r"(?![^\s:({\[\]},])"
 
+# Search/suggestion tactics that emit "Try this" and must not appear in a final proof.
+# These names are tactic-only — none are API methods ending in "?", so real code like
+# List.find?, xs.head?, Array.get?, m.lookup? is NOT matched. Extend as needed.
+SEARCH_TACTICS = ("apply", "exact", "rw", "simp", "simp_all", "aesop", "observe")
+# Longer names first so "simp_all?" isn't shadowed by "simp".
+SEARCH_TACTIC_PATTERN = rf"\b({'|'.join(sorted(SEARCH_TACTICS, key=len, reverse=True))})\?"
+
 
 def count_pattern(
     content: str,

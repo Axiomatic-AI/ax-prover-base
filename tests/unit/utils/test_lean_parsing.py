@@ -4,6 +4,7 @@ import pytest
 
 from ax_prover.models.declaration import Declaration, DeclarationType
 from ax_prover.utils.lean_parsing import (
+    SEARCH_TACTIC_PATTERN,
     count_pattern,
     extract_function_from_content,
     extract_theorem_name,
@@ -211,6 +212,29 @@ class TestCountPattern:
         """apply (without ?) is not flagged by the search tactics pattern."""
         code = "theorem foo : P := by\n  apply some_lemma"
         count, _ = count_pattern(code, pattern=r"\b(apply|exact)\?")
+        assert count == 0
+
+    @pytest.mark.parametrize(
+        "tactic", ["apply?", "exact?", "rw?", "simp?", "simp_all?", "aesop?", "observe?"]
+    )
+    def test_search_tactic_pattern_flags_all_search_tactics(self, tactic):
+        """SEARCH_TACTIC_PATTERN flags every known search/suggestion tactic."""
+        code = f"theorem foo : P := by\n  {tactic}"
+        count, _ = count_pattern(code, pattern=SEARCH_TACTIC_PATTERN)
+        assert count == 1
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "def f (xs : List Nat) := xs.find? (· > 0)",
+            "def g (xs : List Nat) := xs.head?",
+            "def h (a : Array Nat) := a.get? 0",
+            "def k (m : Std.HashMap Nat Nat) := m.lookup? 3",
+        ],
+    )
+    def test_search_tactic_pattern_does_not_flag_api_methods(self, code):
+        """Real API methods ending in '?' (find?/head?/get?/lookup?) are not flagged."""
+        count, _ = count_pattern(code, pattern=SEARCH_TACTIC_PATTERN)
         assert count == 0
 
     def test_sorry_pattern_does_not_match_axiom(self):
