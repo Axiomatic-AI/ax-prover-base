@@ -162,11 +162,7 @@ class TestScanHelpers:
     def test_declaration_line_prefix_name_not_confused(self):
         # `def Treap.insert` (line 1) must not be matched when locating `Treap` (line 4).
         code = (
-            "def Treap.insert (t : Treap) : Treap :=\n"
-            "  t\n"
-            "\n"
-            "structure Treap where\n"
-            "  key : Nat\n"
+            "def Treap.insert (t : Treap) : Treap :=\n  t\n\nstructure Treap where\n  key : Nat\n"
         )
         assert _declaration_line(code, "Treap") == 4
         assert _declaration_line(code, "Treap.insert") == 1
@@ -261,7 +257,7 @@ class TestLocalLeanSearcher:
         with caplog.at_level(logging.INFO):
             searcher.search("Treap")
         assert any(
-            "LocalLeanSearch: Found 3 matches for 'Treap'" in r.message for r in caplog.records
+            "LocalLeanSearch: Found 3 declarations for 'Treap'" in r.message for r in caplog.records
         )
 
     def test_search_logs_no_results_at_info(self, treap_project, caplog):
@@ -273,6 +269,44 @@ class TestLocalLeanSearcher:
         assert any(
             "LocalLeanSearch: No results for 'Nonexistent'" in r.message for r in caplog.records
         )
+
+
+class TestDeduplication:
+    """Identical declarations copied into multiple files collapse to one entry."""
+
+    DECL = "def shared (n : Nat) : Nat :=\n  n + 1\n"
+
+    def _project_with_two_copies(self, tmp_path):
+        root = tmp_path / "challenges"
+        (root / "Challenges" / "Mod").mkdir(parents=True)
+        (root / "Challenges_Remainder" / "Mod").mkdir(parents=True)
+        (root / "lakefile.toml").write_text('name = "challenges"\n')
+        (root / "Challenges" / "Mod" / "A.lean").write_text(self.DECL)
+        (root / "Challenges_Remainder" / "Mod" / "A.lean").write_text(self.DECL)
+        return root
+
+    def test_identical_declaration_deduplicated(self, tmp_path):
+        root = self._project_with_two_copies(tmp_path)
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
+        result = searcher.search("shared")
+        # One unique declaration, both paths recorded.
+        assert "Found 1 declaration(s)" in result
+        assert result.count("def shared") == 1
+        assert "(also:" in result
+        assert "Challenges/Mod/A.lean:" in result
+        assert "Challenges_Remainder/Mod/A.lean:" in result
+
+    def test_same_name_different_body_not_merged(self, tmp_path):
+        root = tmp_path / "challenges"
+        (root / "Challenges").mkdir(parents=True)
+        (root / "lakefile.toml").write_text('name = "challenges"\n')
+        (root / "Challenges" / "A.lean").write_text("def shared (n : Nat) : Nat :=\n  n + 1\n")
+        (root / "Challenges" / "B.lean").write_text("def shared (n : Nat) : Nat :=\n  n + 2\n")
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
+        result = searcher.search("shared")
+        # Different bodies -> genuinely different declarations, both shown.
+        assert "Found 2 declaration(s)" in result
+        assert "(also:" not in result
 
 
 class TestRegistration:

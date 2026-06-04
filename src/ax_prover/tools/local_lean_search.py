@@ -140,22 +140,33 @@ def _declaration_line(content: str, name: str) -> int:
 
 def _format_results(
     query: str,
-    matches: list[tuple[str, Path, int, str]],
+    declarations: list[tuple[str, str, list[tuple[Path, int]]]],
     config: SearchLeanLocalConfig,
 ) -> str:
-    """Render matches, capping by max_results and max_chars; overflow listed by name."""
-    header = f'Found {len(matches)} declaration(s) matching "{query}":'
+    """Render unique declarations, capping by max_results and max_chars.
+
+    Each declaration is (name, block, locations); locations is one or more
+    (path, line) where identical content was found. The first location heads the
+    entry and the rest are listed in an "(also: …)" suffix. Overflow (beyond the
+    caps) is listed by name.
+    """
+    header = f'Found {len(declarations)} declaration(s) matching "{query}":'
     shown: list[str] = []
     overflow: list[str] = []
     total = len(header)
-    for name, rel_path, line, block in matches:
-        entry = f"-- {rel_path}:{line}\n{block}"
+    for name, block, locations in declarations:
+        (primary_path, primary_line), *extra = locations
+        location_header = f"-- {primary_path}:{primary_line}"
+        if extra:
+            also = ", ".join(f"{path}:{line}" for path, line in extra)
+            location_header += f" (also: {also})"
+        entry = f"{location_header}\n{block}"
         within_budget = total + len(entry) + 2 <= config.max_chars
         if len(shown) < config.max_results and within_budget:
             shown.append(entry)
             total += len(entry) + 2
         else:
-            overflow.append(f"{name} ({rel_path}:{line})")
+            overflow.append(f"{name} ({primary_path}:{primary_line})")
     output = header + "\n\n" + "\n\n".join(shown)
     if overflow:
         output += "\n\nAdditional matches (not shown, refine your query): " + ", ".join(overflow)
@@ -206,7 +217,9 @@ class LocalLeanSearcher:
             logger.warning(f"LocalLeanSearch: {error}")
             return error
 
-        matches: list[tuple[str, Path, int, str]] = []
+        # Group by (name, block): identical declarations copied into several files
+        # collapse to one entry recording every location, preserving first-seen order.
+        grouped: dict[tuple[str, str], list[tuple[Path, int]]] = {}
         for lean_file in _iter_lean_files(root):
             try:
                 content = lean_file.read_text(encoding="utf-8")
@@ -218,13 +231,17 @@ class LocalLeanSearcher:
                 if block is None:
                     continue
                 line = _declaration_line(content, name)
-                matches.append((name, lean_file.relative_to(root), line, block))
+                grouped.setdefault((name, block), []).append((lean_file.relative_to(root), line))
 
-        if not matches:
+        if not grouped:
             logger.info(f"LocalLeanSearch: No results for '{query}'")
             return f'No declarations matching "{query}" found.'
-        logger.info(f"LocalLeanSearch: Found {len(matches)} matches for '{query}' under {root}")
-        return _format_results(query, matches, self.config)
+
+        declarations = [(name, block, locations) for (name, block), locations in grouped.items()]
+        logger.info(
+            f"LocalLeanSearch: Found {len(declarations)} declarations for '{query}' under {root}"
+        )
+        return _format_results(query, declarations, self.config)
 
 
 class LocalLeanSearchInput(BaseModel):
