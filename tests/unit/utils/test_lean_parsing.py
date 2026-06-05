@@ -523,3 +523,25 @@ class TestFindStrippedDeclarationNames:
         """Helpers defined after the target are also stripped."""
         code = "theorem foo : True := by trivial\n\nlemma bar : True := by trivial\n"
         assert find_stripped_declaration_names(code, "foo") == ["bar"]
+
+    def test_ignores_namespace_section_end_open(self):
+        """Structural commands (namespace/section/end/open) are never 'stripped' decls."""
+        code = "namespace Foo\n  theorem target : True := by sorry\nend Foo"
+        assert find_stripped_declaration_names(code, "target") == []
+
+    def test_ignores_file_level_open(self):
+        """A file-level `open` must not be reported as a stripped declaration."""
+        code = "open Nat\n\ntheorem target (n : Nat) : n = n := by rfl"
+        result = find_stripped_declaration_names(code, "target")
+        assert "Nat" not in result
+        assert result == []
+
+    def test_genuine_helper_still_reported_alongside_structural(self):
+        """A real standalone helper is reported even when wrapped in a namespace."""
+        code = (
+            "namespace Foo\n"
+            "lemma helper (n : Nat) : n = n := by rfl\n"
+            "theorem target (n : Nat) : n = n := by rfl\n"
+            "end Foo"
+        )
+        assert find_stripped_declaration_names(code, "target") == ["helper"]
