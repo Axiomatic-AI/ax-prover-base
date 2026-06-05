@@ -260,6 +260,39 @@ class TestLocalLeanSearcher:
         assert "Found 3 declaration(s)" in result
         assert "Additional matches" in result
 
+    def test_single_oversized_match_is_truncated_not_dropped(self, tmp_path):
+        # A single match whose block exceeds max_chars must still surface some of the
+        # body plus a truncation marker, NOT an empty body with only a "not shown" note.
+        root = tmp_path / "challenges"
+        (root / "Challenges").mkdir(parents=True)
+        (root / "lakefile.toml").write_text('name = "challenges"\n')
+        body_lines = "\n".join(f"  step_{i} := {i}" for i in range(50))
+        (root / "Challenges" / "Big.lean").write_text(f"def bigDecl : Nat :=\n{body_lines}\n  0\n")
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(max_chars=200), base_folder=str(root))
+        result = searcher.search("bigDecl")
+        assert "Found 1 declaration(s)" in result
+        # The whole oversized block must NOT be shown (it was truncated).
+        assert "step_49" not in result
+        # Part of the actual declaration body must appear.
+        assert "def bigDecl" in result
+        # A truncation marker must be present.
+        assert "truncated" in result
+        # It must NOT claim the only match is "not shown".
+        assert "Additional matches (not shown" not in result
+
+    def test_normal_small_result_not_truncated(self, tmp_path):
+        # A normal small result that fits the budget is rendered fully, no marker.
+        root = tmp_path / "challenges"
+        (root / "Challenges").mkdir(parents=True)
+        (root / "lakefile.toml").write_text('name = "challenges"\n')
+        (root / "Challenges" / "Small.lean").write_text("def smallDecl : Nat :=\n  1\n")
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
+        result = searcher.search("smallDecl")
+        assert "Found 1 declaration(s)" in result
+        assert "def smallDecl : Nat :=" in result
+        assert "truncated" not in result
+        assert "Additional matches" not in result
+
     def test_search_logs_match_count_at_info(self, treap_project, caplog):
         import logging
 
