@@ -268,22 +268,30 @@ def _format_results(
     return output
 
 
-def _collect_matches(
-    root: Path, query: str, *, body: bool
-) -> list[tuple[str, str, list[tuple[Path, int]]]]:
-    """Scan every .lean file under `root` and group matches by (qualified_name, block).
-
-    `body=False` matches declaration names; `body=True` matches query tokens as whole
-    identifiers inside declaration blocks (the fallback). Identical blocks copied across
-    files collapse to one entry recording every location.
-    """
-    grouped: dict[tuple[str, str], list[tuple[Path, int]]] = {}
+def _read_lean_files(root: Path) -> list[tuple[Path, str]]:
+    """Walk `root` once, returning (relative_path, content) for each readable .lean file."""
+    files: list[tuple[Path, str]] = []
     for lean_file in _iter_lean_files(root):
         try:
             content = lean_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             logger.debug(f"Skipping unreadable Lean file {lean_file}: {exc}")
             continue
+        files.append((lean_file.relative_to(root), content))
+    return files
+
+
+def _collect_matches(
+    files: list[tuple[Path, str]], query: str, *, body: bool
+) -> list[tuple[str, str, list[tuple[Path, int]]]]:
+    """Group matches across already-read files by (qualified_name, block).
+
+    `body=False` matches declaration names; `body=True` matches query tokens as whole
+    identifiers inside declaration blocks (the fallback). Identical blocks copied across
+    files collapse to one entry recording every location.
+    """
+    grouped: dict[tuple[str, str], list[tuple[Path, int]]] = {}
+    for relative_path, content in files:
         matches = (
             _body_matching_declarations(content, query)
             if body
@@ -294,21 +302,24 @@ def _collect_matches(
             if block is None:
                 continue
             line = _declaration_line(content, simple_name, occurrence)
-            grouped.setdefault((qualified_name, block), []).append(
-                (lean_file.relative_to(root), line)
-            )
+            grouped.setdefault((qualified_name, block), []).append((relative_path, line))
     return [(name, block, locations) for (name, block), locations in grouped.items()]
 
 
 def _search_root(
     root: Path, query: str, config: SearchLeanLocalConfig, *, label: str = "LocalLeanSearch"
 ) -> str:
-    """Search `root` by declaration name; fall back to body search only if name finds nothing."""
-    decls = _collect_matches(root, query, body=False)
+    """Search `root` by declaration name; fall back to body search only if name finds nothing.
+
+    Walks the tree and reads each file once; the body fallback reuses the cached contents
+    rather than re-walking and re-reading on a name-miss.
+    """
+    files = _read_lean_files(root)
+    decls = _collect_matches(files, query, body=False)
     if decls:
         logger.info(f"{label}: Found {len(decls)} declarations for '{query}' under {root}")
         return _format_results(query, decls, config)
-    body_decls = _collect_matches(root, query, body=True)
+    body_decls = _collect_matches(files, query, body=True)
     if body_decls:
         logger.info(f"{label}: Found {len(body_decls)} body matches for '{query}' under {root}")
         return _format_results(query, body_decls, config, body_match=True)
