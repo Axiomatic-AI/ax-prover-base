@@ -428,6 +428,17 @@ class ProverAgent:
             if build_success:
                 self.logger.info("Build successful")
 
+                # Imports/opens proposed under a locked file are dropped even when the
+                # build succeeds (import redundant / open unnecessary). Surface this on
+                # the iterative path so the proposer is not implicitly taught they worked.
+                preamble_warning = _dropped_preamble_warning(
+                    self.config.restrict_to_proof_body,
+                    state.last_proposal.imports,
+                    state.last_proposal.opens,
+                )
+                if preamble_warning:
+                    self.logger.info(preamble_warning)
+
                 if sorry_count := count_pattern(
                     state.last_proposal.code, pattern=r"\b(sorry|admit)\b"
                 )[0]:
@@ -440,6 +451,7 @@ class ProverAgent:
                     feedback = SorriesGoalStateFeedback(
                         sorry_count=sorry_count,
                         goal_state_at_sorries=goal_state_at_sorries,
+                        dropped_preamble_warning=preamble_warning,
                     )
                     return {"messages": [feedback]}
 
