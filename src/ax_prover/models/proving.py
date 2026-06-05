@@ -152,7 +152,10 @@ class ProverResult(BaseModel):
     )
     updated_theorem: str = Field(
         description=(
-            "Theorem item with proof body. Include the full theorem statement and proof.\n"
+            "The target theorem ONLY, with its proof body. Include the full theorem statement "
+            "and proof. Do NOT add standalone helper lemmas/defs/theorems: only the target is "
+            "kept before compilation, so any other top-level declaration is stripped and "
+            "references to it fail. Inline helpers with `have`/`let`/`let rec`/`where`.\n"
             "Example:\n"
             "theorem foo (n : Nat) : n + 0 = n := by\n"
             "  have h1 : n = n := rfl  -- TODO: Intermediate step\n"

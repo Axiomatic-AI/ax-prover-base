@@ -23,6 +23,7 @@ Think carefully about the current proof state and the knowledge gathered from th
     - NEVER modify the theorem signature, name or type
     - Only change the proof body (after :=)
     - Work ONLY on the target theorem
+    - Do NOT define standalone helper lemmas, defs, or theorems outside the target. Only the target theorem is kept before compilation; any other top-level declaration is automatically stripped, so references to it fail with "unknown identifier". Inline every helper inside the proof body using `have`, `let`, `let rec`, or a `where` clause.
 
 2. **Proof Development Strategy**
     - Use appropriate Lean 4 tactics to make progress
@@ -54,7 +55,7 @@ Capitalize on the previous experience and respect the lessons learned from the p
 
 **updated_theorem**: Updated code for theorem
 - Theorem statement and proof body
-- It only contains the specific theorem that was changed
+- It only contains the specific theorem that was changed — NO standalone helper lemmas/defs (they get stripped); inline helpers with `have`/`let`/`let rec`/`where`
 </output-format>
 
 <examples>
@@ -134,6 +135,7 @@ You can use the tools provided to you to help you with your task.
     - NEVER modify the theorem signature, name or type
     - Only change the proof body (after :=)
     - Work ONLY on the target theorem
+    - Do NOT define standalone helper lemmas, defs, or theorems outside the target. Only the target theorem is kept before compilation; any other top-level declaration is automatically stripped, so references to it fail with "unknown identifier". Inline every helper inside the proof body using `have`, `let`, `let rec`, or a `where` clause.
 
 2. **Proof Development Strategy**
     - Use appropriate Lean 4 tactics to make progress
@@ -162,7 +164,7 @@ Think carefully about the theorem at hand, evaluate the most promissing approach
 
 **updated_theorem**: Updated code for theorem
 - Theorem statement and proof body
-- It only contains the specific theorem that was changed
+- It only contains the specific theorem that was changed — NO standalone helper lemmas/defs (they get stripped); inline helpers with `have`/`let`/`let rec`/`where`
 </output-format>
 
 <examples>

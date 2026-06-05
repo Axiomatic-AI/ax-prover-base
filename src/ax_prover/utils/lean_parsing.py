@@ -16,6 +16,25 @@ logger = get_logger(__name__)
 # Lean keywords for declarations
 LEAN_KEYWORDS = [d.value for d in DeclarationType]
 
+# Declaration types that introduce a real, keepable named declaration (the kind that
+# `TemporaryProposal` would strip if it is not the target). Structural/non-declaration
+# entries (Import, Namespace, Section, End, Open, Notation, syntax/macro/elab, ...) are
+# excluded: they are not standalone declarations and stripping them is not the concern.
+STRIPPABLE_DECLARATION_TYPES = frozenset(
+    {
+        DeclarationType.Definition,
+        DeclarationType.Theorem,
+        DeclarationType.Lemma,
+        DeclarationType.Instance,
+        DeclarationType.Structure,
+        DeclarationType.Class,
+        DeclarationType.Inductive,
+        DeclarationType.Axiom,
+        DeclarationType.Abbrev,
+        DeclarationType.NoncomputableDef,
+        DeclarationType.NoncomputableAbbrev,
+    }
+)
 
 def count_pattern(
     content: str,
@@ -171,6 +190,23 @@ def extract_function_from_content(content: str, function_name: str) -> str | Non
         end_pos = len(content)
 
     return content[start_pos:end_pos].strip()
+
+
+def find_stripped_declaration_names(raw_code: str, target_name: str) -> list[str]:
+    """Names of top-level declarations that would be stripped when applying a proposal.
+
+    Only the target declaration survives `TemporaryProposal` application (it calls
+    `extract_function_from_content` to keep a single declaration). Any other top-level
+    `def`/`lemma`/`theorem`/etc. the proposer wrote is silently discarded, which breaks
+    references to it. This returns those soon-to-be-stripped declaration names so the
+    builder can warn the proposer.
+    """
+    declarations = list_all_declarations_in_lean_code(raw_code)
+    return [
+        d.name
+        for d in declarations
+        if d.name != target_name and d.declaration_type in STRIPPABLE_DECLARATION_TYPES
+    ]
 
 
 def get_function_from_location(base_folder: str, location: Location) -> str | None:

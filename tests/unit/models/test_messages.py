@@ -204,3 +204,21 @@ class TestFeedbackConstructors:
         msg = cls(error_output="some error")
         assert isinstance(msg, BuildFailedFeedback)
         assert "some error" in msg.content
+
+
+class TestBuildFailedFeedbackWarning:
+    """BuildFailedFeedback can carry a warning shown to the proposer."""
+
+    def test_warning_included_in_content(self):
+        """When a warning is supplied, it appears alongside the build error."""
+        msg = BuildFailedFeedback(
+            error_output="unknown identifier `contains_insert`",
+            warning="Your standalone helper lemmas were removed before compiling.",
+        )
+        assert "standalone helper lemmas were removed" in msg.content
+        assert "unknown identifier `contains_insert`" in msg.content
+
+    def test_no_warning_by_default(self):
+        """Default behaviour is unchanged when no warning is supplied."""
+        msg = BuildFailedFeedback(error_output="some error")
+        assert msg.content == "BUILD FAILED:\n\nsome error"

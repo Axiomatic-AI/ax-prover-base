@@ -89,13 +89,15 @@ class BuildFailedFeedback(FeedbackMessage):
 
     feedback_type: Literal["build_failed"] = "build_failed"
     error_output: str
+    warning: str = ""
     is_success: bool = False
 
-    def __init__(self, error_output: str, **kwargs):
-        """Initialize with formatted error message."""
+    def __init__(self, error_output: str, warning: str = "", **kwargs):
+        """Initialize with formatted error message, optionally prefixed by a warning."""
         kwargs.pop("content", None)
-        content = f"BUILD FAILED:\n\n{error_output}"
-        super().__init__(content=content, error_output=error_output, **kwargs)
+        warning_prefix = f"{warning}\n\n" if warning else ""
+        content = f"{warning_prefix}BUILD FAILED:\n\n{error_output}"
+        super().__init__(content=content, error_output=error_output, warning=warning, **kwargs)
 
 
 class ReviewApprovedFeedback(FeedbackMessage):
