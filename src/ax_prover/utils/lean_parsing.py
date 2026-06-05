@@ -22,6 +22,23 @@ LEAN_KEYWORDS = [d.value for d in DeclarationType]
 # wrongly match the earlier "Treap.insert" declaration.
 DECL_NAME_END = r"(?![^\s:({\[\]},])"
 
+# Modifiers that may precede a declaration keyword (e.g. `private def`, `partial def`).
+# `noncomputable` is intentionally absent: it is folded into the compound keywords
+# `noncomputable def` / `noncomputable abbrev` enumerated in DeclarationType.
+DECL_MODIFIERS = ("private", "protected", "partial", "unsafe", "nonrec", "scoped", "local")
+
+# Optional, inline declaration prefix matched before the keyword: zero or more attribute
+# lists (`@[simp]`, `@[simp, reducible]`) followed by zero or more modifier words. Uses
+# `[ \t]` (not `\s`) so it never spans newlines; nested `]` inside `@[...]` is unsupported.
+DECL_PREFIX = (
+    r"(?:@\[[^\]]*\][ \t]*)*"
+    rf"(?:(?:{'|'.join(DECL_MODIFIERS)})[ \t]+)*"
+)
+
+# Declaration keyword alternation, longest-first so compound keywords like
+# `noncomputable def` win over the bare `def`.
+_KEYWORDS_ALT = "|".join(re.escape(kw) for kw in sorted(LEAN_KEYWORDS, key=len, reverse=True))
+
 
 def count_pattern(
     content: str,
@@ -143,7 +160,7 @@ def extract_function_from_content(content: str, function_name: str) -> str | Non
         The complete definition block including doc comments, or None
     """
     keywords_pattern = "|".join(LEAN_KEYWORDS)
-    pattern = rf"^(\s*)({keywords_pattern})\s+{re.escape(function_name)}{DECL_NAME_END}"
+    pattern = rf"^(\s*){DECL_PREFIX}(?:{_KEYWORDS_ALT})\s+{re.escape(function_name)}{DECL_NAME_END}"
 
     match = re.search(pattern, content, re.MULTILINE)
     if not match:
@@ -165,8 +182,9 @@ def extract_function_from_content(content: str, function_name: str) -> str | Non
             break
 
     # Find next definition, doc comment, structural keyword, or top-level comment
-    # at same or lower indentation
-    end_pattern = rf"^[ \t]{{0,{start_indent}}}(/--|--|{keywords_pattern}(?:\s+|\b))"
+    # at same or lower indentation. The next declaration may itself carry an
+    # attribute/modifier prefix (e.g. `@[simp] def`), so allow DECL_PREFIX before it.
+    end_pattern = rf"^[ \t]{{0,{start_indent}}}(/--|--|{DECL_PREFIX}(?:{_KEYWORDS_ALT})(?:\s+|\b))"
 
     remaining_content = content[match.end() :]
     end_match = re.search(end_pattern, remaining_content, re.MULTILINE)
@@ -334,12 +352,16 @@ def list_all_declarations_in_lean_code(raw_code: str) -> list[Declaration]:
 
     declarations = []
     declaration = None
-    declaration_pattern = re.compile(r"(\w+)\s+([^\s:({[\]},]+)\s*(.*)")
+    # Match an optional attribute/modifier prefix, then the keyword (longest-first so
+    # `noncomputable def` beats `def`), the name, and the rest of the line.
+    declaration_pattern = re.compile(
+        rf"^{DECL_PREFIX}({_KEYWORDS_ALT})\s+([^\s:({{[\]}},]+)\s*(.*)"
+    )
     code = strip_comments(raw_code)
 
     for line in code.split("\n"):
         declaration_match = declaration_pattern.match(line.strip())
-        if declaration_match and declaration_match.group(1) in DeclarationType:
+        if declaration_match:
             if declaration is not None:
                 declarations.append(declaration)
             declaration = Declaration(
@@ -443,8 +465,7 @@ def find_declaration_at_line(content: str, line_number: int) -> str | None:
     if line_number > len(lines):
         return None
 
-    keywords_pattern = "|".join(LEAN_KEYWORDS)
-    pattern = rf"^(\s*)({keywords_pattern})\s+([\w.]+)"
+    pattern = rf"^(\s*){DECL_PREFIX}({_KEYWORDS_ALT})\s+([\w.]+)"
 
     declarations: list[tuple[str, int, int]] = []
 
