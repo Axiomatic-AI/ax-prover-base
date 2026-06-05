@@ -237,7 +237,7 @@ def _format_results(
     total = len(header)
     for name, block, locations in declarations:
         (primary_path, primary_line), *extra = locations
-        location_header = f"-- {primary_path}:{primary_line}{note}"
+        location_header = f"-- {name} — {primary_path}:{primary_line}{note}"
         if extra:
             also = ", ".join(f"{path}:{line}" for path, line in extra)
             location_header += f" (also: {also})"
