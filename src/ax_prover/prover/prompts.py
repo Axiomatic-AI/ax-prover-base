@@ -31,7 +31,7 @@ Think carefully about the current proof state and the knowledge gathered from th
 
 3. **Quality Standards**
     - Use appropriate Lean 4 tactics and syntax
-    - Reference Mathlib lemmas when applicable
+    - When searching for lemmas, match the search tool to the file's imports: if the file imports `Mathlib.*`, use the Mathlib search tool (`search_lean_search_tool`); if it imports `Cslib.*`, use the CSLib search tool (`search_cslib_tool`); for declarations from the project's own modules (any other local imports, neither Mathlib nor CSLib), use the local project search tool (`search_lean_local_tool`).
     - Add imports as needed for any lemmas or tactics you use
 </requirements>
 
@@ -141,7 +141,7 @@ You can use the tools provided to you to help you with your task.
 
 3. **Quality Standards**
     - Use appropriate Lean 4 tactics and syntax
-    - Reference Mathlib lemmas when applicable
+    - When searching for lemmas, match the search tool to the file's imports: if the file imports `Mathlib.*`, use the Mathlib search tool (`search_lean_search_tool`); if it imports `Cslib.*`, use the CSLib search tool (`search_cslib_tool`); for declarations from the project's own modules (any other local imports, neither Mathlib nor CSLib), use the local project search tool (`search_lean_local_tool`).
     - Add imports as needed for any lemmas or tactics you use
 </requirements>
 
