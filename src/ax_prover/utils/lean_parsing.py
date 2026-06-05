@@ -16,6 +16,25 @@ logger = get_logger(__name__)
 # Lean keywords for declarations
 LEAN_KEYWORDS = [d.value for d in DeclarationType]
 
+# Declaration types that introduce a real, keepable named declaration (the kind that
+# `TemporaryProposal` would strip if it is not the target). Structural/non-declaration
+# entries (Import, Namespace, Section, End, Open, Notation, syntax/macro/elab, ...) are
+# excluded: they are not standalone declarations and stripping them is not the concern.
+STRIPPABLE_DECLARATION_TYPES = frozenset(
+    {
+        DeclarationType.Definition,
+        DeclarationType.Theorem,
+        DeclarationType.Lemma,
+        DeclarationType.Instance,
+        DeclarationType.Structure,
+        DeclarationType.Class,
+        DeclarationType.Inductive,
+        DeclarationType.Axiom,
+        DeclarationType.Abbrev,
+        DeclarationType.NoncomputableDef,
+        DeclarationType.NoncomputableAbbrev,
+    }
+)
 
 def count_pattern(
     content: str,
@@ -186,7 +205,7 @@ def find_stripped_declaration_names(raw_code: str, target_name: str) -> list[str
     return [
         d.name
         for d in declarations
-        if d.name != target_name and d.declaration_type != DeclarationType.Import
+        if d.name != target_name and d.declaration_type in STRIPPABLE_DECLARATION_TYPES
     ]
 
 
