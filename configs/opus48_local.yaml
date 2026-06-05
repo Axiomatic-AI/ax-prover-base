@@ -10,8 +10,9 @@ prover:
   prover_llm: ${llm_configs.claude_opus_4_8}
   # Set proposer_tools explicitly: the imported default.yaml may resolve to a copy
   # whose proposer_tools omit search_lean_local. This guarantees the local search
-  # tool is active alongside the public LeanSearch + web search.
+  # and CSLib search tools are active alongside the public LeanSearch + web search.
   proposer_tools:
     search_lean: ${tool_configs.search_lean_search}
     search_web: ${tool_configs.search_web}
     search_lean_local: ${tool_configs.search_lean_local}
+    search_cslib: ${tool_configs.search_cslib}
