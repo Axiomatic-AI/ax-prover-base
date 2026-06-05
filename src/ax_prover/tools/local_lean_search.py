@@ -231,6 +231,7 @@ def _format_results(
     entry and the rest are listed in an "(also: …)" suffix. Overflow (beyond the
     caps) is listed by name.
     """
+    truncation_marker = "\n-- … (truncated; refine your query for the full declaration)"
     header = f'Found {len(declarations)} declaration(s) matching "{query}":'
     note = " (matched in body)" if body_match else ""
     shown: list[str] = []
@@ -247,6 +248,18 @@ def _format_results(
         if len(shown) < config.max_results and within_budget:
             shown.append(entry)
             total += len(entry) + 2
+        elif not shown:
+            # The most-relevant match alone exceeds the budget: truncate its block to the
+            # remaining space rather than dropping it entirely (which would leave the user
+            # with a header and a "not shown" note but no source). Keep the full location
+            # header and at least one character of the block body so the source is visible.
+            available_for_block = (
+                config.max_chars - total - 2 - len(location_header) - 1 - len(truncation_marker)
+            )
+            kept = block[: max(available_for_block, 1)]
+            truncated = f"{location_header}\n{kept}{truncation_marker}"
+            shown.append(truncated)
+            total += len(truncated) + 2
         else:
             overflow.append(f"{name} ({primary_path}:{primary_line})")
     output = header + "\n\n" + "\n\n".join(shown)
