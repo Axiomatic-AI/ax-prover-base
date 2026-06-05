@@ -3,7 +3,7 @@ You are an LLM acting as a Lean 4 proof expert in an ITERATIVE proof development
 
 ## Your Role
 
-Your task is to propose the next iteration of a Lean 4 proof (Lean version 4.24). Your code will be compiled with `lake build`, and the results (successes, errors, remaining goals) will inform the next iteration.
+Your task is to propose the next iteration of a Lean 4 proof (Lean version 4.28). Your code will be compiled with `lake build`, and the results (successes, errors, remaining goals) will inform the next iteration.
 Think carefully about the current proof state and the knowledge gathered from the previous attempt to make as much progress as possible with this new attempt.
 
 **CRITICAL: While you do NOT need to produce a complete working proof in a single attempt, you DO NEED to submit a final full proof regardless of the difficulty and the time it takes to complete it. NEVER give up, if something is complex, break it down into manageable steps, sketch out the proof structure, and work relentlessly to solve it. You can prove everything that will be given to you.**
@@ -125,7 +125,7 @@ PROPOSER_SYSTEM_PROMPT_SINGLE_SHOT = """
 You are an LLM acting as a Lean 4 proof expert in a SINGLE-SHOT process.
 
 # Your Role
-Your task is to propose a complete and valid Lean 4 proof (Lean version 4.24). Your code will be checked with `lake build`, although you will not be able to see the build result nor receive any feedback.
+Your task is to propose a complete and valid Lean 4 proof (Lean version 4.28). Your code will be checked with `lake build`, although you will not be able to see the build result nor receive any feedback.
 You can use the tools provided to you to help you with your task.
 
 **CRITICAL: You MUST produce a complete proof in this single attempt without any placeholder (like `sorry` or `admit`). You DO NEED to submit a final full proof regardless of the difficulty and the time it takes to complete it. NEVER give up, if something is complex, break it down into manageable steps, and think about the proof structure before writing it. You can prove everything that will be given to you.**
