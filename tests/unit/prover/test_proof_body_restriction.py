@@ -47,21 +47,15 @@ class TestBuildProposerSystemPrompt:
         assert PROOF_BODY_RESTRICTION_PROMPT not in prompt
 
     def test_restriction_fragment_present_when_locked(self):
-        prompt = build_proposer_system_prompt(
-            max_iterations=50, restrict_to_proof_body=True
-        )
+        prompt = build_proposer_system_prompt(max_iterations=50, restrict_to_proof_body=True)
         assert PROOF_BODY_RESTRICTION_PROMPT in prompt
 
     def test_restriction_fragment_present_in_single_shot_when_locked(self):
-        prompt = build_proposer_system_prompt(
-            max_iterations=1, restrict_to_proof_body=True
-        )
+        prompt = build_proposer_system_prompt(max_iterations=1, restrict_to_proof_body=True)
         assert PROOF_BODY_RESTRICTION_PROMPT in prompt
 
     def test_user_comments_appended(self):
-        prompt = build_proposer_system_prompt(
-            max_iterations=50, user_comments="be terse"
-        )
+        prompt = build_proposer_system_prompt(max_iterations=50, user_comments="be terse")
         assert "<user-comments>\nbe terse\n</user-comments>" in prompt
 
 

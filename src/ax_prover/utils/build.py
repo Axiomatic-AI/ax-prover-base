@@ -428,9 +428,7 @@ class TemporaryProposal:
                         return self
 
                 if self.proposal.opens:
-                    success = edit_opens(
-                        self.base_folder, self.location.path, self.proposal.opens
-                    )
+                    success = edit_opens(self.base_folder, self.location.path, self.proposal.opens)
                     if not success:
                         self.error = "Failed to apply opens to temp file"
                         return self

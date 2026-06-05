@@ -230,11 +230,7 @@ def build_proposer_system_prompt(
     Selects the single-shot vs iterative base prompt, appends the locked-file
     restriction when enabled, then any user comments.
     """
-    prompt = (
-        PROPOSER_SYSTEM_PROMPT_SINGLE_SHOT
-        if max_iterations == 1
-        else PROPOSER_SYSTEM_PROMPT
-    )
+    prompt = PROPOSER_SYSTEM_PROMPT_SINGLE_SHOT if max_iterations == 1 else PROPOSER_SYSTEM_PROMPT
     if restrict_to_proof_body:
         prompt += PROOF_BODY_RESTRICTION_PROMPT
     if user_comments:
