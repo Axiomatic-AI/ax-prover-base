@@ -210,13 +210,12 @@ theorem EqualCard.univ (X : Type) : EqualCard (.univ : Set X) X :=
 """
 
 PROOF_BODY_RESTRICTION_PROMPT = """
-
 <locked-file>
 IMPORTANT — THIS FILE IS LOCKED: you may ONLY edit the proof body of the target theorem.
 - Do NOT add new imports. Leave the `imports` field empty (`[]`). The file's imports are fixed and already complete for this problem.
 - Do NOT add file-level `open` statements. Leave the `opens` field empty (`[]`).
 - If you need a namespace, use `open ... in` immediately before the term or tactic block inside the proof body, or fully-qualify names.
-Anything placed in the `imports` or `opens` fields is IGNORED and never written to the file, so relying on it only causes "unknown identifier" errors.
+- Anything placed in the `imports` or `opens` fields is IGNORED and never written to the file, so relying on it only causes "unknown identifier" errors.
 </locked-file>"""
 
 
