@@ -252,6 +252,18 @@ class TestExtractFunctionFromContent:
         assert insert is not None
         assert insert.startswith("def Treap.insert")
 
+    def test_universe_polymorphic_name(self):
+        """A name followed by a universe binder `.{u}` is extractable."""
+        code = "theorem foo.{u} (x : Type u) : x = x := by rfl"
+        block = extract_function_from_content(code, "foo")
+        assert block is not None
+        assert block.startswith("theorem foo.{u}")
+
+    def test_universe_binder_does_not_match_qualified_name(self):
+        """Searching `foo` must not match a different decl `foo.bar`."""
+        code = "theorem foo.bar : True := trivial"
+        assert extract_function_from_content(code, "foo") is None
+
 
 class TestExtractTheoremName:
     """Tests for extract_theorem_name function."""
