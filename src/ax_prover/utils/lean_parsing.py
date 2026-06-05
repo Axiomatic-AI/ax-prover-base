@@ -149,12 +149,17 @@ def strip_comments(src: str) -> str:
     return "".join(out)
 
 
-def extract_function_from_content(content: str, function_name: str) -> str | None:
+def extract_function_from_content(
+    content: str, function_name: str, occurrence: int = 0
+) -> str | None:
     """Extract a function/theorem/lemma definition from Lean code.
 
     Args:
         content: Lean code content as string
         function_name: Name of the function/theorem/lemma to extract
+        occurrence: 0-based index to disambiguate when several declarations share the
+            same simple name in one file (e.g. `A.insert` and `B.insert` written as
+            `def insert` inside different namespaces). 0 selects the first.
 
     Returns:
         The complete definition block including doc comments, or None
@@ -162,9 +167,10 @@ def extract_function_from_content(content: str, function_name: str) -> str | Non
     keywords_pattern = "|".join(LEAN_KEYWORDS)
     pattern = rf"^(\s*){DECL_PREFIX}(?:{_KEYWORDS_ALT})\s+{re.escape(function_name)}{DECL_NAME_END}"
 
-    match = re.search(pattern, content, re.MULTILINE)
-    if not match:
+    matches = list(re.finditer(pattern, content, re.MULTILINE))
+    if occurrence >= len(matches):
         return None
+    match = matches[occurrence]
 
     start_pos = match.start()
     start_indent = len(match.group(1))
