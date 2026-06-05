@@ -22,6 +22,7 @@ from ..utils.lean_parsing import (
     LEAN_KEYWORDS,
     extract_function_from_content,
     list_all_declarations_in_lean_code,
+    non_comment_matches,
 )
 from .registry import register_tool, tool_name_from_type
 
@@ -206,7 +207,7 @@ def _declaration_line(content: str, name: str, occurrence: int = 0) -> int:
     line. Falls back to 1 if the declaration keyword cannot be located.
     """
     pattern = rf"^\s*{DECL_PREFIX}(?:{_KEYWORDS_PATTERN})\s+{re.escape(name)}{DECL_NAME_END}"
-    matches = list(re.finditer(pattern, content, re.MULTILINE))
+    matches = non_comment_matches(pattern, content)
     if occurrence >= len(matches):
         return 1
     match = matches[occurrence]

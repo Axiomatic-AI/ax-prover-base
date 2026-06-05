@@ -324,6 +324,30 @@ class TestExtractFunctionFromContent:
         assert "open Nat in" not in block
         assert block.startswith("theorem target")
 
+    def test_commented_decl_skipped_block_comment(self):
+        """A `def foo` inside a block comment must not be selected as occurrence 0."""
+        code = "/-\ndef foo := 1\n-/\ndef foo := 2\n"
+        block = extract_function_from_content(code, "foo", 0)
+        assert block is not None
+        assert block.startswith("def foo := 2")
+        assert ":= 1" not in block
+
+    def test_commented_decl_skipped_line_comment(self):
+        """A `def foo` after a `--` line comment must not be selected as occurrence 0."""
+        code = "-- def foo := 1\ndef foo := 2\n"
+        block = extract_function_from_content(code, "foo", 0)
+        assert block is not None
+        assert block.startswith("def foo := 2")
+        assert ":= 1" not in block
+
+    def test_no_commented_decls_occurrence_unchanged(self):
+        """With no commented decls, occurrence indexing is unchanged (regression guard)."""
+        code = "def foo := 1\n\ndef foo := 2\n"
+        first = extract_function_from_content(code, "foo", 0)
+        second = extract_function_from_content(code, "foo", 1)
+        assert first is not None and first.startswith("def foo := 1")
+        assert second is not None and second.startswith("def foo := 2")
+
 
 class TestExtractTheoremName:
     """Tests for extract_theorem_name function."""
