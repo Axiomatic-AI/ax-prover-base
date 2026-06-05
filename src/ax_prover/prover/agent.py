@@ -48,6 +48,7 @@ from ..utils.lean_interact import get_goal_state_at_sorries
 from ..utils.lean_parsing import (
     SEARCH_TACTIC_PATTERN,
     find_declaration_by_name,
+    find_stripped_declaration_names,
     list_all_declarations_in_lean_code,
     strip_comments,
 )
@@ -325,6 +326,7 @@ class ProverAgent:
         if not state.last_proposal:
             raise Exception("Builder expects proposal")
 
+        stripped_declarations: list[str] = []
         if state.item.location:
             declarations = list_all_declarations_in_lean_code(state.last_proposal.code)
             proposed_proof = find_declaration_by_name(declarations, state.item.location.name)
@@ -334,6 +336,18 @@ class ProverAgent:
                 )
                 feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
                 return {"messages": [feedback]}
+
+            # Only the target declaration survives application; any standalone helper
+            # lemmas/defs the proposer wrote are stripped before compilation, breaking
+            # references to them. Detect them so we can explain build failures.
+            stripped_declarations = find_stripped_declaration_names(
+                state.last_proposal.code, state.item.location.name
+            )
+            if stripped_declarations:
+                self.logger.info(
+                    f"Proposed code defines standalone declarations that will be stripped: "
+                    f"{', '.join(stripped_declarations)}"
+                )
 
         with TemporaryProposal(
             self.base_folder, state.item.location, state.last_proposal
@@ -412,7 +426,21 @@ class ProverAgent:
         state.metrics.compilation_error_count += 1
         self.logger.info("Build failed with errors:")
         self.logger.debug(message)
-        feedback = BuildFailedFeedback(error_output=self._build_error_processing(message))
+        warning = ""
+        if stripped_declarations:
+            names = ", ".join(f"`{n}`" for n in stripped_declarations)
+            warning = (
+                f"WARNING — STANDALONE DECLARATIONS STRIPPED: your proposal defined "
+                f"{len(stripped_declarations)} declaration(s) outside the target theorem "
+                f"'{state.item.location.name}': {names}. Only the target theorem is kept before "
+                "compilation, so these were removed and any reference to them fails with "
+                "'unknown identifier'. Do NOT define separate `lemma`/`def`/`theorem`; inline "
+                "every helper inside the proof body using `have`, `let`, `let rec`, or a `where` "
+                "clause."
+            )
+        feedback = BuildFailedFeedback(
+            error_output=self._build_error_processing(message), warning=warning
+        )
         return {
             "messages": [feedback],
             "metrics": state.metrics,

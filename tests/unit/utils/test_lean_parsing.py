@@ -10,6 +10,7 @@ from ax_prover.utils.lean_parsing import (
     extract_theorem_name,
     find_declaration_at_line,
     find_declaration_by_name,
+    find_stripped_declaration_names,
     list_all_declarations_in_lean_code,
     normalize_location,
     strip_comments,
@@ -486,3 +487,39 @@ class TestModifiersAndAttributes:
     def test_sorry_inside_noncomputable_def_attributed_to_it(self):
         code = "noncomputable def foo : Nat := by\n  sorry"
         assert find_declaration_at_line(code, 2) == "foo"
+
+
+# Code where the proposer wrote standalone helper lemmas *before* the target
+# theorem. When the proposal is applied, only the target declaration survives
+# (see TemporaryProposal -> extract_function_from_content), so these helpers are
+# silently stripped and the target's references to them break.
+STRIPPED_HELPERS_CODE = r"""
+lemma contains_insert (n : Nat) : n = n := by rfl
+
+lemma contains_merge (n : Nat) : n = n := by rfl
+
+theorem decrease_priority_correctness (n : Nat) : n + 0 = n := by
+  rw [contains_insert]
+  rfl
+"""
+
+
+class TestFindStrippedDeclarationNames:
+    """Tests for detecting standalone declarations that get stripped on apply."""
+
+    def test_lists_helpers_other_than_target(self):
+        """Returns names of every top-level declaration except the target."""
+        result = find_stripped_declaration_names(
+            STRIPPED_HELPERS_CODE, "decrease_priority_correctness"
+        )
+        assert result == ["contains_insert", "contains_merge"]
+
+    def test_empty_when_only_target(self):
+        """No extra declarations -> nothing gets stripped."""
+        code = "theorem foo (n : Nat) : n + 0 = n := by simp"
+        assert find_stripped_declaration_names(code, "foo") == []
+
+    def test_detects_helper_after_target(self):
+        """Helpers defined after the target are also stripped."""
+        code = "theorem foo : True := by trivial\n\nlemma bar : True := by trivial\n"
+        assert find_stripped_declaration_names(code, "foo") == ["bar"]
