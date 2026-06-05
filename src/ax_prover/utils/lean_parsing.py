@@ -364,6 +364,69 @@ def extract_function_from_content(
     return content[start_pos:end_pos].strip()
 
 
+def _iter_namespaced_declarations(content: str):
+    """Yield (declaration, qualified_name, occurrence) for each named declaration.
+
+    Tracks namespace/section scope to build each declaration's namespace-qualified name
+    and counts per-simple-name occurrences (aligned with `extract_function_from_content`'s
+    re.finditer ordering). This mirrors the namespace-aware enumeration in
+    `tools.local_lean_search._iter_searchable`; it lives here so both the search tool and
+    `utils.build` can resolve a target without `utils` importing from `tools` (which would
+    create a circular / layering dependency).
+    """
+    namespace_stack: list[str | None] = []
+    name_counts: dict[str, int] = {}
+    for declaration in list_all_declarations_in_lean_code(content):
+        occurrence = name_counts.get(declaration.name, 0)
+        name_counts[declaration.name] = occurrence + 1
+        declaration_type = declaration.declaration_type
+        if declaration_type == DeclarationType.Namespace:
+            namespace_stack.append(declaration.name)
+            continue
+        if declaration_type == DeclarationType.Section:
+            namespace_stack.append(None)  # sections do not contribute to the name
+            continue
+        if declaration_type == DeclarationType.End:
+            if namespace_stack:
+                namespace_stack.pop()
+            continue
+        if declaration_type not in STRIPPABLE_DECLARATION_TYPES:
+            continue
+        prefix = ".".join(part for part in namespace_stack if part)
+        if prefix and not declaration.name.startswith(f"{prefix}."):
+            qualified = f"{prefix}.{declaration.name}"
+        else:
+            qualified = declaration.name
+        yield declaration, qualified, occurrence
+
+
+def resolve_target_occurrence(content: str, target_name: str) -> tuple[str, int] | None:
+    """Resolve `target_name` to the `(simple_name, occurrence)` of its declaration in `content`.
+
+    `target_name` may be namespace-qualified (`Treap.insert`) or simple (`insert`). The
+    namespace-qualified name of each declaration is computed (tracking `namespace`/`section`
+    scope), then a match is sought where the qualified name equals `target_name`, or — for a
+    simple `target_name` — where the qualified name equals it or ends with `.<target_name>`.
+
+    `occurrence` is the 0-based index among declarations sharing the SIMPLE name, suitable
+    for passing to `extract_function_from_content`.
+
+    Returns None when there is no match or the match is ambiguous (more than one distinct
+    declaration matches), so callers can fall back to the conservative occurrence-0 default.
+    """
+    matches: list[tuple[str, int]] = []
+    is_qualified = "." in target_name
+    for declaration, qualified, occurrence in _iter_namespaced_declarations(content):
+        if qualified == target_name:
+            matches.append((declaration.name, occurrence))
+        elif not is_qualified and qualified.endswith(f".{target_name}"):
+            matches.append((declaration.name, occurrence))
+
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
 def find_stripped_declaration_names(raw_code: str, target_name: str) -> list[str]:
     """Names of top-level declarations that would be stripped when applying a proposal.
 
