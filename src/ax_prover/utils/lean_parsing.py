@@ -29,6 +29,23 @@ SEARCH_TACTICS = ("apply", "exact", "rw", "simp", "simp_all", "aesop", "observe"
 # Longer names first so "simp_all?" isn't shadowed by "simp".
 SEARCH_TACTIC_PATTERN = rf"\b({'|'.join(sorted(SEARCH_TACTICS, key=len, reverse=True))})\?"
 
+# Modifiers that may precede a declaration keyword (e.g. `private def`, `partial def`).
+# `noncomputable` is intentionally absent: it is folded into the compound keywords
+# `noncomputable def` / `noncomputable abbrev` enumerated in DeclarationType.
+DECL_MODIFIERS = ("private", "protected", "partial", "unsafe", "nonrec", "scoped", "local")
+
+# Optional, inline declaration prefix matched before the keyword: zero or more attribute
+# lists (`@[simp]`, `@[simp, reducible]`) followed by zero or more modifier words. Uses
+# `[ \t]` (not `\s`) so it never spans newlines; nested `]` inside `@[...]` is unsupported.
+DECL_PREFIX = (
+    r"(?:@\[[^\]]*\][ \t]*)*"
+    rf"(?:(?:{'|'.join(DECL_MODIFIERS)})[ \t]+)*"
+)
+
+# Declaration keyword alternation, longest-first so compound keywords like
+# `noncomputable def` win over the bare `def`.
+_KEYWORDS_ALT = "|".join(re.escape(kw) for kw in sorted(LEAN_KEYWORDS, key=len, reverse=True))
+
 
 def count_pattern(
     content: str,
@@ -139,22 +156,28 @@ def strip_comments(src: str) -> str:
     return "".join(out)
 
 
-def extract_function_from_content(content: str, function_name: str) -> str | None:
+def extract_function_from_content(
+    content: str, function_name: str, occurrence: int = 0
+) -> str | None:
     """Extract a function/theorem/lemma definition from Lean code.
 
     Args:
         content: Lean code content as string
         function_name: Name of the function/theorem/lemma to extract
+        occurrence: 0-based index to disambiguate when several declarations share the
+            same simple name in one file (e.g. `A.insert` and `B.insert` written as
+            `def insert` inside different namespaces). 0 selects the first.
 
     Returns:
         The complete definition block including doc comments, or None
     """
     keywords_pattern = "|".join(LEAN_KEYWORDS)
-    pattern = rf"^(\s*)({keywords_pattern})\s+{re.escape(function_name)}{DECL_NAME_END}"
+    pattern = rf"^(\s*){DECL_PREFIX}(?:{_KEYWORDS_ALT})\s+{re.escape(function_name)}{DECL_NAME_END}"
 
-    match = re.search(pattern, content, re.MULTILINE)
-    if not match:
+    matches = list(re.finditer(pattern, content, re.MULTILINE))
+    if occurrence >= len(matches):
         return None
+    match = matches[occurrence]
 
     start_pos = match.start()
     start_indent = len(match.group(1))
@@ -172,8 +195,9 @@ def extract_function_from_content(content: str, function_name: str) -> str | Non
             break
 
     # Find next definition, doc comment, structural keyword, or top-level comment
-    # at same or lower indentation
-    end_pattern = rf"^[ \t]{{0,{start_indent}}}(/--|--|{keywords_pattern}(?:\s+|\b))"
+    # at same or lower indentation. The next declaration may itself carry an
+    # attribute/modifier prefix (e.g. `@[simp] def`), so allow DECL_PREFIX before it.
+    end_pattern = rf"^[ \t]{{0,{start_indent}}}(/--|--|{DECL_PREFIX}(?:{_KEYWORDS_ALT})(?:\s+|\b))"
 
     remaining_content = content[match.end() :]
     end_match = re.search(end_pattern, remaining_content, re.MULTILINE)
@@ -341,15 +365,18 @@ def list_all_declarations_in_lean_code(raw_code: str) -> list[Declaration]:
 
     declarations = []
     declaration = None
-    declaration_pattern = re.compile(r"(\w+)\s+([^\s:({[\]},]+)\s*(.*)")
+    # Match an optional attribute/modifier prefix, then the keyword (longest-first so
+    # `noncomputable def` beats `def`), the name, and the rest of the line.
+    declaration_pattern = re.compile(
+        rf"^{DECL_PREFIX}({_KEYWORDS_ALT})\s+([^\s:({{[\]}},]+)\s*(.*)"
+    )
     code = strip_comments(raw_code)
 
     for line in code.split("\n"):
         declaration_match = declaration_pattern.match(line.strip())
-        # Match against the keyword values (not `in DeclarationType`): on Python 3.11
-        # `str in EnumClass` raises TypeError; 3.12 changed it. LEAN_KEYWORDS is the
-        # list of DeclarationType values, so this works on all supported versions.
-        if declaration_match and declaration_match.group(1) in LEAN_KEYWORDS:
+        # The regex's keyword group is built from LEAN_KEYWORDS, so a match already
+        # guarantees a valid declaration keyword — no extra membership check needed.
+        if declaration_match:
             if declaration is not None:
                 declarations.append(declaration)
             declaration = Declaration(
@@ -453,8 +480,7 @@ def find_declaration_at_line(content: str, line_number: int) -> str | None:
     if line_number > len(lines):
         return None
 
-    keywords_pattern = "|".join(LEAN_KEYWORDS)
-    pattern = rf"^(\s*)({keywords_pattern})\s+([\w.]+)"
+    pattern = rf"^(\s*){DECL_PREFIX}({_KEYWORDS_ALT})\s+([\w.]+)"
 
     declarations: list[tuple[str, int, int]] = []
 

@@ -18,6 +18,7 @@ from ..models.declaration import DeclarationType
 from ..utils import get_logger
 from ..utils.lean_parsing import (
     DECL_NAME_END,
+    DECL_PREFIX,
     LEAN_KEYWORDS,
     extract_function_from_content,
     list_all_declarations_in_lean_code,
@@ -88,7 +89,10 @@ def _walk_down_for_roots(start: Path) -> list[Path]:
     return roots
 
 
-_KEYWORDS_PATTERN = "|".join(re.escape(keyword) for keyword in LEAN_KEYWORDS)
+# Longest-first so compound keywords like `noncomputable def` win over the bare `def`.
+_KEYWORDS_PATTERN = "|".join(
+    re.escape(keyword) for keyword in sorted(LEAN_KEYWORDS, key=len, reverse=True)
+)
 
 
 def _iter_lean_files(root: Path) -> Iterator[Path]:
@@ -100,37 +104,68 @@ def _iter_lean_files(root: Path) -> Iterator[Path]:
                 yield Path(dirpath) / filename
 
 
-def _matching_declaration_names(content: str, query: str) -> list[str]:
-    """Names of searchable declarations matching `query` (case-insensitive).
+def _matching_declaration_names(content: str, query: str) -> list[tuple[str, str, int]]:
+    """`(simple_name, qualified_name, occurrence)` for declarations matching `query`.
 
-    A multi-word query matches names that contain every whitespace-separated
-    token, so "Treap insert" matches `Treap.insert` (a single-word query keeps
-    the original substring behaviour). Preserves source order, de-duplicated.
+    Matching is case-insensitive against the namespace-QUALIFIED name, so a
+    multi-word query like "BinaryTree insert" matches a `def insert` declared inside
+    `namespace BinaryTree` as well as a top-level `def BinaryTree.insert`. The simple
+    name (as written in source) is returned alongside, since block extraction and line
+    lookup operate on the source text. `occurrence` is the 0-based index of this
+    declaration among all declarations sharing its simple name in the file, so callers
+    can disambiguate the correct block/line when the same simple name appears in several
+    namespaces. Preserves source order, de-duplicated by qualified name.
     """
     tokens = query.lower().split()
     if not tokens:
         return []
-    names: list[str] = []
+    results: list[tuple[str, str, int]] = []
     seen: set[str] = set()
+    namespace_stack: list[str | None] = []
+    # Count occurrences of each simple name across ALL declarations, so the index aligns
+    # with re.finditer order in extract_function_from_content / _declaration_line.
+    name_counts: dict[str, int] = {}
     for declaration in list_all_declarations_in_lean_code(content):
-        if declaration.declaration_type not in SEARCHABLE_TYPES:
+        occurrence = name_counts.get(declaration.name, 0)
+        name_counts[declaration.name] = occurrence + 1
+        declaration_type = declaration.declaration_type
+        if declaration_type == DeclarationType.Namespace:
+            namespace_stack.append(declaration.name)
             continue
-        name_lower = declaration.name.lower()
-        if all(token in name_lower for token in tokens) and declaration.name not in seen:
-            seen.add(declaration.name)
-            names.append(declaration.name)
-    return names
+        if declaration_type == DeclarationType.Section:
+            namespace_stack.append(None)  # sections do not contribute to the name
+            continue
+        if declaration_type == DeclarationType.End:
+            if namespace_stack:
+                namespace_stack.pop()
+            continue
+        if declaration_type not in SEARCHABLE_TYPES:
+            continue
+        prefix = ".".join(part for part in namespace_stack if part)
+        if prefix and not declaration.name.startswith(f"{prefix}."):
+            qualified = f"{prefix}.{declaration.name}"
+        else:
+            qualified = declaration.name
+        if qualified in seen:
+            continue
+        if all(token in qualified.lower() for token in tokens):
+            seen.add(qualified)
+            results.append((declaration.name, qualified, occurrence))
+    return results
 
 
-def _declaration_line(content: str, name: str) -> int:
+def _declaration_line(content: str, name: str, occurrence: int = 0) -> int:
     """1-based line number where the declaration of `name` begins (keyword line).
 
-    Falls back to 1 if the declaration keyword cannot be located.
+    `occurrence` selects the N-th (0-based) declaration with this simple name, matching
+    extract_function_from_content, so duplicates across namespaces resolve to the right
+    line. Falls back to 1 if the declaration keyword cannot be located.
     """
-    pattern = rf"^\s*(?:{_KEYWORDS_PATTERN})\s+{re.escape(name)}{DECL_NAME_END}"
-    match = re.search(pattern, content, re.MULTILINE)
-    if match is None:
+    pattern = rf"^\s*{DECL_PREFIX}(?:{_KEYWORDS_PATTERN})\s+{re.escape(name)}{DECL_NAME_END}"
+    matches = list(re.finditer(pattern, content, re.MULTILINE))
+    if occurrence >= len(matches):
         return 1
+    match = matches[occurrence]
     # With re.MULTILINE, `^` anchors at a line start and the following `\s*` can span
     # blank lines and indentation, so match.start() may precede the keyword line.
     # Advance past the matched leading whitespace to the keyword itself.
@@ -217,8 +252,8 @@ class LocalLeanSearcher:
             logger.warning(f"LocalLeanSearch: {error}")
             return error
 
-        # Group by (name, block): identical declarations copied into several files
-        # collapse to one entry recording every location, preserving first-seen order.
+        # Group by (qualified_name, block): identical declarations copied into several
+        # files collapse to one entry recording every location, preserving first-seen order.
         grouped: dict[tuple[str, str], list[tuple[Path, int]]] = {}
         for lean_file in _iter_lean_files(root):
             try:
@@ -226,12 +261,16 @@ class LocalLeanSearcher:
             except (OSError, UnicodeDecodeError) as exc:
                 logger.debug(f"Skipping unreadable Lean file {lean_file}: {exc}")
                 continue
-            for name in _matching_declaration_names(content, query):
-                block = extract_function_from_content(content, name)
+            for simple_name, qualified_name, occurrence in _matching_declaration_names(
+                content, query
+            ):
+                block = extract_function_from_content(content, simple_name, occurrence)
                 if block is None:
                     continue
-                line = _declaration_line(content, name)
-                grouped.setdefault((name, block), []).append((lean_file.relative_to(root), line))
+                line = _declaration_line(content, simple_name, occurrence)
+                grouped.setdefault((qualified_name, block), []).append(
+                    (lean_file.relative_to(root), line)
+                )
 
         if not grouped:
             logger.info(f"LocalLeanSearch: No results for '{query}'")
