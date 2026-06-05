@@ -56,14 +56,38 @@ from .memory import BaseMemory
 from .prompts import (
     ATTEMPT_TEMPLATE,
     PREVIOUS_ATTEMPT_USER_PROMPT,
-    PROPOSER_SYSTEM_PROMPT,
-    PROPOSER_SYSTEM_PROMPT_SINGLE_SHOT,
     PROPOSER_USER_PROMPT,
     REVIEWER_SYSTEM_PROMPT,
     REVIEWER_USER_PROMPT,
     SUMMARIZE_OUTPUT_SYSTEM_PROMPT,
     SUMMARIZE_OUTPUT_USER_PROMPT,
+    build_proposer_system_prompt,
 )
+
+
+def _dropped_preamble_warning(
+    restrict_to_proof_body: bool,
+    imports: list[str],
+    opens: list[str],
+) -> str:
+    """Warn the proposer that proposed imports/opens were dropped under a locked file.
+
+    Returns an empty string when the restriction is off or nothing was proposed.
+    """
+    if not restrict_to_proof_body or not (imports or opens):
+        return ""
+    parts = []
+    if imports:
+        parts.append("import(s) " + ", ".join(f"`{name}`" for name in imports))
+    if opens:
+        parts.append("open(s) " + ", ".join(f"`{name}`" for name in opens))
+    proposed = " and ".join(parts)
+    return (
+        f"WARNING — IMPORTS/OPENS IGNORED: you proposed {proposed}, but this file is "
+        "locked — only the proof body may change, so they were NOT applied. All necessary "
+        "imports are already present; use `open ... in` inside the proof body or "
+        "fully-qualify names instead of adding file-level imports/opens."
+    )
 
 
 class ProverAgent:
@@ -253,14 +277,11 @@ class ProverAgent:
 
         complete_file = read_file(self.base_folder, state.item.location.path)
 
-        system_prompt = (
-            PROPOSER_SYSTEM_PROMPT_SINGLE_SHOT
-            if self.config.max_iterations == 1
-            else PROPOSER_SYSTEM_PROMPT
+        system_prompt = build_proposer_system_prompt(
+            max_iterations=self.config.max_iterations,
+            restrict_to_proof_body=self.config.restrict_to_proof_body,
+            user_comments=self.config.user_comments,
         )
-
-        if self.config.user_comments:
-            system_prompt += f"\n\n<user-comments>\n{self.config.user_comments}\n</user-comments>"
 
         query = PROPOSER_USER_PROMPT.format(
             target_theorem=state.item.location.formatted_context,
@@ -333,7 +354,10 @@ class ProverAgent:
                 return {"messages": [feedback]}
 
         with TemporaryProposal(
-            self.base_folder, state.item.location, state.last_proposal
+            self.base_folder,
+            state.item.location,
+            state.last_proposal,
+            restrict_to_proof_body=self.config.restrict_to_proof_body,
         ) as applier:
             if not applier.success:
                 feedback = BuildFailedFeedback(error_output=applier.error)
@@ -368,6 +392,17 @@ class ProverAgent:
             if build_success:
                 self.logger.info("Build successful")
 
+                # Imports/opens proposed under a locked file are dropped even when the
+                # build succeeds (import redundant / open unnecessary). Surface this on
+                # the iterative path so the proposer is not implicitly taught they worked.
+                preamble_warning = _dropped_preamble_warning(
+                    self.config.restrict_to_proof_body,
+                    state.last_proposal.imports,
+                    state.last_proposal.opens,
+                )
+                if preamble_warning:
+                    self.logger.info(preamble_warning)
+
                 if sorry_count := count_pattern(
                     state.last_proposal.code, pattern=r"\b(sorry|admit)\b"
                 )[0]:
@@ -380,6 +415,7 @@ class ProverAgent:
                     feedback = SorriesGoalStateFeedback(
                         sorry_count=sorry_count,
                         goal_state_at_sorries=goal_state_at_sorries,
+                        dropped_preamble_warning=preamble_warning,
                     )
                     return {"messages": [feedback]}
 
@@ -409,7 +445,15 @@ class ProverAgent:
         state.metrics.compilation_error_count += 1
         self.logger.info("Build failed with errors:")
         self.logger.debug(message)
-        feedback = BuildFailedFeedback(error_output=self._build_error_processing(message))
+        error_output = self._build_error_processing(message)
+        preamble_warning = _dropped_preamble_warning(
+            self.config.restrict_to_proof_body,
+            state.last_proposal.imports,
+            state.last_proposal.opens,
+        )
+        if preamble_warning:
+            error_output = f"{preamble_warning}\n\n{error_output}"
+        feedback = BuildFailedFeedback(error_output=error_output)
         return {
             "messages": [feedback],
             "metrics": state.metrics,
@@ -455,7 +499,10 @@ class ProverAgent:
         if actual_approved:
             output = ReviewApprovedFeedback(comments=reasoning)
             with TemporaryProposal(
-                self.base_folder, state.item.location, state.last_proposal
+                self.base_folder,
+                state.item.location,
+                state.last_proposal,
+                restrict_to_proof_body=self.config.restrict_to_proof_body,
             ) as applier:
                 applier.apply_permanently()
         else:

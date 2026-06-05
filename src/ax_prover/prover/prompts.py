@@ -209,6 +209,35 @@ theorem EqualCard.univ (X : Type) : EqualCard (.univ : Set X) X :=
 </examples>
 """
 
+PROOF_BODY_RESTRICTION_PROMPT = """
+<locked-file>
+IMPORTANT — THIS FILE IS LOCKED: you may ONLY edit the proof body of the target theorem.
+- Do NOT add new imports. Leave the `imports` field empty (`[]`). The file's imports are fixed and already complete for this problem.
+- Do NOT add file-level `open` statements. Leave the `opens` field empty (`[]`).
+- If you need a namespace, use `open ... in` immediately before the term or tactic block inside the proof body, or fully-qualify names.
+- Anything placed in the `imports` or `opens` fields is IGNORED and never written to the file, so relying on it only causes "unknown identifier" errors.
+</locked-file>"""
+
+
+def build_proposer_system_prompt(
+    *,
+    max_iterations: int,
+    restrict_to_proof_body: bool = False,
+    user_comments: str | None = None,
+) -> str:
+    """Assemble the proposer system prompt from config-driven options.
+
+    Selects the single-shot vs iterative base prompt, appends the locked-file
+    restriction when enabled, then any user comments.
+    """
+    prompt = PROPOSER_SYSTEM_PROMPT_SINGLE_SHOT if max_iterations == 1 else PROPOSER_SYSTEM_PROMPT
+    if restrict_to_proof_body:
+        prompt += PROOF_BODY_RESTRICTION_PROMPT
+    if user_comments:
+        prompt += f"\n\n<user-comments>\n{user_comments}\n</user-comments>"
+    return prompt
+
+
 PROPOSER_USER_PROMPT = """
 Complete the proof for the following target theorem within the given file.
 
