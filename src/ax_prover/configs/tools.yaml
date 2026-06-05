@@ -43,3 +43,8 @@ tool_configs:
     tool_type: search_lean_local
     max_results: 6
     max_chars: 4000
+
+  search_cslib:
+    tool_type: search_cslib
+    max_results: 6
+    max_chars: 4000

@@ -95,6 +95,18 @@ _KEYWORDS_PATTERN = "|".join(
 )
 
 
+# Characters that make up a Lean identifier; a body token matches only when flanked by
+# non-identifier characters (so "query_aux" won't hit inside "query_auxN" and "insert"
+# won't hit inside "Treap.insert").
+_IDENT_CHAR = r"[0-9A-Za-z_'.]"
+
+
+def _identifier_match(token: str, text: str) -> bool:
+    """True if `token` appears in `text` as a whole identifier (case-insensitive)."""
+    pattern = rf"(?<!{_IDENT_CHAR}){re.escape(token)}(?!{_IDENT_CHAR})"
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
 def _iter_lean_files(root: Path) -> Iterator[Path]:
     """Yield every .lean file under `root`, skipping the `.lake/` directory."""
     for dirpath, dirnames, filenames in os.walk(root):
@@ -104,26 +116,14 @@ def _iter_lean_files(root: Path) -> Iterator[Path]:
                 yield Path(dirpath) / filename
 
 
-def _matching_declaration_names(content: str, query: str) -> list[tuple[str, str, int]]:
-    """`(simple_name, qualified_name, occurrence)` for declarations matching `query`.
+def _iter_searchable(content: str):
+    """Yield (declaration, qualified_name, occurrence) for each searchable declaration.
 
-    Matching is case-insensitive against the namespace-QUALIFIED name, so a
-    multi-word query like "BinaryTree insert" matches a `def insert` declared inside
-    `namespace BinaryTree` as well as a top-level `def BinaryTree.insert`. The simple
-    name (as written in source) is returned alongside, since block extraction and line
-    lookup operate on the source text. `occurrence` is the 0-based index of this
-    declaration among all declarations sharing its simple name in the file, so callers
-    can disambiguate the correct block/line when the same simple name appears in several
-    namespaces. Preserves source order, de-duplicated by qualified name.
+    Tracks namespace/section scope to build the qualified name and counts per-simple-name
+    occurrences (aligned with re.finditer order in extract_function_from_content /
+    _declaration_line). Shared by name matching and the body-search fallback.
     """
-    tokens = query.lower().split()
-    if not tokens:
-        return []
-    results: list[tuple[str, str, int]] = []
-    seen: set[str] = set()
     namespace_stack: list[str | None] = []
-    # Count occurrences of each simple name across ALL declarations, so the index aligns
-    # with re.finditer order in extract_function_from_content / _declaration_line.
     name_counts: dict[str, int] = {}
     for declaration in list_all_declarations_in_lean_code(content):
         occurrence = name_counts.get(declaration.name, 0)
@@ -146,9 +146,53 @@ def _matching_declaration_names(content: str, query: str) -> list[tuple[str, str
             qualified = f"{prefix}.{declaration.name}"
         else:
             qualified = declaration.name
+        yield declaration, qualified, occurrence
+
+
+def _matching_declaration_names(content: str, query: str) -> list[tuple[str, str, int]]:
+    """`(simple_name, qualified_name, occurrence)` for declarations matching `query`.
+
+    Matching is case-insensitive against the namespace-QUALIFIED name, so a
+    multi-word query like "BinaryTree insert" matches a `def insert` declared inside
+    `namespace BinaryTree` as well as a top-level `def BinaryTree.insert`. The simple
+    name (as written in source) is returned alongside, since block extraction and line
+    lookup operate on the source text. `occurrence` is the 0-based index of this
+    declaration among all declarations sharing its simple name in the file, so callers
+    can disambiguate the correct block/line when the same simple name appears in several
+    namespaces. Preserves source order, de-duplicated by qualified name.
+    """
+    tokens = query.lower().split()
+    if not tokens:
+        return []
+    results: list[tuple[str, str, int]] = []
+    seen: set[str] = set()
+    for declaration, qualified, occurrence in _iter_searchable(content):
         if qualified in seen:
             continue
         if all(token in qualified.lower() for token in tokens):
+            seen.add(qualified)
+            results.append((declaration.name, qualified, occurrence))
+    return results
+
+
+def _body_matching_declarations(content: str, query: str) -> list[tuple[str, str, int]]:
+    """`(simple_name, qualified_name, occurrence)` for declarations whose block text contains
+    every query token as a whole identifier. Fallback for identifiers that are not declaration
+    names themselves (e.g. `where`/`let rec` helpers, inductive constructors). De-duplicated by
+    qualified name, source order preserved.
+    """
+    tokens = query.lower().split()
+    if not tokens:
+        return []
+    results: list[tuple[str, str, int]] = []
+    seen: set[str] = set()
+    for declaration, qualified, occurrence in _iter_searchable(content):
+        if qualified in seen:
+            continue
+        block = extract_function_from_content(content, declaration.name, occurrence)
+        if block is None:
+            continue
+        if all(_identifier_match(token, block) for token in tokens):
             seen.add(qualified)
             results.append((declaration.name, qualified, occurrence))
     return results
@@ -177,6 +221,7 @@ def _format_results(
     query: str,
     declarations: list[tuple[str, str, list[tuple[Path, int]]]],
     config: SearchLeanLocalConfig,
+    body_match: bool = False,
 ) -> str:
     """Render unique declarations, capping by max_results and max_chars.
 
@@ -186,12 +231,13 @@ def _format_results(
     caps) is listed by name.
     """
     header = f'Found {len(declarations)} declaration(s) matching "{query}":'
+    note = " (matched in body)" if body_match else ""
     shown: list[str] = []
     overflow: list[str] = []
     total = len(header)
     for name, block, locations in declarations:
         (primary_path, primary_line), *extra = locations
-        location_header = f"-- {primary_path}:{primary_line}"
+        location_header = f"-- {name} — {primary_path}:{primary_line}{note}"
         if extra:
             also = ", ".join(f"{path}:{line}" for path, line in extra)
             location_header += f" (also: {also})"
@@ -206,6 +252,54 @@ def _format_results(
     if overflow:
         output += "\n\nAdditional matches (not shown, refine your query): " + ", ".join(overflow)
     return output
+
+
+def _collect_matches(
+    root: Path, query: str, *, body: bool
+) -> list[tuple[str, str, list[tuple[Path, int]]]]:
+    """Scan every .lean file under `root` and group matches by (qualified_name, block).
+
+    `body=False` matches declaration names; `body=True` matches query tokens as whole
+    identifiers inside declaration blocks (the fallback). Identical blocks copied across
+    files collapse to one entry recording every location.
+    """
+    grouped: dict[tuple[str, str], list[tuple[Path, int]]] = {}
+    for lean_file in _iter_lean_files(root):
+        try:
+            content = lean_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.debug(f"Skipping unreadable Lean file {lean_file}: {exc}")
+            continue
+        matches = (
+            _body_matching_declarations(content, query)
+            if body
+            else _matching_declaration_names(content, query)
+        )
+        for simple_name, qualified_name, occurrence in matches:
+            block = extract_function_from_content(content, simple_name, occurrence)
+            if block is None:
+                continue
+            line = _declaration_line(content, simple_name, occurrence)
+            grouped.setdefault((qualified_name, block), []).append(
+                (lean_file.relative_to(root), line)
+            )
+    return [(name, block, locations) for (name, block), locations in grouped.items()]
+
+
+def _search_root(
+    root: Path, query: str, config: SearchLeanLocalConfig, *, label: str = "LocalLeanSearch"
+) -> str:
+    """Search `root` by declaration name; fall back to body search only if name finds nothing."""
+    decls = _collect_matches(root, query, body=False)
+    if decls:
+        logger.info(f"{label}: Found {len(decls)} declarations for '{query}' under {root}")
+        return _format_results(query, decls, config)
+    body_decls = _collect_matches(root, query, body=True)
+    if body_decls:
+        logger.info(f"{label}: Found {len(body_decls)} body matches for '{query}' under {root}")
+        return _format_results(query, body_decls, config, body_match=True)
+    logger.info(f"{label}: No results for '{query}'")
+    return f'No declarations matching "{query}" found.'
 
 
 class LocalLeanSearcher:
@@ -252,35 +346,7 @@ class LocalLeanSearcher:
             logger.warning(f"LocalLeanSearch: {error}")
             return error
 
-        # Group by (qualified_name, block): identical declarations copied into several
-        # files collapse to one entry recording every location, preserving first-seen order.
-        grouped: dict[tuple[str, str], list[tuple[Path, int]]] = {}
-        for lean_file in _iter_lean_files(root):
-            try:
-                content = lean_file.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as exc:
-                logger.debug(f"Skipping unreadable Lean file {lean_file}: {exc}")
-                continue
-            for simple_name, qualified_name, occurrence in _matching_declaration_names(
-                content, query
-            ):
-                block = extract_function_from_content(content, simple_name, occurrence)
-                if block is None:
-                    continue
-                line = _declaration_line(content, simple_name, occurrence)
-                grouped.setdefault((qualified_name, block), []).append(
-                    (lean_file.relative_to(root), line)
-                )
-
-        if not grouped:
-            logger.info(f"LocalLeanSearch: No results for '{query}'")
-            return f'No declarations matching "{query}" found.'
-
-        declarations = [(name, block, locations) for (name, block), locations in grouped.items()]
-        logger.info(
-            f"LocalLeanSearch: Found {len(declarations)} declarations for '{query}' under {root}"
-        )
-        return _format_results(query, declarations, self.config)
+        return _search_root(root, query, self.config)
 
 
 class LocalLeanSearchInput(BaseModel):

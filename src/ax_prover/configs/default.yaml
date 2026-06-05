@@ -8,6 +8,7 @@ prover:
     search_lean: ${tool_configs.search_lean_search}
     search_web: ${tool_configs.search_web}
     search_lean_local: ${tool_configs.search_lean_local}
+    search_cslib: ${tool_configs.search_cslib}
   max_iterations: 50
   memory_config:
     class_name: ExperienceProcessor

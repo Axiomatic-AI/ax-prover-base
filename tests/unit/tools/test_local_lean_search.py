@@ -12,7 +12,9 @@ from ax_prover.tools.local_lean_search import (
     SEARCHABLE_TYPES,
     LocalLeanSearcher,
     SearchLeanLocalConfig,
+    _body_matching_declarations,
     _declaration_line,
+    _identifier_match,
     _iter_lean_files,
     _matching_declaration_names,
     _walk_down_for_roots,
@@ -453,3 +455,71 @@ class TestAmbiguousSimpleName:
         assert ":= BBB" in result
         assert "Challenges/Dup.lean:3" in result  # A.insert
         assert "Challenges/Dup.lean:9" in result  # B.insert
+
+
+class TestIdentifierMatch:
+    def test_matches_standalone_identifier(self):
+        assert _identifier_match("query_aux", "  x := query_aux n 0")
+
+    def test_not_matched_inside_longer_identifier(self):
+        # trailing 'N' continues the identifier, so it is not a whole-identifier match
+        assert not _identifier_match("query_aux", "def query_auxN := 1")
+
+    def test_dot_is_an_identifier_boundary_char(self):
+        # '.' is part of a Lean identifier, so "insert" does NOT match inside "Treap.insert"
+        assert not _identifier_match("insert", "y := Treap.insert t")
+
+    def test_case_insensitive(self):
+        assert _identifier_match("foo", "exact FOO")
+
+
+WHERE_BLOCK_LEAN = """import Mathlib
+
+def query (n : Nat) : Nat :=
+  query_aux n 0   where query_aux (j acc : Nat) : Nat :=
+    if j = 0 then acc else query_aux (j - 1) (acc + j)
+"""
+
+
+class TestBodyMatchingDeclarations:
+    def test_name_search_misses_where_helper(self):
+        # `query_aux` is not a top-level declaration, so name search returns nothing.
+        assert _matching_declaration_names(WHERE_BLOCK_LEAN, "query_aux") == []
+
+    def test_body_search_returns_enclosing_declaration(self):
+        assert _body_matching_declarations(WHERE_BLOCK_LEAN, "query_aux") == [("query", "query", 0)]
+
+    def test_body_search_requires_all_tokens(self):
+        assert _body_matching_declarations(WHERE_BLOCK_LEAN, "query_aux missing") == []
+
+    def test_body_search_respects_identifier_boundary(self):
+        # 'quer' is a prefix, not a whole identifier in the body -> no match.
+        assert _body_matching_declarations(WHERE_BLOCK_LEAN, "quer") == []
+
+
+@pytest.fixture
+def where_project(tmp_path):
+    root = tmp_path / "proj"
+    (root / "Challenges").mkdir(parents=True)
+    (root / "lakefile.toml").write_text('name = "p"\n')
+    (root / "Challenges" / "Q.lean").write_text(WHERE_BLOCK_LEAN)
+    return root
+
+
+class TestBodySearchEndToEnd:
+    def test_search_falls_back_to_body_for_where_helper(self, where_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(where_project))
+        out = searcher.search("query_aux")
+        assert "def query" in out
+        assert "matched in body" in out
+        assert "Challenges/Q.lean:" in out
+
+    def test_name_match_does_not_use_body_fallback(self, where_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(where_project))
+        out = searcher.search("query")
+        assert "def query" in out
+        assert "matched in body" not in out
+
+    def test_no_match_message_unchanged(self, where_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(where_project))
+        assert searcher.search("zzz_nope") == 'No declarations matching "zzz_nope" found.'
