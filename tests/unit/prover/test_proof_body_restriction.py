@@ -65,6 +65,46 @@ def test_restriction_fragment_mentions_key_rules():
     assert "locked" in PROOF_BODY_RESTRICTION_PROMPT.lower()
 
 
+class TestSorriesFeedbackCarriesPreambleWarning:
+    def test_warning_appended_to_content_when_provided(self):
+        from ax_prover.models.messages import SorriesGoalStateFeedback
+
+        warning = _dropped_preamble_warning(True, ["Mathlib.Tactic"], [])
+        feedback = SorriesGoalStateFeedback(
+            sorry_count=1,
+            goal_state_at_sorries="⊢ True",
+            dropped_preamble_warning=warning,
+        )
+        assert "SORRIES DETECTED" in feedback.content
+        assert "IMPORTS/OPENS IGNORED" in feedback.content
+        assert "Mathlib.Tactic" in feedback.content
+
+    def test_no_warning_when_empty(self):
+        from ax_prover.models.messages import SorriesGoalStateFeedback
+
+        feedback = SorriesGoalStateFeedback(
+            sorry_count=1,
+            goal_state_at_sorries="⊢ True",
+            dropped_preamble_warning="",
+        )
+        assert "IMPORTS/OPENS IGNORED" not in feedback.content
+
+
+def test_builder_node_surfaces_dropped_preamble_on_sorries_path():
+    """Guard: the build-success-with-sorries branch must surface the dropped-preamble warning.
+
+    Exercising _builder_node fully requires LLM/Lean, so assert via source that the
+    sorries branch wires the warning through to SorriesGoalStateFeedback.
+    """
+    import inspect
+
+    from ax_prover.prover.agent import ProverAgent
+
+    source = inspect.getsource(ProverAgent._builder_node)
+    assert "_dropped_preamble_warning(" in source
+    assert "dropped_preamble_warning=" in source
+
+
 def test_proposer_node_wires_in_the_prompt_builder():
     """Guard against the proposer node bypassing build_proposer_system_prompt.
 
