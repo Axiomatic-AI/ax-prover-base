@@ -47,6 +47,7 @@ from ..utils.git import get_repo_metadata
 from ..utils.lean_interact import get_goal_state_at_sorries
 from ..utils.lean_parsing import (
     SEARCH_TACTIC_PATTERN,
+    blank_string_literals,
     find_declaration_by_name,
     find_stripped_declaration_names,
     list_all_declarations_in_lean_code,
@@ -65,6 +66,12 @@ from .prompts import (
     SUMMARIZE_OUTPUT_USER_PROMPT,
     build_proposer_system_prompt,
 )
+
+# Conservative fallback context window (Claude-class) used only when the model's
+# langchain profile reports no `max_input_tokens` (e.g. a very new release langchain
+# doesn't know yet). When this fires it is logged as a warning so the misconfiguration
+# is visible rather than silently masked.
+DEFAULT_MAX_INPUT_TOKENS = 200_000
 
 
 def _dropped_preamble_warning(
@@ -127,11 +134,23 @@ class ProverAgent:
         summary_llm_config = self.config.summarize_output.llm or self.config.prover_llm
         self.summary_llm_client = LLMClient(summary_llm_config)
 
-        # New models (e.g. claude-opus-4-8) may have no langchain profile / no
-        # max_input_tokens; fall back to the standard Claude context window.
-        self.max_input_tokens = self.llm_client.profile.get("max_input_tokens") or 200_000
+        # New models may have no langchain profile / no max_input_tokens. Rather than
+        # silently substituting a default for any falsy value (which would over- or
+        # under-estimate the real window for non-Claude models), log a warning naming
+        # the model and the fallback used so the misconfiguration is visible.
+        profile_max = self.llm_client.profile.get("max_input_tokens")
+        if not profile_max:
+            self.logger.warning(
+                f"No max_input_tokens in profile for model {self.llm_client.model_id}; "
+                f"falling back to {DEFAULT_MAX_INPUT_TOKENS}."
+            )
+            profile_max = DEFAULT_MAX_INPUT_TOKENS
+        self.max_input_tokens = profile_max
         if self.max_input_tokens < 1000:
-            self.logger.error("Error: max_input_tokens abnormally small")
+            self.logger.error(
+                f"max_input_tokens abnormally small ({self.max_input_tokens}) for model "
+                f"{self.llm_client.model_id}."
+            )
 
     # TODO: this is creating extra confusion. But we require some things to be run asynchronously
     @classmethod
@@ -409,6 +428,17 @@ class ProverAgent:
             if build_success:
                 self.logger.info("Build successful")
 
+                # Imports/opens proposed under a locked file are dropped even when the
+                # build succeeds (import redundant / open unnecessary). Surface this on
+                # the iterative path so the proposer is not implicitly taught they worked.
+                preamble_warning = _dropped_preamble_warning(
+                    self.config.restrict_to_proof_body,
+                    state.last_proposal.imports,
+                    state.last_proposal.opens,
+                )
+                if preamble_warning:
+                    self.logger.info(preamble_warning)
+
                 if sorry_count := count_pattern(
                     state.last_proposal.code, pattern=r"\b(sorry|admit)\b"
                 )[0]:
@@ -421,10 +451,13 @@ class ProverAgent:
                     feedback = SorriesGoalStateFeedback(
                         sorry_count=sorry_count,
                         goal_state_at_sorries=goal_state_at_sorries,
+                        dropped_preamble_warning=preamble_warning,
                     )
                     return {"messages": [feedback]}
 
-                stripped_code = strip_comments(state.last_proposal.code)
+                # Blank string-literal contents so a tactic-like substring or the word
+                # "axiom" inside a string/docstring cannot falsely trigger the checks below.
+                stripped_code = blank_string_literals(strip_comments(state.last_proposal.code))
 
                 axiom_count, axiom_locations = count_pattern(stripped_code, pattern=r"\baxiom\b")
                 if axiom_count:

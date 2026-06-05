@@ -22,6 +22,7 @@ from ..utils.lean_parsing import (
     LEAN_KEYWORDS,
     extract_function_from_content,
     list_all_declarations_in_lean_code,
+    non_comment_matches,
 )
 from .registry import register_tool, tool_name_from_type
 
@@ -206,7 +207,7 @@ def _declaration_line(content: str, name: str, occurrence: int = 0) -> int:
     line. Falls back to 1 if the declaration keyword cannot be located.
     """
     pattern = rf"^\s*{DECL_PREFIX}(?:{_KEYWORDS_PATTERN})\s+{re.escape(name)}{DECL_NAME_END}"
-    matches = list(re.finditer(pattern, content, re.MULTILINE))
+    matches = non_comment_matches(pattern, content)
     if occurrence >= len(matches):
         return 1
     match = matches[occurrence]
@@ -230,6 +231,7 @@ def _format_results(
     entry and the rest are listed in an "(also: …)" suffix. Overflow (beyond the
     caps) is listed by name.
     """
+    truncation_marker = "\n-- … (truncated; refine your query for the full declaration)"
     header = f'Found {len(declarations)} declaration(s) matching "{query}":'
     note = " (matched in body)" if body_match else ""
     shown: list[str] = []
@@ -246,6 +248,18 @@ def _format_results(
         if len(shown) < config.max_results and within_budget:
             shown.append(entry)
             total += len(entry) + 2
+        elif not shown:
+            # The most-relevant match alone exceeds the budget: truncate its block to the
+            # remaining space rather than dropping it entirely (which would leave the user
+            # with a header and a "not shown" note but no source). Keep the full location
+            # header and at least one character of the block body so the source is visible.
+            available_for_block = (
+                config.max_chars - total - 2 - len(location_header) - 1 - len(truncation_marker)
+            )
+            kept = block[: max(available_for_block, 1)]
+            truncated = f"{location_header}\n{kept}{truncation_marker}"
+            shown.append(truncated)
+            total += len(truncated) + 2
         else:
             overflow.append(f"{name} ({primary_path}:{primary_line})")
     output = header + "\n\n" + "\n\n".join(shown)
@@ -254,22 +268,30 @@ def _format_results(
     return output
 
 
-def _collect_matches(
-    root: Path, query: str, *, body: bool
-) -> list[tuple[str, str, list[tuple[Path, int]]]]:
-    """Scan every .lean file under `root` and group matches by (qualified_name, block).
-
-    `body=False` matches declaration names; `body=True` matches query tokens as whole
-    identifiers inside declaration blocks (the fallback). Identical blocks copied across
-    files collapse to one entry recording every location.
-    """
-    grouped: dict[tuple[str, str], list[tuple[Path, int]]] = {}
+def _read_lean_files(root: Path) -> list[tuple[Path, str]]:
+    """Walk `root` once, returning (relative_path, content) for each readable .lean file."""
+    files: list[tuple[Path, str]] = []
     for lean_file in _iter_lean_files(root):
         try:
             content = lean_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             logger.debug(f"Skipping unreadable Lean file {lean_file}: {exc}")
             continue
+        files.append((lean_file.relative_to(root), content))
+    return files
+
+
+def _collect_matches(
+    files: list[tuple[Path, str]], query: str, *, body: bool
+) -> list[tuple[str, str, list[tuple[Path, int]]]]:
+    """Group matches across already-read files by (qualified_name, block).
+
+    `body=False` matches declaration names; `body=True` matches query tokens as whole
+    identifiers inside declaration blocks (the fallback). Identical blocks copied across
+    files collapse to one entry recording every location.
+    """
+    grouped: dict[tuple[str, str], list[tuple[Path, int]]] = {}
+    for relative_path, content in files:
         matches = (
             _body_matching_declarations(content, query)
             if body
@@ -280,21 +302,24 @@ def _collect_matches(
             if block is None:
                 continue
             line = _declaration_line(content, simple_name, occurrence)
-            grouped.setdefault((qualified_name, block), []).append(
-                (lean_file.relative_to(root), line)
-            )
+            grouped.setdefault((qualified_name, block), []).append((relative_path, line))
     return [(name, block, locations) for (name, block), locations in grouped.items()]
 
 
 def _search_root(
     root: Path, query: str, config: SearchLeanLocalConfig, *, label: str = "LocalLeanSearch"
 ) -> str:
-    """Search `root` by declaration name; fall back to body search only if name finds nothing."""
-    decls = _collect_matches(root, query, body=False)
+    """Search `root` by declaration name; fall back to body search only if name finds nothing.
+
+    Walks the tree and reads each file once; the body fallback reuses the cached contents
+    rather than re-walking and re-reading on a name-miss.
+    """
+    files = _read_lean_files(root)
+    decls = _collect_matches(files, query, body=False)
     if decls:
         logger.info(f"{label}: Found {len(decls)} declarations for '{query}' under {root}")
         return _format_results(query, decls, config)
-    body_decls = _collect_matches(root, query, body=True)
+    body_decls = _collect_matches(files, query, body=True)
     if body_decls:
         logger.info(f"{label}: Found {len(body_decls)} body matches for '{query}' under {root}")
         return _format_results(query, body_decls, config, body_match=True)

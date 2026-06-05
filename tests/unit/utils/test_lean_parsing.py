@@ -5,6 +5,7 @@ import pytest
 from ax_prover.models.declaration import Declaration, DeclarationType
 from ax_prover.utils.lean_parsing import (
     SEARCH_TACTIC_PATTERN,
+    blank_string_literals,
     count_pattern,
     extract_function_from_content,
     extract_theorem_name,
@@ -277,6 +278,77 @@ class TestExtractFunctionFromContent:
         assert insert is not None
         assert insert.startswith("def Treap.insert")
 
+    def test_universe_polymorphic_name(self):
+        """A name followed by a universe binder `.{u}` is extractable."""
+        code = "theorem foo.{u} (x : Type u) : x = x := by rfl"
+        block = extract_function_from_content(code, "foo")
+        assert block is not None
+        assert block.startswith("theorem foo.{u}")
+
+    def test_universe_binder_does_not_match_qualified_name(self):
+        """Searching `foo` must not match a different decl `foo.bar`."""
+        code = "theorem foo.bar : True := trivial"
+        assert extract_function_from_content(code, "foo") is None
+
+    def test_includes_leading_open_in_prefix(self):
+        """A contiguous `open … in` prefix that binds to the decl is included."""
+        code = "open Nat in\ntheorem target (n : Nat) : n = n := by rfl"
+        block = extract_function_from_content(code, "target")
+        assert block is not None
+        assert "open Nat in" in block
+        assert "theorem target" in block
+
+    def test_includes_multiple_in_prefixes(self):
+        """Several stacked `… in` prefix commands are all included."""
+        code = (
+            "set_option maxHeartbeats 400000 in\nopen Nat in\ntheorem target : True := by trivial"
+        )
+        block = extract_function_from_content(code, "target")
+        assert block is not None
+        assert block.startswith("set_option maxHeartbeats 400000 in")
+        assert "open Nat in" in block
+        assert "theorem target" in block
+
+    def test_does_not_pull_in_preceding_unrelated_decl(self):
+        """An ordinary preceding declaration is not pulled into the block."""
+        code = "theorem other : True := trivial\ntheorem target : True := trivial"
+        block = extract_function_from_content(code, "target")
+        assert block is not None
+        assert "other" not in block
+        assert block.startswith("theorem target")
+
+    def test_stops_at_blank_line_before_in_prefix(self):
+        """A blank line separates an `… in` prefix that does not bind to the decl."""
+        code = "open Nat in\n\ntheorem target : True := by trivial"
+        block = extract_function_from_content(code, "target")
+        assert block is not None
+        assert "open Nat in" not in block
+        assert block.startswith("theorem target")
+
+    def test_commented_decl_skipped_block_comment(self):
+        """A `def foo` inside a block comment must not be selected as occurrence 0."""
+        code = "/-\ndef foo := 1\n-/\ndef foo := 2\n"
+        block = extract_function_from_content(code, "foo", 0)
+        assert block is not None
+        assert block.startswith("def foo := 2")
+        assert ":= 1" not in block
+
+    def test_commented_decl_skipped_line_comment(self):
+        """A `def foo` after a `--` line comment must not be selected as occurrence 0."""
+        code = "-- def foo := 1\ndef foo := 2\n"
+        block = extract_function_from_content(code, "foo", 0)
+        assert block is not None
+        assert block.startswith("def foo := 2")
+        assert ":= 1" not in block
+
+    def test_no_commented_decls_occurrence_unchanged(self):
+        """With no commented decls, occurrence indexing is unchanged (regression guard)."""
+        code = "def foo := 1\n\ndef foo := 2\n"
+        first = extract_function_from_content(code, "foo", 0)
+        second = extract_function_from_content(code, "foo", 1)
+        assert first is not None and first.startswith("def foo := 1")
+        assert second is not None and second.startswith("def foo := 2")
+
 
 class TestExtractTheoremName:
     """Tests for extract_theorem_name function."""
@@ -523,3 +595,76 @@ class TestFindStrippedDeclarationNames:
         """Helpers defined after the target are also stripped."""
         code = "theorem foo : True := by trivial\n\nlemma bar : True := by trivial\n"
         assert find_stripped_declaration_names(code, "foo") == ["bar"]
+
+    def test_ignores_namespace_section_end_open(self):
+        """Structural commands (namespace/section/end/open) are never 'stripped' decls."""
+        code = "namespace Foo\n  theorem target : True := by sorry\nend Foo"
+        assert find_stripped_declaration_names(code, "target") == []
+
+    def test_ignores_file_level_open(self):
+        """A file-level `open` must not be reported as a stripped declaration."""
+        code = "open Nat\n\ntheorem target (n : Nat) : n = n := by rfl"
+        result = find_stripped_declaration_names(code, "target")
+        assert "Nat" not in result
+        assert result == []
+
+    def test_genuine_helper_still_reported_alongside_structural(self):
+        """A real standalone helper is reported even when wrapped in a namespace."""
+        code = (
+            "namespace Foo\n"
+            "lemma helper (n : Nat) : n = n := by rfl\n"
+            "theorem target (n : Nat) : n = n := by rfl\n"
+            "end Foo"
+        )
+        assert find_stripped_declaration_names(code, "target") == ["helper"]
+
+
+class TestBlankStringLiterals:
+    """Tests for blank_string_literals function."""
+
+    def test_blanks_inner_content_preserves_quotes_and_length(self):
+        src = 'let x := "simp? in here"'
+        result = blank_string_literals(src)
+        assert len(result) == len(src)
+        assert result == 'let x := "' + " " * len("simp? in here") + '"'
+        # Quotes preserved, inner content blanked.
+        assert result[9] == '"'
+        assert result[-1] == '"'
+
+    def test_code_outside_strings_untouched(self):
+        src = "theorem foo : True := by simp"
+        assert blank_string_literals(src) == src
+
+    def test_search_tactic_inside_string_not_matched(self):
+        """count_pattern over blanked source no longer flags a tactic in a string."""
+        src = 'theorem foo : True := by trivial -- note: "use simp? here"'
+        stripped = strip_comments(src)
+        # Without blanking, the comment is gone but if it were a string it would match.
+        blanked = blank_string_literals(stripped)
+        count, _ = count_pattern(blanked, pattern=SEARCH_TACTIC_PATTERN)
+        assert count == 0
+
+    def test_search_tactic_in_string_literal_not_matched(self):
+        src = 'theorem foo : True := by exact (id "use simp? to solve" |> fun _ => trivial)'
+        blanked = blank_string_literals(strip_comments(src))
+        count, _ = count_pattern(blanked, pattern=SEARCH_TACTIC_PATTERN)
+        assert count == 0
+
+    def test_real_search_tactic_still_matched(self):
+        src = "theorem foo : True := by simp?"
+        blanked = blank_string_literals(strip_comments(src))
+        count, _ = count_pattern(blanked, pattern=SEARCH_TACTIC_PATTERN)
+        assert count == 1
+
+    def test_axiom_word_in_string_not_matched(self):
+        src = 'theorem foo : True := by exact (id "this is an axiom" |> fun _ => trivial)'
+        blanked = blank_string_literals(strip_comments(src))
+        count, _ = count_pattern(blanked, pattern=r"\baxiom\b")
+        assert count == 0
+
+    def test_empty_string(self):
+        assert blank_string_literals("") == ""
+
+    def test_no_strings_identity(self):
+        src = "def add (a b : Nat) : Nat := a + b"
+        assert blank_string_literals(src) == src

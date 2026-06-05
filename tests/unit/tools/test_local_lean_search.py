@@ -260,6 +260,39 @@ class TestLocalLeanSearcher:
         assert "Found 3 declaration(s)" in result
         assert "Additional matches" in result
 
+    def test_single_oversized_match_is_truncated_not_dropped(self, tmp_path):
+        # A single match whose block exceeds max_chars must still surface some of the
+        # body plus a truncation marker, NOT an empty body with only a "not shown" note.
+        root = tmp_path / "challenges"
+        (root / "Challenges").mkdir(parents=True)
+        (root / "lakefile.toml").write_text('name = "challenges"\n')
+        body_lines = "\n".join(f"  step_{i} := {i}" for i in range(50))
+        (root / "Challenges" / "Big.lean").write_text(f"def bigDecl : Nat :=\n{body_lines}\n  0\n")
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(max_chars=200), base_folder=str(root))
+        result = searcher.search("bigDecl")
+        assert "Found 1 declaration(s)" in result
+        # The whole oversized block must NOT be shown (it was truncated).
+        assert "step_49" not in result
+        # Part of the actual declaration body must appear.
+        assert "def bigDecl" in result
+        # A truncation marker must be present.
+        assert "truncated" in result
+        # It must NOT claim the only match is "not shown".
+        assert "Additional matches (not shown" not in result
+
+    def test_normal_small_result_not_truncated(self, tmp_path):
+        # A normal small result that fits the budget is rendered fully, no marker.
+        root = tmp_path / "challenges"
+        (root / "Challenges").mkdir(parents=True)
+        (root / "lakefile.toml").write_text('name = "challenges"\n')
+        (root / "Challenges" / "Small.lean").write_text("def smallDecl : Nat :=\n  1\n")
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
+        result = searcher.search("smallDecl")
+        assert "Found 1 declaration(s)" in result
+        assert "def smallDecl : Nat :=" in result
+        assert "truncated" not in result
+        assert "Additional matches" not in result
+
     def test_search_logs_match_count_at_info(self, treap_project, caplog):
         import logging
 
@@ -457,6 +490,41 @@ class TestAmbiguousSimpleName:
         assert "Challenges/Dup.lean:9" in result  # B.insert
 
 
+# A real `def foo` preceded by a commented-out `def foo` (line-start, inside a block
+# comment). The raw-content matcher would otherwise pick the commented one first.
+COMMENTED_DECL_LEAN = """import Mathlib
+
+/-
+def foo := 1
+-/
+def foo := 2
+"""
+
+
+@pytest.fixture
+def commented_decl_project(tmp_path):
+    root = tmp_path / "challenges"
+    (root / "Challenges").mkdir(parents=True)
+    (root / "lakefile.toml").write_text('name = "challenges"\n')
+    (root / "Challenges" / "Commented.lean").write_text(COMMENTED_DECL_LEAN)
+    return root
+
+
+class TestCommentedDeclaration:
+    def test_declaration_line_skips_commented_decl(self):
+        # The real `def foo := 2` is on line 6; the commented one (line 4) must be ignored.
+        assert _declaration_line(COMMENTED_DECL_LEAN, "foo", 0) == 6
+
+    def test_search_returns_real_block_not_commented(self, commented_decl_project):
+        searcher = LocalLeanSearcher(
+            SearchLeanLocalConfig(), base_folder=str(commented_decl_project)
+        )
+        result = searcher.search("foo")
+        assert "def foo := 2" in result
+        assert ":= 1" not in result
+        assert "Challenges/Commented.lean:6" in result
+
+
 class TestIdentifierMatch:
     def test_matches_standalone_identifier(self):
         assert _identifier_match("query_aux", "  x := query_aux n 0")
@@ -523,3 +591,23 @@ class TestBodySearchEndToEnd:
     def test_no_match_message_unchanged(self, where_project):
         searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(where_project))
         assert searcher.search("zzz_nope") == 'No declarations matching "zzz_nope" found.'
+
+    def test_body_fallback_reads_each_file_once(self, where_project, monkeypatch):
+        # A name-miss that succeeds only via the body fallback must NOT re-walk and
+        # re-read the tree: each .lean file is read exactly once per search.
+        import pathlib
+
+        read_counts: dict[str, int] = {}
+        original = pathlib.Path.read_text
+
+        def counting_read_text(self, *args, **kwargs):
+            if str(self).endswith(".lean"):
+                read_counts[str(self)] = read_counts.get(str(self), 0) + 1
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(pathlib.Path, "read_text", counting_read_text)
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(where_project))
+        out = searcher.search("query_aux")  # name miss -> body fallback hit
+        assert "matched in body" in out
+        assert read_counts  # at least one .lean file was read
+        assert all(count == 1 for count in read_counts.values()), read_counts

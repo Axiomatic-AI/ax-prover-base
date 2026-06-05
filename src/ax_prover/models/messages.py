@@ -165,12 +165,25 @@ class SorriesGoalStateFeedback(FeedbackMessage):
     feedback_type: Literal["sorries_goal_state"] = "sorries_goal_state"
     sorry_count: int
     goal_state_at_sorries: str
+    dropped_preamble_warning: str = ""
     is_success: bool = False
 
-    def __init__(self, sorry_count: int, goal_state_at_sorries: str, **kwargs):
-        """Initialize with formatted sorries goal state message."""
+    def __init__(
+        self,
+        sorry_count: int,
+        goal_state_at_sorries: str,
+        dropped_preamble_warning: str = "",
+        **kwargs,
+    ):
+        """Initialize with formatted sorries goal state message.
+
+        `dropped_preamble_warning`, when non-empty, is prepended so the proposer is told
+        its proposed imports/opens were dropped even though the build succeeded.
+        """
         kwargs.pop("content", None)
+        warning_prefix = f"{dropped_preamble_warning}\n\n" if dropped_preamble_warning else ""
         content = (
+            f"{warning_prefix}"
             f"SORRIES DETECTED: The proposed code contains {sorry_count} sorry/admit. "
             f"Work on closing these sorries. Here is the Goal State at these sorries {goal_state_at_sorries} ."
         )
@@ -178,6 +191,7 @@ class SorriesGoalStateFeedback(FeedbackMessage):
             content=content,
             sorry_count=sorry_count,
             goal_state_at_sorries=goal_state_at_sorries,
+            dropped_preamble_warning=dropped_preamble_warning,
             **kwargs,
         )
 

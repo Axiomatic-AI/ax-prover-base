@@ -121,6 +121,15 @@ class LLMClient:
         self._retry_config: dict = config.retry_config
 
     @property
+    def model_id(self) -> str:
+        """Best-effort model identifier for logging (provider attr varies)."""
+        return (
+            getattr(self._base_llm, "model", None)
+            or getattr(self._base_llm, "model_name", None)
+            or "<unknown>"
+        )
+
+    @property
     def profile(self) -> dict:
         """Model metadata (max_input_tokens, max_output_tokens, capabilities, etc.).
 

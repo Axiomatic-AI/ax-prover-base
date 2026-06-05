@@ -150,3 +150,58 @@ def test_temporary_proposal_still_applies_code_when_restricted(tmp_path):
         # Imports/opens are still suppressed.
         assert "import Mathlib.Tactic" not in content
         assert "open Nat" not in content
+
+
+def _make_namespaced_demo_project(tmp_path) -> Location:
+    """Write a Lean file containing a `B.insert` target and return its Location.
+
+    The file does not yet matter for selection (the proposal carries the new code);
+    we just need a valid original file whose target declaration can be replaced.
+    """
+    (tmp_path / "Demo.lean").write_text(
+        "namespace B\n\ndef insert : Nat := sorry\n\nend B\n",
+        encoding="utf-8",
+    )
+    return Location(name="B.insert", module_path="Demo", is_external=False)
+
+
+def test_temporary_proposal_selects_target_by_namespace(tmp_path):
+    """When the proposal code has two same-simple-name decls, the namespace-qualified
+    target (B.insert, the SECOND occurrence) is applied — not the first (A.insert)."""
+    location = _make_namespaced_demo_project(tmp_path)
+    proposal = ProposalMessage(
+        reasoning="r",
+        code=(
+            "namespace A\n\n"
+            "def insert : Nat := 111\n\n"
+            "end A\n\n"
+            "namespace B\n\n"
+            "def insert : Nat := 222\n\n"
+            "end B\n"
+        ),
+        location=location,
+        imports=[],
+        opens=[],
+    )
+    with TemporaryProposal(str(tmp_path), location, proposal) as applier:
+        assert applier.success, applier.error
+        content = (Path(tmp_path) / applier.location.path).read_text(encoding="utf-8")
+        # The TARGET (B.insert, value 222) must be applied, not the first decl (A.insert).
+        assert "222" in content
+        assert "111" not in content
+
+
+def test_temporary_proposal_single_declaration_regression(tmp_path):
+    """The common case (single declaration, simple name, occurrence 0) is unchanged."""
+    location = _make_demo_project(tmp_path)
+    proposal = ProposalMessage(
+        reasoning="r",
+        code="theorem thm : True := by\n  exact trivial",
+        location=location,
+        imports=[],
+        opens=[],
+    )
+    with TemporaryProposal(str(tmp_path), location, proposal) as applier:
+        assert applier.success, applier.error
+        content = (Path(tmp_path) / applier.location.path).read_text(encoding="utf-8")
+        assert "exact trivial" in content
