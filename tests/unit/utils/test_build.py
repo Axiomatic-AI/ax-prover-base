@@ -107,11 +107,11 @@ def test_temporary_proposal_applies_imports_and_opens_by_default(tmp_path):
     with TemporaryProposal(str(tmp_path), location, proposal) as applier:
         assert applier.success
         content = (Path(tmp_path) / applier.location.path).read_text(encoding="utf-8")
-    assert "import Mathlib.Tactic" in content
-    assert "open Nat" in content
+        assert "import Mathlib.Tactic" in content
+        assert "open Nat" in content
 
 
-def test_temporary_proposal_skips_imports_and_opens_when_locked(tmp_path):
+def test_temporary_proposal_skips_imports_and_opens_when_restricted(tmp_path):
     location = _make_demo_project(tmp_path)
     proposal = ProposalMessage(
         reasoning="r",
@@ -125,7 +125,28 @@ def test_temporary_proposal_skips_imports_and_opens_when_locked(tmp_path):
     ) as applier:
         assert applier.success
         content = (Path(tmp_path) / applier.location.path).read_text(encoding="utf-8")
-    assert "import Mathlib.Tactic" not in content
-    assert "open Nat" not in content
-    # The original (already-present) import is untouched.
-    assert "import Existing.Module" in content
+        assert "import Mathlib.Tactic" not in content
+        assert "open Nat" not in content
+        # The original (already-present) import is untouched.
+        assert "import Existing.Module" in content
+
+
+def test_temporary_proposal_still_applies_code_when_restricted(tmp_path):
+    location = _make_demo_project(tmp_path)
+    proposal = ProposalMessage(
+        reasoning="r",
+        code="theorem thm : True := by\n  exact trivial",
+        location=location,
+        imports=["Mathlib.Tactic"],
+        opens=["Nat"],
+    )
+    with TemporaryProposal(
+        str(tmp_path), location, proposal, restrict_to_proof_body=True
+    ) as applier:
+        assert applier.success
+        content = (Path(tmp_path) / applier.location.path).read_text(encoding="utf-8")
+        # Proof body IS applied even when imports/opens are suppressed.
+        assert "exact trivial" in content
+        # Imports/opens are still suppressed.
+        assert "import Mathlib.Tactic" not in content
+        assert "open Nat" not in content
