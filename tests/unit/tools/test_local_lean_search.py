@@ -497,3 +497,31 @@ class TestBodyMatchingDeclarations:
     def test_body_search_respects_identifier_boundary(self):
         # 'quer' is a prefix, not a whole identifier in the body -> no match.
         assert _body_matching_declarations(WHERE_BLOCK_LEAN, "quer") == []
+
+
+@pytest.fixture
+def where_project(tmp_path):
+    root = tmp_path / "proj"
+    (root / "Challenges").mkdir(parents=True)
+    (root / "lakefile.toml").write_text('name = "p"\n')
+    (root / "Challenges" / "Q.lean").write_text(WHERE_BLOCK_LEAN)
+    return root
+
+
+class TestBodySearchEndToEnd:
+    def test_search_falls_back_to_body_for_where_helper(self, where_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(where_project))
+        out = searcher.search("query_aux")
+        assert "def query" in out
+        assert "matched in body" in out
+        assert "Challenges/Q.lean:" in out
+
+    def test_name_match_does_not_use_body_fallback(self, where_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(where_project))
+        out = searcher.search("query")
+        assert "def query" in out
+        assert "matched in body" not in out
+
+    def test_no_match_message_unchanged(self, where_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(where_project))
+        assert searcher.search("zzz_nope") == 'No declarations matching "zzz_nope" found.'
