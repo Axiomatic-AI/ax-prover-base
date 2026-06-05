@@ -67,6 +67,12 @@ from .prompts import (
     build_proposer_system_prompt,
 )
 
+# Conservative fallback context window (Claude-class) used only when the model's
+# langchain profile reports no `max_input_tokens` (e.g. a very new release langchain
+# doesn't know yet). When this fires it is logged as a warning so the misconfiguration
+# is visible rather than silently masked.
+DEFAULT_MAX_INPUT_TOKENS = 200_000
+
 
 def _dropped_preamble_warning(
     restrict_to_proof_body: bool,
@@ -128,11 +134,23 @@ class ProverAgent:
         summary_llm_config = self.config.summarize_output.llm or self.config.prover_llm
         self.summary_llm_client = LLMClient(summary_llm_config)
 
-        # New models (e.g. claude-opus-4-8) may have no langchain profile / no
-        # max_input_tokens; fall back to the standard Claude context window.
-        self.max_input_tokens = self.llm_client.profile.get("max_input_tokens") or 200_000
+        # New models may have no langchain profile / no max_input_tokens. Rather than
+        # silently substituting a default for any falsy value (which would over- or
+        # under-estimate the real window for non-Claude models), log a warning naming
+        # the model and the fallback used so the misconfiguration is visible.
+        profile_max = self.llm_client.profile.get("max_input_tokens")
+        if not profile_max:
+            self.logger.warning(
+                f"No max_input_tokens in profile for model {self.llm_client.model_id}; "
+                f"falling back to {DEFAULT_MAX_INPUT_TOKENS}."
+            )
+            profile_max = DEFAULT_MAX_INPUT_TOKENS
+        self.max_input_tokens = profile_max
         if self.max_input_tokens < 1000:
-            self.logger.error("Error: max_input_tokens abnormally small")
+            self.logger.error(
+                f"max_input_tokens abnormally small ({self.max_input_tokens}) for model "
+                f"{self.llm_client.model_id}."
+            )
 
     # TODO: this is creating extra confusion. But we require some things to be run asynchronously
     @classmethod
