@@ -176,8 +176,26 @@ def _matching_declaration_names(content: str, query: str) -> list[tuple[str, str
 
 
 def _body_matching_declarations(content: str, query: str) -> list[tuple[str, str, int]]:
-    """Placeholder replaced in Task 3."""
-    return []
+    """`(simple_name, qualified_name, occurrence)` for declarations whose block text contains
+    every query token as a whole identifier. Fallback for identifiers that are not declaration
+    names themselves (e.g. `where`/`let rec` helpers, inductive constructors). De-duplicated by
+    qualified name, source order preserved.
+    """
+    tokens = query.lower().split()
+    if not tokens:
+        return []
+    results: list[tuple[str, str, int]] = []
+    seen: set[str] = set()
+    for declaration, qualified, occurrence in _iter_searchable(content):
+        if qualified in seen:
+            continue
+        block = extract_function_from_content(content, declaration.name, occurrence)
+        if block is None:
+            continue
+        if all(_identifier_match(token, block) for token in tokens):
+            seen.add(qualified)
+            results.append((declaration.name, qualified, occurrence))
+    return results
 
 
 def _declaration_line(content: str, name: str, occurrence: int = 0) -> int:

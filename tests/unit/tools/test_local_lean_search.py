@@ -471,3 +471,29 @@ class TestIdentifierMatch:
 
     def test_case_insensitive(self):
         assert _identifier_match("foo", "exact FOO")
+
+
+WHERE_BLOCK_LEAN = """import Mathlib
+
+def query (n : Nat) : Nat :=
+  query_aux n 0   where query_aux (j acc : Nat) : Nat :=
+    if j = 0 then acc else query_aux (j - 1) (acc + j)
+"""
+
+
+class TestBodyMatchingDeclarations:
+    def test_name_search_misses_where_helper(self):
+        # `query_aux` is not a top-level declaration, so name search returns nothing.
+        assert _matching_declaration_names(WHERE_BLOCK_LEAN, "query_aux") == []
+
+    def test_body_search_returns_enclosing_declaration(self):
+        assert _body_matching_declarations(WHERE_BLOCK_LEAN, "query_aux") == [
+            ("query", "query", 0)
+        ]
+
+    def test_body_search_requires_all_tokens(self):
+        assert _body_matching_declarations(WHERE_BLOCK_LEAN, "query_aux missing") == []
+
+    def test_body_search_respects_identifier_boundary(self):
+        # 'quer' is a prefix, not a whole identifier in the body -> no match.
+        assert _body_matching_declarations(WHERE_BLOCK_LEAN, "quer") == []
