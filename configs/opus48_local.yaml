@@ -1,0 +1,17 @@
+# Opus 4.8 with the default tool set (public leansearch.net + web + local search).
+# Unlike configs/claude_ablations/claude4-8.yaml, this does NOT use the private
+# axleansearch Cloud Run backend, so no GCP auth/proxy is needed for local runs.
+import:
+  - llms.yaml
+  - tools.yaml
+  - default.yaml
+
+prover:
+  prover_llm: ${llm_configs.claude_opus_4_8}
+  # Set proposer_tools explicitly: the imported default.yaml may resolve to a copy
+  # whose proposer_tools omit search_lean_local. This guarantees the local search
+  # tool is active alongside the public LeanSearch + web search.
+  proposer_tools:
+    search_lean: ${tool_configs.search_lean_search}
+    search_web: ${tool_configs.search_web}
+    search_lean_local: ${tool_configs.search_lean_local}
