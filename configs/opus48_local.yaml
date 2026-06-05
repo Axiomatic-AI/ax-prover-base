@@ -8,6 +8,10 @@ import:
 
 prover:
   prover_llm: ${llm_configs.claude_opus_4_8}
+  # AI4Math competition rules: only the sorry placeholders may change — no new
+  # imports or file-level opens in the challenge file. This locks the file preamble
+  # (the prover edits the proof body only). General runs leave this at its False default.
+  restrict_to_proof_body: true
   # Set proposer_tools explicitly: the imported default.yaml may resolve to a copy
   # whose proposer_tools omit search_lean_local. This guarantees the local search
   # and CSLib search tools are active alongside the public LeanSearch + web search.
