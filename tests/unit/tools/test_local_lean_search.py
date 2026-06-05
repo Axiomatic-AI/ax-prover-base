@@ -12,7 +12,9 @@ from ax_prover.tools.local_lean_search import (
     SEARCHABLE_TYPES,
     LocalLeanSearcher,
     SearchLeanLocalConfig,
+    _body_matching_declarations,
     _declaration_line,
+    _identifier_match,
     _iter_lean_files,
     _matching_declaration_names,
     _walk_down_for_roots,
@@ -453,3 +455,19 @@ class TestAmbiguousSimpleName:
         assert ":= BBB" in result
         assert "Challenges/Dup.lean:3" in result  # A.insert
         assert "Challenges/Dup.lean:9" in result  # B.insert
+
+
+class TestIdentifierMatch:
+    def test_matches_standalone_identifier(self):
+        assert _identifier_match("query_aux", "  x := query_aux n 0")
+
+    def test_not_matched_inside_longer_identifier(self):
+        # trailing 'N' continues the identifier, so it is not a whole-identifier match
+        assert not _identifier_match("query_aux", "def query_auxN := 1")
+
+    def test_dot_is_an_identifier_boundary_char(self):
+        # '.' is part of a Lean identifier, so "insert" does NOT match inside "Treap.insert"
+        assert not _identifier_match("insert", "y := Treap.insert t")
+
+    def test_case_insensitive(self):
+        assert _identifier_match("foo", "exact FOO")

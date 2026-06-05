@@ -95,6 +95,18 @@ _KEYWORDS_PATTERN = "|".join(
 )
 
 
+# Characters that make up a Lean identifier; a body token matches only when flanked by
+# non-identifier characters (so "query_aux" won't hit inside "query_auxN" and "insert"
+# won't hit inside "Treap.insert").
+_IDENT_CHAR = r"[0-9A-Za-z_'.]"
+
+
+def _identifier_match(token: str, text: str) -> bool:
+    """True if `token` appears in `text` as a whole identifier (case-insensitive)."""
+    pattern = rf"(?<!{_IDENT_CHAR}){re.escape(token)}(?!{_IDENT_CHAR})"
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
 def _iter_lean_files(root: Path) -> Iterator[Path]:
     """Yield every .lean file under `root`, skipping the `.lake/` directory."""
     for dirpath, dirnames, filenames in os.walk(root):
