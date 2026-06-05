@@ -2,12 +2,12 @@
 
 import pytest
 
-from ax_prover.tools import create_search_cslib_tool
 from ax_prover.tools.cslib_search import (
     CSLIB_SEARCH_TOOL_TYPE,
     CslibSearcher,
     SearchCslibConfig,
 )
+from ax_prover.tools.local_lean_search import LocalLeanSearcher, SearchLeanLocalConfig
 from ax_prover.tools.registry import TOOL_REGISTRY, create_tool
 
 
@@ -48,8 +48,6 @@ class TestCslibRegistration:
         assert tool is not None
         assert tool.name == "search_cslib_tool"
 
-
-from ax_prover.tools.local_lean_search import LocalLeanSearcher, SearchLeanLocalConfig
 
 # CSLib-shaped content: module header, public import, namespace, doc + own-line @[simp],
 # noncomputable, private. `measure` here collides (different namespace/body) with the SKI file.

@@ -487,9 +487,7 @@ class TestBodyMatchingDeclarations:
         assert _matching_declaration_names(WHERE_BLOCK_LEAN, "query_aux") == []
 
     def test_body_search_returns_enclosing_declaration(self):
-        assert _body_matching_declarations(WHERE_BLOCK_LEAN, "query_aux") == [
-            ("query", "query", 0)
-        ]
+        assert _body_matching_declarations(WHERE_BLOCK_LEAN, "query_aux") == [("query", "query", 0)]
 
     def test_body_search_requires_all_tokens(self):
         assert _body_matching_declarations(WHERE_BLOCK_LEAN, "query_aux missing") == []
