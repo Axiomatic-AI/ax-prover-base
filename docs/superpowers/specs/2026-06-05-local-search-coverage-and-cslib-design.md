@@ -97,9 +97,27 @@ In `src/ax_prover/prover/prompts.py`, change the two "Lean version 4.24" occurre
   `search("query_aux")` returns the enclosing `query` block, header flagged as a body match; a body
   hit on an ordinary referenced identifier; identifier-boundary guard (token does not match inside a
   longer identifier); and confirmation that body-search does NOT run when a name match exists.
-- CSLib (`test_cslib_search.py`): tmp lake project with `.lake/packages/cslib/Cslib/X.lean`
-  containing a namespaced `theorem` — found and namespace-qualified; missing-cslib-dir yields the
-  clear message; the cslib tool does NOT return the project's own (non-cslib) declarations.
+- CSLib (`test_cslib_search.py`): unit tests use **synthetic cslib-shaped `tmp_path` fixtures**
+  (the real CSLib lives in the AI4Math repo, not here / CI), with a real-CSLib check kept as the
+  manual verification step. Tricky retrieval matrix (all required):
+  1. **Isolation, both directions** — fixture with BOTH `.lake/packages/cslib/` and
+     `.lake/packages/mathlib/`: `search_cslib` returns cslib decls only (never mathlib, never the
+     project's own `Def_*/Challenge_*`); `search_lean_local` never returns cslib decls.
+  2. **Module-system shapes** — a cslib file beginning with `module` + `public import …` headers,
+     and an **own-line `@[simp]`** attribute (optionally with a `/-- … -/` doc comment) above a
+     `theorem`: the decl is still found by name and its block extracts sensibly (assert the
+     observed block boundaries, documenting whether the own-line attribute is included).
+  3. **Namespacing + cross-file duplicate names** — `theorem ofTransGen` in `namespace WellFounded`
+     found via `"WellFounded ofTransGen"`, shown qualified; the **same simple name in two cslib
+     files / namespaces with different bodies** resolves to two distinct results with correct
+     per-file paths/lines.
+  4. **Modifiers** — `noncomputable def` and `private theorem` in cslib are found.
+  5. **Body-search + inductive constructors** — a token referenced only inside a lemma body, and an
+     `inductive` constructor name (e.g. `S`/`K`/`I`, not a top-level decl), return the enclosing
+     declaration flagged as a body match.
+  6. **Edges** — missing cslib dir → clear message; caps overflow lists extras by name; cslib root
+     resolved relative to the project whether `base_folder` is the root, a subdir (walk-up), or the
+     parent (walk-down).
 
 ## Verification
 
