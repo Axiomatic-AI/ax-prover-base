@@ -591,3 +591,23 @@ class TestBodySearchEndToEnd:
     def test_no_match_message_unchanged(self, where_project):
         searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(where_project))
         assert searcher.search("zzz_nope") == 'No declarations matching "zzz_nope" found.'
+
+    def test_body_fallback_reads_each_file_once(self, where_project, monkeypatch):
+        # A name-miss that succeeds only via the body fallback must NOT re-walk and
+        # re-read the tree: each .lean file is read exactly once per search.
+        import pathlib
+
+        read_counts: dict[str, int] = {}
+        original = pathlib.Path.read_text
+
+        def counting_read_text(self, *args, **kwargs):
+            if str(self).endswith(".lean"):
+                read_counts[str(self)] = read_counts.get(str(self), 0) + 1
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(pathlib.Path, "read_text", counting_read_text)
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(where_project))
+        out = searcher.search("query_aux")  # name miss -> body fallback hit
+        assert "matched in body" in out
+        assert read_counts  # at least one .lean file was read
+        assert all(count == 1 for count in read_counts.values()), read_counts
