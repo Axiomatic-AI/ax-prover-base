@@ -56,13 +56,12 @@ from .memory import BaseMemory
 from .prompts import (
     ATTEMPT_TEMPLATE,
     PREVIOUS_ATTEMPT_USER_PROMPT,
-    PROPOSER_SYSTEM_PROMPT,
-    PROPOSER_SYSTEM_PROMPT_SINGLE_SHOT,
     PROPOSER_USER_PROMPT,
     REVIEWER_SYSTEM_PROMPT,
     REVIEWER_USER_PROMPT,
     SUMMARIZE_OUTPUT_SYSTEM_PROMPT,
     SUMMARIZE_OUTPUT_USER_PROMPT,
+    build_proposer_system_prompt,
 )
 
 
@@ -278,14 +277,11 @@ class ProverAgent:
 
         complete_file = read_file(self.base_folder, state.item.location.path)
 
-        system_prompt = (
-            PROPOSER_SYSTEM_PROMPT_SINGLE_SHOT
-            if self.config.max_iterations == 1
-            else PROPOSER_SYSTEM_PROMPT
+        system_prompt = build_proposer_system_prompt(
+            max_iterations=self.config.max_iterations,
+            restrict_to_proof_body=self.config.restrict_to_proof_body,
+            user_comments=self.config.user_comments,
         )
-
-        if self.config.user_comments:
-            system_prompt += f"\n\n<user-comments>\n{self.config.user_comments}\n</user-comments>"
 
         query = PROPOSER_USER_PROMPT.format(
             target_theorem=state.item.location.formatted_context,

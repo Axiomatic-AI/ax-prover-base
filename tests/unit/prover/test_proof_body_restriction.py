@@ -69,3 +69,19 @@ def test_restriction_fragment_mentions_key_rules():
     assert "import" in PROOF_BODY_RESTRICTION_PROMPT
     assert "open" in PROOF_BODY_RESTRICTION_PROMPT
     assert "locked" in PROOF_BODY_RESTRICTION_PROMPT.lower()
+
+
+def test_proposer_node_wires_in_the_prompt_builder():
+    """Guard against the proposer node bypassing build_proposer_system_prompt.
+
+    The helper-only tests above pass even if _proposer_node assembles the prompt
+    inline (and thus never appends the locked-file fragment). This asserts the
+    wiring actually exists, passing the restrict flag through.
+    """
+    import inspect
+
+    from ax_prover.prover.agent import ProverAgent
+
+    source = inspect.getsource(ProverAgent._proposer_node)
+    assert "build_proposer_system_prompt(" in source
+    assert "restrict_to_proof_body=self.config.restrict_to_proof_body" in source
