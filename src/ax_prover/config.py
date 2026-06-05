@@ -93,6 +93,7 @@ class ProverConfig:
     )
     summarize_output: SummarizeOutputConfig = field(default_factory=SummarizeOutputConfig)
     user_comments: str | None = None
+    restrict_to_proof_body: bool = False
 
 
 @dataclass
