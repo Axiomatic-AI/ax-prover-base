@@ -289,6 +289,41 @@ class TestExtractFunctionFromContent:
         code = "theorem foo.bar : True := trivial"
         assert extract_function_from_content(code, "foo") is None
 
+    def test_includes_leading_open_in_prefix(self):
+        """A contiguous `open … in` prefix that binds to the decl is included."""
+        code = "open Nat in\ntheorem target (n : Nat) : n = n := by rfl"
+        block = extract_function_from_content(code, "target")
+        assert block is not None
+        assert "open Nat in" in block
+        assert "theorem target" in block
+
+    def test_includes_multiple_in_prefixes(self):
+        """Several stacked `… in` prefix commands are all included."""
+        code = (
+            "set_option maxHeartbeats 400000 in\nopen Nat in\ntheorem target : True := by trivial"
+        )
+        block = extract_function_from_content(code, "target")
+        assert block is not None
+        assert block.startswith("set_option maxHeartbeats 400000 in")
+        assert "open Nat in" in block
+        assert "theorem target" in block
+
+    def test_does_not_pull_in_preceding_unrelated_decl(self):
+        """An ordinary preceding declaration is not pulled into the block."""
+        code = "theorem other : True := trivial\ntheorem target : True := trivial"
+        block = extract_function_from_content(code, "target")
+        assert block is not None
+        assert "other" not in block
+        assert block.startswith("theorem target")
+
+    def test_stops_at_blank_line_before_in_prefix(self):
+        """A blank line separates an `… in` prefix that does not bind to the decl."""
+        code = "open Nat in\n\ntheorem target : True := by trivial"
+        block = extract_function_from_content(code, "target")
+        assert block is not None
+        assert "open Nat in" not in block
+        assert block.startswith("theorem target")
+
 
 class TestExtractTheoremName:
     """Tests for extract_theorem_name function."""

@@ -179,6 +179,39 @@ def strip_comments(src: str) -> str:
     return "".join(out)
 
 
+# A command prefix that binds to the following declaration ends with a standalone `in`
+# keyword (e.g. `open Nat in`, `set_option foo true in`, `variable (x) in`). The negative
+# lookbehind `(?<![\w.])` ensures we match the keyword `in`, not the tail of an identifier
+# like `Fin` or `min`.
+_IN_PREFIX_LINE = re.compile(r"(?<![\w.])in[ \t]*$")
+
+
+def _extend_start_over_in_prefixes(content: str, start_pos: int) -> int:
+    """Move start_pos back over contiguous preceding `... in` command-prefix lines.
+
+    Stops at a blank line or any line that is not an `... in` prefix, so ordinary
+    preceding declarations and comments are never absorbed.
+    """
+    # start_pos may sit on leading whitespace (the matcher's `\s*` can span blank lines),
+    # so advance to the first non-blank line — the real start of the declaration block.
+    while start_pos < len(content) and content[start_pos] in " \t\n":
+        start_pos += 1
+
+    line_start = content.rfind("\n", 0, start_pos) + 1
+    while line_start > 0:
+        # The line above the current block (without its trailing newline).
+        prev_line_end = line_start - 1
+        prev_line_start = content.rfind("\n", 0, prev_line_end) + 1
+        prev_line = content[prev_line_start:prev_line_end]
+
+        if not prev_line.strip() or not _IN_PREFIX_LINE.search(prev_line.rstrip()):
+            break
+
+        line_start = prev_line_start
+
+    return line_start
+
+
 def extract_function_from_content(
     content: str, function_name: str, occurrence: int = 0
 ) -> str | None:
@@ -216,6 +249,13 @@ def extract_function_from_content(
         if not re.search(rf"\b(?:{keywords_pattern})\s+\w+", between):
             start_pos = doc_match.start()
             break
+
+    # Include any contiguous command-prefix lines that bind to this declaration via a
+    # trailing `in` (e.g. `open Nat in`, `set_option ... in`). Without them the bound
+    # command is lost when the block is applied -> "unknown identifier". Walk backward
+    # over preceding lines that end in a standalone ` in` token, stopping at a blank line
+    # or any other line (ordinary decls, comments) so we never absorb unrelated code.
+    start_pos = _extend_start_over_in_prefixes(content, start_pos)
 
     # Find next definition, doc comment, structural keyword, or top-level comment
     # at same or lower indentation. The next declaration may itself carry an
