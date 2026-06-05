@@ -5,6 +5,7 @@ import pytest
 from ax_prover.models.declaration import Declaration, DeclarationType
 from ax_prover.utils.lean_parsing import (
     SEARCH_TACTIC_PATTERN,
+    blank_string_literals,
     count_pattern,
     extract_function_from_content,
     extract_theorem_name,
@@ -13,6 +14,58 @@ from ax_prover.utils.lean_parsing import (
     normalize_location,
     strip_comments,
 )
+
+
+class TestBlankStringLiterals:
+    """Tests for blank_string_literals function."""
+
+    def test_blanks_inner_content_preserves_quotes_and_length(self):
+        src = 'let x := "simp? in here"'
+        result = blank_string_literals(src)
+        assert len(result) == len(src)
+        assert result == 'let x := "' + " " * len("simp? in here") + '"'
+        # Quotes preserved, inner content blanked.
+        assert result[9] == '"'
+        assert result[-1] == '"'
+
+    def test_code_outside_strings_untouched(self):
+        src = "theorem foo : True := by simp"
+        assert blank_string_literals(src) == src
+
+    def test_search_tactic_inside_string_not_matched(self):
+        """count_pattern over blanked source no longer flags a tactic in a string."""
+        src = 'theorem foo : True := by trivial -- note: "use simp? here"'
+        stripped = strip_comments(src)
+        # Without blanking, the comment is gone but if it were a string it would match.
+        blanked = blank_string_literals(stripped)
+        count, _ = count_pattern(blanked, pattern=SEARCH_TACTIC_PATTERN)
+        assert count == 0
+
+    def test_search_tactic_in_string_literal_not_matched(self):
+        src = 'theorem foo : True := by exact (id "use simp? to solve" |> fun _ => trivial)'
+        blanked = blank_string_literals(strip_comments(src))
+        count, _ = count_pattern(blanked, pattern=SEARCH_TACTIC_PATTERN)
+        assert count == 0
+
+    def test_real_search_tactic_still_matched(self):
+        src = "theorem foo : True := by simp?"
+        blanked = blank_string_literals(strip_comments(src))
+        count, _ = count_pattern(blanked, pattern=SEARCH_TACTIC_PATTERN)
+        assert count == 1
+
+    def test_axiom_word_in_string_not_matched(self):
+        src = 'theorem foo : True := by exact (id "this is an axiom" |> fun _ => trivial)'
+        blanked = blank_string_literals(strip_comments(src))
+        count, _ = count_pattern(blanked, pattern=r"\baxiom\b")
+        assert count == 0
+
+    def test_empty_string(self):
+        assert blank_string_literals("") == ""
+
+    def test_no_strings_identity(self):
+        src = "def add (a b : Nat) : Nat := a + b"
+        assert blank_string_literals(src) == src
+
 
 SAMPLE_LEAN_CODE = r"""
 import Mathlib.Topology.Basic
