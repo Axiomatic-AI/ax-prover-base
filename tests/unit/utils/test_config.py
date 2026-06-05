@@ -219,3 +219,10 @@ class TestLoadEnvSecrets:
         """No error when .env.secrets doesn't exist anywhere."""
         monkeypatch.chdir(tmp_path)
         load_env_secrets()  # Should not raise
+
+
+def test_prover_config_restrict_to_proof_body_defaults_false():
+    from ax_prover.config import ProverConfig
+
+    assert ProverConfig().restrict_to_proof_body is False
+    assert ProverConfig(restrict_to_proof_body=True).restrict_to_proof_body is True

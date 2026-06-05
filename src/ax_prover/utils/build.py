@@ -360,6 +360,7 @@ class TemporaryProposal:
         base_folder: str,
         original_location: Location | None,
         proposal: "ProposalMessage",
+        restrict_to_proof_body: bool = False,
     ):
         """Initialize the temporary proposal applier.
 
@@ -367,10 +368,13 @@ class TemporaryProposal:
             base_folder: Base folder path
             original_location: Location object for the original file (None means no location set)
             proposal: ProposalMessage with imports, opens, and code to apply
+            restrict_to_proof_body: When True, do not write new imports or file-level
+                opens to the file — only the proof body is edited.
         """
         self.base_folder = base_folder
         self.original_location = original_location
         self.proposal = proposal
+        self.restrict_to_proof_body = restrict_to_proof_body
         self.location: Location | None = None  # Temp location, set in __enter__
         self.error: str = ""
         self.success: bool = False
@@ -414,17 +418,20 @@ class TemporaryProposal:
                 update={"module_path": temp_module_path}
             )
 
-            if self.proposal.imports:
-                success = edit_imports(self.base_folder, self.location.path, self.proposal.imports)
-                if not success:
-                    self.error = "Failed to apply imports to temp file"
-                    return self
+            if not self.restrict_to_proof_body:
+                if self.proposal.imports:
+                    success = edit_imports(
+                        self.base_folder, self.location.path, self.proposal.imports
+                    )
+                    if not success:
+                        self.error = "Failed to apply imports to temp file"
+                        return self
 
-            if self.proposal.opens:
-                success = edit_opens(self.base_folder, self.location.path, self.proposal.opens)
-                if not success:
-                    self.error = "Failed to apply opens to temp file"
-                    return self
+                if self.proposal.opens:
+                    success = edit_opens(self.base_folder, self.location.path, self.proposal.opens)
+                    if not success:
+                        self.error = "Failed to apply opens to temp file"
+                        return self
 
             if self.proposal.code:
                 # Only allow edits within the function definition
