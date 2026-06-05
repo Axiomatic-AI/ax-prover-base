@@ -123,13 +123,18 @@ class TestScanHelpers:
         assert found == {"A.lean", "B.lean"}
 
     def test_matching_names_case_insensitive_substring(self):
+        # Declarations live inside `namespace Treaps`, so results are qualified.
         names = _matching_declaration_names(SAMPLE_LEAN, "treap")
-        assert names == ["Treap", "Treap.insert", "treap_insert_size"]
+        assert names == [
+            ("Treap", "Treaps.Treap", 0),
+            ("Treap.insert", "Treaps.Treap.insert", 0),
+            ("treap_insert_size", "Treaps.treap_insert_size", 0),
+        ]
 
     def test_matching_names_excludes_structural_keywords(self):
-        # "Treaps" (the namespace) must not be returned even though it matches.
+        # "Treaps" (the namespace) must not be returned as a declaration.
         names = _matching_declaration_names(SAMPLE_LEAN, "Treap")
-        assert "Treaps" not in names
+        assert "Treaps" not in [simple for simple, *_ in names]
 
     def test_matching_names_no_match_returns_empty(self):
         assert _matching_declaration_names(SAMPLE_LEAN, "nonexistent") == []
@@ -138,12 +143,15 @@ class TestScanHelpers:
         # "Treap insert" should match names containing BOTH "treap" and "insert",
         # not require the literal two-word substring (which never matches a name).
         names = _matching_declaration_names(SAMPLE_LEAN, "Treap insert")
-        assert names == ["Treap.insert", "treap_insert_size"]
+        assert names == [
+            ("Treap.insert", "Treaps.Treap.insert", 0),
+            ("treap_insert_size", "Treaps.treap_insert_size", 0),
+        ]
 
     def test_matching_names_multiword_ignores_extra_whitespace(self):
         assert _matching_declaration_names(SAMPLE_LEAN, "  Treap   insert ") == [
-            "Treap.insert",
-            "treap_insert_size",
+            ("Treap.insert", "Treaps.Treap.insert", 0),
+            ("treap_insert_size", "Treaps.treap_insert_size", 0),
         ]
 
     def test_matching_names_multiword_excludes_partial_token_match(self):
@@ -328,3 +336,120 @@ class TestRegistration:
         tool = create_search_lean_local_tool(SearchLeanLocalConfig(), base_folder=str(proj))
         result = tool.func("myThing")
         assert "def myThing" in result
+
+
+# A project exercising namespace qualification and modifier/attribute handling.
+NAMESPACED_LEAN = """import Mathlib
+
+namespace BinaryTree
+
+def insert (t : BinaryTree) (k : Nat) : BinaryTree :=
+  t
+
+noncomputable def dijkstra_rec (g : G) (s : V) : T :=
+  foo
+
+end BinaryTree
+
+@[simp] private def topLevelTagged : Nat := 0
+
+section Helpers
+def in_section : Nat := 1
+end Helpers
+"""
+
+
+@pytest.fixture
+def namespaced_project(tmp_path):
+    root = tmp_path / "challenges"
+    (root / "Challenges").mkdir(parents=True)
+    (root / "lakefile.toml").write_text('name = "challenges"\n')
+    (root / "Challenges" / "Defs.lean").write_text(NAMESPACED_LEAN)
+    return root
+
+
+class TestNamespaceQualification:
+    def test_qualifies_namespaced_declaration(self):
+        # `def insert` inside `namespace BinaryTree` is reachable via "BinaryTree insert".
+        names = _matching_declaration_names(NAMESPACED_LEAN, "BinaryTree insert")
+        assert ("insert", "BinaryTree.insert", 0) in names
+
+    def test_simple_name_preserved_for_extraction(self):
+        # The simple (source) name must remain available for block extraction.
+        names = _matching_declaration_names(NAMESPACED_LEAN, "BinaryTree insert")
+        simple, qualified, _ = next(t for t in names if t[1] == "BinaryTree.insert")
+        assert simple == "insert"
+
+    def test_section_does_not_contribute_to_name(self):
+        # `section Helpers` must NOT prefix `in_section`.
+        names = _matching_declaration_names(NAMESPACED_LEAN, "in_section")
+        assert names == [("in_section", "in_section", 0)]
+
+    def test_no_double_qualification(self):
+        code = "namespace A.B\n\ndef A.B.f : Nat := 0\n\nend A.B\n"
+        names = _matching_declaration_names(code, "f")
+        assert names == [("A.B.f", "A.B.f", 0)]
+
+    def test_nested_dotted_namespace(self):
+        code = "namespace A.B\n\ndef f : Nat := 0\n\nend A.B\n"
+        names = _matching_declaration_names(code, "f")
+        assert names == [("f", "A.B.f", 0)]
+
+    def test_search_displays_qualified_name_for_namespaced_def(self, namespaced_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(namespaced_project))
+        result = searcher.search("BinaryTree insert")
+        assert 'matching "BinaryTree insert"' in result
+        assert "def insert (t : BinaryTree)" in result  # block is the source text
+
+
+class TestModifiedDeclarationSearch:
+    def test_search_finds_noncomputable_def(self, namespaced_project):
+        # Regression: `noncomputable def` declarations were invisible to search.
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(namespaced_project))
+        result = searcher.search("dijkstra_rec")
+        assert "noncomputable def dijkstra_rec" in result
+
+    def test_search_finds_attributed_private_def(self, namespaced_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(namespaced_project))
+        result = searcher.search("topLevelTagged")
+        assert "def topLevelTagged" in result
+
+
+# Two declarations sharing a simple name in different namespaces, same file.
+DUP_SIMPLE_NAME_LEAN = """namespace A
+
+def insert (t : T) : T := AAA
+
+end A
+
+namespace B
+
+def insert (t : T) : T := BBB
+
+end B
+"""
+
+
+@pytest.fixture
+def dup_name_project(tmp_path):
+    root = tmp_path / "challenges"
+    (root / "Challenges").mkdir(parents=True)
+    (root / "lakefile.toml").write_text('name = "challenges"\n')
+    (root / "Challenges" / "Dup.lean").write_text(DUP_SIMPLE_NAME_LEAN)
+    return root
+
+
+class TestAmbiguousSimpleName:
+    def test_matching_names_reports_distinct_occurrences(self):
+        names = _matching_declaration_names(DUP_SIMPLE_NAME_LEAN, "insert")
+        # Each match carries (simple, qualified, occurrence) so the right block can be found.
+        assert names == [("insert", "A.insert", 0), ("insert", "B.insert", 1)]
+
+    def test_search_shows_correct_block_and_line_per_namespace(self, dup_name_project):
+        searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(dup_name_project))
+        result = searcher.search("insert")
+        # Both bodies must appear, each at its own line — not the first block twice.
+        assert ":= AAA" in result
+        assert ":= BBB" in result
+        assert "Challenges/Dup.lean:3" in result  # A.insert
+        assert "Challenges/Dup.lean:9" in result  # B.insert

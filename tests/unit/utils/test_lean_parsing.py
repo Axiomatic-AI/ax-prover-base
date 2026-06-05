@@ -7,6 +7,7 @@ from ax_prover.utils.lean_parsing import (
     count_pattern,
     extract_function_from_content,
     extract_theorem_name,
+    find_declaration_at_line,
     find_declaration_by_name,
     list_all_declarations_in_lean_code,
     normalize_location,
@@ -375,3 +376,89 @@ class TestFindDeclarationByName:
     def test_empty_list(self):
         """Returns None for empty declarations list."""
         assert find_declaration_by_name([], "foo") is None
+
+
+class TestModifiersAndAttributes:
+    """Declarations carrying modifiers (`noncomputable`/`partial`/`private`/...) or inline
+    attributes (`@[simp]`) must be parsed, extracted, and located like any other decl.
+
+    These were previously dropped because the parser keyed off the first whitespace-delimited
+    word, which for `noncomputable def foo` was `noncomputable` (not a keyword).
+    """
+
+    @pytest.mark.parametrize(
+        ("code", "expected_type", "expected_name"),
+        [
+            (
+                "noncomputable def dijkstra_rec (g : G) : T := foo",
+                DeclarationType.NoncomputableDef,
+                "dijkstra_rec",
+            ),
+            (
+                "noncomputable abbrev weightSum : Nat := 0",
+                DeclarationType.NoncomputableAbbrev,
+                "weightSum",
+            ),
+            ("partial def dRec (x : Nat) : Nat := dRec x", DeclarationType.Definition, "dRec"),
+            ("private def secret : Nat := 1", DeclarationType.Definition, "secret"),
+            ("protected def prot : Nat := 2", DeclarationType.Definition, "prot"),
+            ("unsafe def danger : Nat := 0", DeclarationType.Definition, "danger"),
+            ("@[simp] def tagged : Nat := 0", DeclarationType.Definition, "tagged"),
+            ("@[simp, reducible] private def both : Nat := 0", DeclarationType.Definition, "both"),
+        ],
+    )
+    def test_modified_declaration_detected(self, code, expected_type, expected_name):
+        decls = list_all_declarations_in_lean_code(code)
+        assert len(decls) == 1
+        assert decls[0].declaration_type == expected_type
+        assert decls[0].name == expected_name
+
+    def test_names_are_correct_for_modified_decls(self):
+        code = (
+            "noncomputable def relax_neighbors (g : G) : T := foo\n"
+            "private def secret : Nat := 1\n"
+            "@[simp] def tagged : Nat := 0\n"
+        )
+        names = [d.name for d in list_all_declarations_in_lean_code(code)]
+        assert names == ["relax_neighbors", "secret", "tagged"]
+
+    def test_modifier_word_in_body_is_not_a_false_positive(self):
+        # A body line beginning with a modifier-like identifier must not be parsed as a decl.
+        code = "theorem foo : T := by\n  private_helper := bar\n  exact x"
+        names = [d.name for d in list_all_declarations_in_lean_code(code)]
+        assert names == ["foo"]
+
+    def test_extract_noncomputable_def_block(self):
+        code = (
+            "/-- Relaxes neighbours. -/\n"
+            "noncomputable def relax_neighbors (g : G) : T :=\n"
+            "  foo\n\n"
+            "def other : Nat := 0\n"
+        )
+        block = extract_function_from_content(code, "relax_neighbors")
+        assert block is not None
+        assert block.startswith("/-- Relaxes neighbours. -/")
+        assert "noncomputable def relax_neighbors" in block
+        assert "def other" not in block  # stops before the next declaration
+
+    def test_extract_stops_before_next_attributed_decl(self):
+        code = "def first : Nat := 0\n@[simp] def second : Nat := 1\n"
+        block = extract_function_from_content(code, "first")
+        assert block is not None
+        assert "second" not in block
+
+    def test_extract_attributed_def_block(self):
+        code = "@[simp] def tagged : Nat := 0\n"
+        block = extract_function_from_content(code, "tagged")
+        assert block is not None
+        assert block.startswith("@[simp] def tagged")
+
+    def test_find_declaration_by_name_finds_noncomputable_target(self):
+        # Coupling guard: the builder verifies the target via find_declaration_by_name; a
+        # `noncomputable def` target used to be invisible -> false MissingTargetTheorem.
+        decls = list_all_declarations_in_lean_code("noncomputable def foo := 1")
+        assert find_declaration_by_name(decls, "foo") is not None
+
+    def test_sorry_inside_noncomputable_def_attributed_to_it(self):
+        code = "noncomputable def foo : Nat := by\n  sorry"
+        assert find_declaration_at_line(code, 2) == "foo"
