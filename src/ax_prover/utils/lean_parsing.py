@@ -40,7 +40,10 @@ STRIPPABLE_DECLARATION_TYPES = frozenset(
 # one of these delimiters (matching list_all_declarations_in_lean_code's name pattern).
 # Use this after a name instead of `\b`: `\b` treats `.` as a boundary, so "Treap" would
 # wrongly match the earlier "Treap.insert" declaration.
-DECL_NAME_END = r"(?![^\s:({\[\]},])"
+# A universe binder `.{u}` (valid Lean 4 syntax, e.g. `theorem foo.{u} ...`) may directly
+# follow the name, so allow a literal `.{` as a valid boundary too — but still reject a
+# qualified-name continuation like `foo.bar` (where `foo` is a prefix of another decl).
+DECL_NAME_END = r"(?:(?=\.\{)|(?![^\s:({\[\]},]))"
 
 # Search/suggestion tactics that emit "Try this" and must not appear in a final proof.
 # These names are tactic-only — none are API methods ending in "?", so real code like
