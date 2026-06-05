@@ -457,6 +457,41 @@ class TestAmbiguousSimpleName:
         assert "Challenges/Dup.lean:9" in result  # B.insert
 
 
+# A real `def foo` preceded by a commented-out `def foo` (line-start, inside a block
+# comment). The raw-content matcher would otherwise pick the commented one first.
+COMMENTED_DECL_LEAN = """import Mathlib
+
+/-
+def foo := 1
+-/
+def foo := 2
+"""
+
+
+@pytest.fixture
+def commented_decl_project(tmp_path):
+    root = tmp_path / "challenges"
+    (root / "Challenges").mkdir(parents=True)
+    (root / "lakefile.toml").write_text('name = "challenges"\n')
+    (root / "Challenges" / "Commented.lean").write_text(COMMENTED_DECL_LEAN)
+    return root
+
+
+class TestCommentedDeclaration:
+    def test_declaration_line_skips_commented_decl(self):
+        # The real `def foo := 2` is on line 6; the commented one (line 4) must be ignored.
+        assert _declaration_line(COMMENTED_DECL_LEAN, "foo", 0) == 6
+
+    def test_search_returns_real_block_not_commented(self, commented_decl_project):
+        searcher = LocalLeanSearcher(
+            SearchLeanLocalConfig(), base_folder=str(commented_decl_project)
+        )
+        result = searcher.search("foo")
+        assert "def foo := 2" in result
+        assert ":= 1" not in result
+        assert "Challenges/Commented.lean:6" in result
+
+
 class TestIdentifierMatch:
     def test_matches_standalone_identifier(self):
         assert _identifier_match("query_aux", "  x := query_aux n 0")

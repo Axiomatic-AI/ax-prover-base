@@ -152,6 +152,97 @@ def strip_comments(src: str) -> str:
     return "".join(out)
 
 
+def comment_spans(src: str) -> list[tuple[int, int]]:
+    """Character spans (start, end) of every Lean comment region in `src`.
+
+    Mirrors `strip_comments`' state machine — handles `--` line comments, nested
+    `/- … -/` block comments, and leaves string literals intact — but records each
+    comment's character range instead of deleting it. Used to filter out declaration
+    keyword matches that fall inside a comment, so raw-content matching agrees with
+    the comment-stripped enumeration in `list_all_declarations_in_lean_code`.
+    """
+
+    class ParsingState(Enum):
+        Out = 1
+        LineComment = 2
+        BlockComment = 3
+        StringLiteral = 4
+
+    state = ParsingState.Out
+    i = 0
+    depth = 0
+    n = len(src)
+    spans: list[tuple[int, int]] = []
+    comment_start = 0
+
+    while i < n:
+        c = src[i]
+        c2 = src[i : i + 2]
+
+        if state == ParsingState.Out:
+            if c == '"':
+                state = ParsingState.StringLiteral
+                i += 1
+            elif c2 == "--":
+                state = ParsingState.LineComment
+                comment_start = i
+                i += 2
+            elif c2 == "/-":
+                state = ParsingState.BlockComment
+                depth = 1
+                comment_start = i
+                i += 2
+            else:
+                i += 1
+
+        elif state == ParsingState.LineComment:
+            if c == "\n":
+                spans.append((comment_start, i))
+                state = ParsingState.Out
+            i += 1
+
+        elif state == ParsingState.BlockComment:
+            if c2 == "/-":
+                depth += 1
+                i += 2
+            elif c2 == "-/":
+                depth -= 1
+                i += 2
+                if depth == 0:
+                    spans.append((comment_start, i))
+                    state = ParsingState.Out
+            else:
+                i += 1
+
+        elif state == ParsingState.StringLiteral:
+            if c == '"':
+                state = ParsingState.Out
+            i += 1
+
+    # An unterminated line/block comment runs to end-of-input.
+    if state in (ParsingState.LineComment, ParsingState.BlockComment):
+        spans.append((comment_start, n))
+
+    return spans
+
+
+def _in_any_span(offset: int, spans: list[tuple[int, int]]) -> bool:
+    """True if `offset` falls within any (start, end) span (end-exclusive)."""
+    return any(start <= offset < end for start, end in spans)
+
+
+def non_comment_matches(pattern: str, content: str) -> list[re.Match[str]]:
+    """`re.finditer(pattern, content, re.MULTILINE)` matches not starting inside a comment.
+
+    Keeps raw-content occurrence indexing aligned with the comment-stripped
+    enumeration in `list_all_declarations_in_lean_code`, which ignores commented decls.
+    """
+    spans = comment_spans(content)
+    return [
+        m for m in re.finditer(pattern, content, re.MULTILINE) if not _in_any_span(m.start(), spans)
+    ]
+
+
 # A command prefix that binds to the following declaration ends with a standalone `in`
 # keyword (e.g. `open Nat in`, `set_option foo true in`, `variable (x) in`). The negative
 # lookbehind `(?<![\w.])` ensures we match the keyword `in`, not the tail of an identifier
@@ -203,7 +294,7 @@ def extract_function_from_content(
     keywords_pattern = "|".join(LEAN_KEYWORDS)
     pattern = rf"^(\s*){DECL_PREFIX}(?:{_KEYWORDS_ALT})\s+{re.escape(function_name)}{DECL_NAME_END}"
 
-    matches = list(re.finditer(pattern, content, re.MULTILINE))
+    matches = non_comment_matches(pattern, content)
     if occurrence >= len(matches):
         return None
     match = matches[occurrence]
