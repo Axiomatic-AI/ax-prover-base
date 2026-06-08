@@ -873,3 +873,46 @@ def test_searcher_search_returns_fuzzy_suggestion_on_exact_miss(tmp_path):
     result = searcher.search("extractmin")
     assert "No exact match" in result
     assert "extract_min" in result
+
+
+def test_accumulate_skips_oversized_entry_but_keeps_later_small_ones():
+    """An over-budget entry is skipped, not a hard stop: smaller later defs still get cached."""
+    from ax_prover.tools.local_lean_search import MAX_CACHED_DEFINITION_CHARS
+
+    big = "x" * (MAX_CACHED_DEFINITION_CHARS - 1100)  # its entry fits, leaving ~1100 chars
+    huge = "y" * 1400  # entry would overflow the remaining budget -> skipped
+    pool = {
+        "N.a_big": (big, Path("D.lean"), 1),
+        "N.b_huge": (huge, Path("D.lean"), 2),
+        "N.c_small": ("def c := 1", Path("D.lean"), 3),
+    }
+    code = "a_big b_huge c_small"
+    result = accumulate_used_definitions({}, pool, code, target_name="t")
+    assert "N.a_big" in result
+    assert "N.b_huge" not in result  # over budget -> skipped
+    assert "N.c_small" in result  # small, still cached after the skip (continue, not break)
+
+
+def test_accumulate_skips_ambiguous_bare_name_used_as_library_ref():
+    """A local decl with a ubiquitous simple name (min) is cached only on an explicit qualified
+    reference, not on a bare reference that is really a Mathlib/core use."""
+    pool = {"Foo.min": ("def min : Nat := 0", Path("D.lean"), 1)}
+    code = "theorem t : a ≤ min a b := by exact min_le_left a b"  # bare 'min' = library
+    result = accumulate_used_definitions({}, pool, code, target_name="t")
+    assert result == {}
+
+
+def test_accumulate_caches_ambiguous_name_when_qualified_reference_present():
+    pool = {"Foo.min": ("def min : Nat := 0", Path("D.lean"), 1)}
+    code = "theorem t : True := by exact Foo.min"
+    result = accumulate_used_definitions({}, pool, code, target_name="t")
+    assert "Foo.min" in result
+
+
+def test_accumulate_caches_distinctive_namespaced_name_via_bare_ref():
+    """Recall preserved: a distinctive simple name (extract_min) is cached from a bare reference
+    (the agent writes it unqualified after `open`)."""
+    pool = {"BinaryHeap.extract_min": ("def extract_min : Nat := 0", Path("D.lean"), 1)}
+    code = "theorem t : True := by exact extract_min h"
+    result = accumulate_used_definitions({}, pool, code, target_name="t")
+    assert "BinaryHeap.extract_min" in result
