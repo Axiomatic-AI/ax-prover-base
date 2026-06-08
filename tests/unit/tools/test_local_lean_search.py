@@ -863,3 +863,13 @@ def test_collect_fuzzy_matches_ranks_closer_suffix_first(tmp_path):
     results = _collect_fuzzy_matches(files, "decrease_mn", SearchLeanLocalConfig(max_results=2))
     names = [name for name, _block, _locs in results]
     assert names == ["decrease_min", "decrease_key"]  # closer suffix ranked first
+
+
+def test_searcher_search_returns_fuzzy_suggestion_on_exact_miss(tmp_path):
+    root = _make_lake_project(tmp_path)
+    (root / "Def.lean").write_text("def extract_min : Nat := 0\n", encoding="utf-8")
+    searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
+    # "extractmin" exact-misses (underscore) and isn't a body identifier -> fuzzy fallback fires.
+    result = searcher.search("extractmin")
+    assert "No exact match" in result
+    assert "extract_min" in result
