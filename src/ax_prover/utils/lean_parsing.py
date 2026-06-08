@@ -16,6 +16,32 @@ logger = get_logger(__name__)
 # Lean keywords for declarations
 LEAN_KEYWORDS = [d.value for d in DeclarationType]
 
+# Assertion that a declaration name has ended. A name token runs until whitespace or
+# one of these delimiters (matching list_all_declarations_in_lean_code's name pattern).
+# Use this after a name instead of `\b`: `\b` treats `.` as a boundary, so "Treap" would
+# wrongly match the earlier "Treap.insert" declaration.
+# A universe binder `.{u}` (valid Lean 4 syntax, e.g. `theorem foo.{u} ...`) may directly
+# follow the name, so allow a literal `.{` as a valid boundary too — but still reject a
+# qualified-name continuation like `foo.bar` (where `foo` is a prefix of another decl).
+DECL_NAME_END = r"(?:(?=\.\{)|(?![^\s:({\[\]},]))"
+
+# Modifiers that may precede a declaration keyword (e.g. `private def`, `partial def`).
+# `noncomputable` is intentionally absent: it is folded into the compound keywords
+# `noncomputable def` / `noncomputable abbrev` enumerated in DeclarationType.
+DECL_MODIFIERS = ("private", "protected", "partial", "unsafe", "nonrec", "scoped", "local")
+
+# Optional, inline declaration prefix matched before the keyword: zero or more attribute
+# lists (`@[simp]`, `@[simp, reducible]`) followed by zero or more modifier words. Uses
+# `[ \t]` (not `\s`) so it never spans newlines; nested `]` inside `@[...]` is unsupported.
+DECL_PREFIX = (
+    r"(?:@\[[^\]]*\][ \t]*)*"
+    rf"(?:(?:{'|'.join(DECL_MODIFIERS)})[ \t]+)*"
+)
+
+# Declaration keyword alternation, longest-first so compound keywords like
+# `noncomputable def` win over the bare `def`.
+_KEYWORDS_ALT = "|".join(re.escape(kw) for kw in sorted(LEAN_KEYWORDS, key=len, reverse=True))
+
 
 def count_pattern(
     content: str,
@@ -126,22 +152,152 @@ def strip_comments(src: str) -> str:
     return "".join(out)
 
 
-def extract_function_from_content(content: str, function_name: str) -> str | None:
+def comment_spans(src: str) -> list[tuple[int, int]]:
+    """Character spans (start, end) of every Lean comment region in `src`.
+
+    Mirrors `strip_comments`' state machine — handles `--` line comments, nested
+    `/- … -/` block comments, and leaves string literals intact — but records each
+    comment's character range instead of deleting it. Used to filter out declaration
+    keyword matches that fall inside a comment, so raw-content matching agrees with
+    the comment-stripped enumeration in `list_all_declarations_in_lean_code`.
+    """
+
+    class ParsingState(Enum):
+        Out = 1
+        LineComment = 2
+        BlockComment = 3
+        StringLiteral = 4
+
+    state = ParsingState.Out
+    i = 0
+    depth = 0
+    n = len(src)
+    spans: list[tuple[int, int]] = []
+    comment_start = 0
+
+    while i < n:
+        c = src[i]
+        c2 = src[i : i + 2]
+
+        if state == ParsingState.Out:
+            if c == '"':
+                state = ParsingState.StringLiteral
+                i += 1
+            elif c2 == "--":
+                state = ParsingState.LineComment
+                comment_start = i
+                i += 2
+            elif c2 == "/-":
+                state = ParsingState.BlockComment
+                depth = 1
+                comment_start = i
+                i += 2
+            else:
+                i += 1
+
+        elif state == ParsingState.LineComment:
+            if c == "\n":
+                spans.append((comment_start, i))
+                state = ParsingState.Out
+            i += 1
+
+        elif state == ParsingState.BlockComment:
+            if c2 == "/-":
+                depth += 1
+                i += 2
+            elif c2 == "-/":
+                depth -= 1
+                i += 2
+                if depth == 0:
+                    spans.append((comment_start, i))
+                    state = ParsingState.Out
+            else:
+                i += 1
+
+        elif state == ParsingState.StringLiteral:
+            if c == '"':
+                state = ParsingState.Out
+            i += 1
+
+    # An unterminated line/block comment runs to end-of-input.
+    if state in (ParsingState.LineComment, ParsingState.BlockComment):
+        spans.append((comment_start, n))
+
+    return spans
+
+
+def _in_any_span(offset: int, spans: list[tuple[int, int]]) -> bool:
+    """True if `offset` falls within any (start, end) span (end-exclusive)."""
+    return any(start <= offset < end for start, end in spans)
+
+
+def non_comment_matches(pattern: str, content: str) -> list[re.Match[str]]:
+    """`re.finditer(pattern, content, re.MULTILINE)` matches not starting inside a comment.
+
+    Keeps raw-content occurrence indexing aligned with the comment-stripped
+    enumeration in `list_all_declarations_in_lean_code`, which ignores commented decls.
+    """
+    spans = comment_spans(content)
+    return [
+        m for m in re.finditer(pattern, content, re.MULTILINE) if not _in_any_span(m.start(), spans)
+    ]
+
+
+# A command prefix that binds to the following declaration ends with a standalone `in`
+# keyword (e.g. `open Nat in`, `set_option foo true in`, `variable (x) in`). The negative
+# lookbehind `(?<![\w.])` ensures we match the keyword `in`, not the tail of an identifier
+# like `Fin` or `min`.
+_IN_PREFIX_LINE = re.compile(r"(?<![\w.])in[ \t]*$")
+
+
+def _extend_start_over_in_prefixes(content: str, start_pos: int) -> int:
+    """Move start_pos back over contiguous preceding `... in` command-prefix lines.
+
+    Stops at a blank line or any line that is not an `... in` prefix, so ordinary
+    preceding declarations and comments are never absorbed.
+    """
+    # start_pos may sit on leading whitespace (the matcher's `\s*` can span blank lines),
+    # so advance to the first non-blank line — the real start of the declaration block.
+    while start_pos < len(content) and content[start_pos] in " \t\n":
+        start_pos += 1
+
+    line_start = content.rfind("\n", 0, start_pos) + 1
+    while line_start > 0:
+        # The line above the current block (without its trailing newline).
+        prev_line_end = line_start - 1
+        prev_line_start = content.rfind("\n", 0, prev_line_end) + 1
+        prev_line = content[prev_line_start:prev_line_end]
+
+        if not prev_line.strip() or not _IN_PREFIX_LINE.search(prev_line.rstrip()):
+            break
+
+        line_start = prev_line_start
+
+    return line_start
+
+
+def extract_function_from_content(
+    content: str, function_name: str, occurrence: int = 0
+) -> str | None:
     """Extract a function/theorem/lemma definition from Lean code.
 
     Args:
         content: Lean code content as string
         function_name: Name of the function/theorem/lemma to extract
+        occurrence: 0-based index to disambiguate when several declarations share the
+            same simple name in one file (e.g. `A.insert` and `B.insert` written as
+            `def insert` inside different namespaces). 0 selects the first.
 
     Returns:
         The complete definition block including doc comments, or None
     """
     keywords_pattern = "|".join(LEAN_KEYWORDS)
-    pattern = rf"^(\s*)({keywords_pattern})\s+{re.escape(function_name)}\b"
+    pattern = rf"^(\s*){DECL_PREFIX}(?:{_KEYWORDS_ALT})\s+{re.escape(function_name)}{DECL_NAME_END}"
 
-    match = re.search(pattern, content, re.MULTILINE)
-    if not match:
+    matches = non_comment_matches(pattern, content)
+    if occurrence >= len(matches):
         return None
+    match = matches[occurrence]
 
     start_pos = match.start()
     start_indent = len(match.group(1))
@@ -158,9 +314,17 @@ def extract_function_from_content(content: str, function_name: str) -> str | Non
             start_pos = doc_match.start()
             break
 
+    # Include any contiguous command-prefix lines that bind to this declaration via a
+    # trailing `in` (e.g. `open Nat in`, `set_option ... in`). Without them the bound
+    # command is lost when the block is applied -> "unknown identifier". Walk backward
+    # over preceding lines that end in a standalone ` in` token, stopping at a blank line
+    # or any other line (ordinary decls, comments) so we never absorb unrelated code.
+    start_pos = _extend_start_over_in_prefixes(content, start_pos)
+
     # Find next definition, doc comment, structural keyword, or top-level comment
-    # at same or lower indentation
-    end_pattern = rf"^[ \t]{{0,{start_indent}}}(/--|--|{keywords_pattern}(?:\s+|\b))"
+    # at same or lower indentation. The next declaration may itself carry an
+    # attribute/modifier prefix (e.g. `@[simp] def`), so allow DECL_PREFIX before it.
+    end_pattern = rf"^[ \t]{{0,{start_indent}}}(/--|--|{DECL_PREFIX}(?:{_KEYWORDS_ALT})(?:\s+|\b))"
 
     remaining_content = content[match.end() :]
     end_match = re.search(end_pattern, remaining_content, re.MULTILINE)
@@ -171,6 +335,89 @@ def extract_function_from_content(content: str, function_name: str) -> str | Non
         end_pos = len(content)
 
     return content[start_pos:end_pos].strip()
+
+
+# Declaration types that introduce a real, keepable named declaration (def/theorem/
+# lemma/etc.). Used by `_iter_namespaced_declarations` to skip structural entries
+# (namespace/section/end/import/open/...) when resolving a target's occurrence.
+STRIPPABLE_DECLARATION_TYPES = frozenset(
+    {
+        DeclarationType.Definition,
+        DeclarationType.Theorem,
+        DeclarationType.Lemma,
+        DeclarationType.Instance,
+        DeclarationType.Structure,
+        DeclarationType.Class,
+        DeclarationType.Inductive,
+        DeclarationType.Axiom,
+        DeclarationType.Abbrev,
+        DeclarationType.NoncomputableDef,
+        DeclarationType.NoncomputableAbbrev,
+    }
+)
+
+
+def _iter_namespaced_declarations(content: str):
+    """Yield (declaration, qualified_name, occurrence) for each named declaration.
+
+    Tracks namespace/section scope to build each declaration's namespace-qualified name
+    and counts per-simple-name occurrences (aligned with `extract_function_from_content`'s
+    re.finditer ordering). This mirrors the namespace-aware enumeration in
+    `tools.local_lean_search._iter_searchable`; it lives here so both the search tool and
+    `utils.build` can resolve a target without `utils` importing from `tools` (which would
+    create a circular / layering dependency).
+    """
+    namespace_stack: list[str | None] = []
+    name_counts: dict[str, int] = {}
+    for declaration in list_all_declarations_in_lean_code(content):
+        occurrence = name_counts.get(declaration.name, 0)
+        name_counts[declaration.name] = occurrence + 1
+        declaration_type = declaration.declaration_type
+        if declaration_type == DeclarationType.Namespace:
+            namespace_stack.append(declaration.name)
+            continue
+        if declaration_type == DeclarationType.Section:
+            namespace_stack.append(None)  # sections do not contribute to the name
+            continue
+        if declaration_type == DeclarationType.End:
+            if namespace_stack:
+                namespace_stack.pop()
+            continue
+        if declaration_type not in STRIPPABLE_DECLARATION_TYPES:
+            continue
+        prefix = ".".join(part for part in namespace_stack if part)
+        if prefix and not declaration.name.startswith(f"{prefix}."):
+            qualified = f"{prefix}.{declaration.name}"
+        else:
+            qualified = declaration.name
+        yield declaration, qualified, occurrence
+
+
+def resolve_target_occurrence(content: str, target_name: str) -> tuple[str, int] | None:
+    """Resolve `target_name` to the `(simple_name, occurrence)` of its declaration in `content`.
+
+    `target_name` may be namespace-qualified (`Treap.insert`) or simple (`insert`). The
+    namespace-qualified name of each declaration is computed (tracking `namespace`/`section`
+    scope), then a match is sought where the qualified name equals `target_name`, or — for a
+    simple `target_name` — where the qualified name equals it or ends with `.<target_name>`.
+
+    `occurrence` is the 0-based index among declarations sharing the SIMPLE name, suitable
+    for passing to `extract_function_from_content`.
+
+    Returns None when there is no match or the match is ambiguous (more than one distinct
+    declaration matches), so callers can fall back to the conservative occurrence-0 default.
+    """
+    matches: list[tuple[str, int]] = []
+    is_qualified = "." in target_name
+    for declaration, qualified, occurrence in _iter_namespaced_declarations(content):
+        if qualified == target_name:
+            matches.append((declaration.name, occurrence))
+        elif not is_qualified and qualified.endswith(f".{target_name}"):
+            matches.append((declaration.name, occurrence))
+
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def get_function_from_location(base_folder: str, location: Location) -> str | None:
@@ -328,12 +575,16 @@ def list_all_declarations_in_lean_code(raw_code: str) -> list[Declaration]:
 
     declarations = []
     declaration = None
-    declaration_pattern = re.compile(r"(\w+)\s+([^\s:({[\]},]+)\s*(.*)")
+    # Match an optional attribute/modifier prefix, then the keyword (longest-first so
+    # `noncomputable def` beats `def`), the name, and the rest of the line.
+    declaration_pattern = re.compile(
+        rf"^{DECL_PREFIX}({_KEYWORDS_ALT})\s+([^\s:({{[\]}},]+)\s*(.*)"
+    )
     code = strip_comments(raw_code)
 
     for line in code.split("\n"):
         declaration_match = declaration_pattern.match(line.strip())
-        if declaration_match and declaration_match.group(1) in DeclarationType:
+        if declaration_match:
             if declaration is not None:
                 declarations.append(declaration)
             declaration = Declaration(
@@ -437,8 +688,7 @@ def find_declaration_at_line(content: str, line_number: int) -> str | None:
     if line_number > len(lines):
         return None
 
-    keywords_pattern = "|".join(LEAN_KEYWORDS)
-    pattern = rf"^(\s*)({keywords_pattern})\s+([\w.]+)"
+    pattern = rf"^(\s*){DECL_PREFIX}({_KEYWORDS_ALT})\s+([\w.]+)"
 
     declarations: list[tuple[str, int, int]] = []
 

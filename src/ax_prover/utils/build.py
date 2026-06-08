@@ -14,7 +14,7 @@ from ..config import LeanConfig
 from ..models.files import Location
 from ..utils import get_logger
 from ..utils.files import edit_function, edit_imports, edit_opens, read_file
-from ..utils.lean_parsing import extract_function_from_content
+from ..utils.lean_parsing import extract_function_from_content, resolve_target_occurrence
 
 if TYPE_CHECKING:
     from ax_prover.models.messages import ProposalMessage
@@ -427,9 +427,19 @@ class TemporaryProposal:
                     return self
 
             if self.proposal.code:
-                # Only allow edits within the function definition
+                # Only allow edits within the function definition. Resolve the correct
+                # occurrence of the target (the proposal may contain several declarations
+                # sharing the target's simple name, e.g. `A.insert` and `B.insert`); fall
+                # back to the first occurrence when resolution is ambiguous or finds nothing
+                # so the common single-declaration case is unchanged.
+                resolved = resolve_target_occurrence(self.proposal.code, self.location.name)
+                if resolved is not None:
+                    simple_name, occurrence = resolved
+                else:
+                    simple_name = self.location.name
+                    occurrence = 0
                 filtered_code = extract_function_from_content(
-                    self.proposal.code, self.location.name
+                    self.proposal.code, simple_name, occurrence
                 )
                 success = edit_function(self.base_folder, self.location, filtered_code)
                 if not success:

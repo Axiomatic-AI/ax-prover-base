@@ -27,6 +27,12 @@ from ..models.messages import (
 )
 from ..models.proving import ProverResult, ReviewDecision
 from ..tools import create_tool
+from ..tools.local_lean_search import (
+    LOCAL_LEAN_SEARCH_TOOL_TYPE,
+    LocalLeanSearcher,
+    accumulate_used_definitions,
+)
+from ..tools.registry import tool_name_from_type
 from ..utils import (
     attach_builder_files,
     attach_prover_logs_if_enabled,
@@ -55,6 +61,7 @@ from . import memory as memory_module
 from .memory import BaseMemory
 from .prompts import (
     ATTEMPT_TEMPLATE,
+    LOCAL_DEFINITIONS_USER_PROMPT,
     PREVIOUS_ATTEMPT_USER_PROMPT,
     PROPOSER_SYSTEM_PROMPT,
     PROPOSER_SYSTEM_PROMPT_SINGLE_SHOT,
@@ -92,6 +99,7 @@ class ProverAgent:
             self.lean_semaphore = Semaphore(self.runtime_config.lean.max_concurrent_builds)
 
         self.proposer_tools = []
+        self._local_searcher: LocalLeanSearcher | None = None
 
         self.llm_client = LLMClient(self.config.prover_llm)
 
@@ -133,6 +141,7 @@ class ProverAgent:
         )
 
         instance.proposer_tools = await instance._create_tools()
+        instance._local_searcher = instance._find_local_searcher()
         instance.app = instance._build_graph()
 
         return instance
@@ -143,7 +152,7 @@ class ProverAgent:
         for tool_config in self.config.proposer_tools.values():
             if tool_config is None:
                 continue
-            tool = await create_tool(tool_config)
+            tool = await create_tool(tool_config, base_folder=self.base_folder)
             if tool is not None:
                 tools.append(tool)
         return tools
@@ -235,9 +244,63 @@ class ProverAgent:
         half = (self.max_input_tokens - len(message_separator)) // 2
         return f"{message[:half]}{message_separator}{message[-half:]}"
 
+    def _find_local_searcher(self) -> LocalLeanSearcher | None:
+        """Locate the live LocalLeanSearcher behind the local-search tool, if configured."""
+        local_tool_name = tool_name_from_type(LOCAL_LEAN_SEARCH_TOOL_TYPE)
+        for tool in self.proposer_tools:
+            if tool.name == local_tool_name:
+                bound = getattr(getattr(tool, "func", None), "__self__", None)
+                if isinstance(bound, LocalLeanSearcher):
+                    return bound
+                self.logger.warning(
+                    "Local search tool is configured but its searcher instance could not be "
+                    "recovered; used-definition caching is disabled for this run."
+                )
+        return None
+
+    def _accumulate_used_definitions(self, state: ProverAgentState) -> dict[str, str]:
+        """Append local-search results referenced by the latest proposal to the run cache."""
+        if self._local_searcher is None or not state.last_proposal:
+            return dict(state.used_definitions)
+        target_name = state.item.location.name if state.item.location else None
+        return accumulate_used_definitions(
+            state.used_definitions,
+            self._local_searcher.returned_declarations,
+            state.last_proposal.code,
+            target_name,
+        )
+
+    def _render_used_definitions(self, used_definitions: dict[str, str]) -> str | None:
+        """Render the <local-definitions> block, bounded to a fraction of the input budget.
+
+        Whole entries are dropped from the end (verbatim source is never chopped mid-definition) so
+        the cache cannot crowd out the proof state on a token-tight model; at least one entry is
+        always kept, and any drop is noted. Returns None when there is nothing to inject.
+        """
+        if not used_definitions:
+            return None
+        budget = self.max_input_tokens // 4  # chars; an upper bound on the block's token cost
+        kept: list[str] = []
+        total = 0
+        omitted = 0
+        for entry in used_definitions.values():
+            if kept and total + len(entry) > budget:
+                omitted += 1
+                continue
+            kept.append(entry)
+            total += len(entry)
+        definitions = "\n\n".join(kept)
+        if omitted:
+            definitions += (
+                f"\n\n-- ({omitted} more cached definition(s) omitted to fit the context)"
+            )
+        return LOCAL_DEFINITIONS_USER_PROMPT.format(definitions=definitions)
+
     async def _memory_processor_node(self, state: ProverAgentState) -> dict:
-        """Process memory using the configured memory strategy."""
-        return await self.memory.process(state)
+        """Process memory using the configured strategy, plus accumulate used local definitions."""
+        result = await self.memory.process(state)
+        result["used_definitions"] = self._accumulate_used_definitions(state)
+        return result
 
     async def _proposer_node(self, state: ProverAgentState, config: RunnableConfig) -> dict:
         self.logger.info(
@@ -279,6 +342,10 @@ class ProverAgent:
 
         if state.experience:
             query = "\n\n".join([query, state.experience])
+
+        definitions_block = self._render_used_definitions(state.used_definitions)
+        if definitions_block:
+            query = "\n\n".join([query, definitions_block])
 
         context_messages = [
             SystemMessage(content=system_prompt),
