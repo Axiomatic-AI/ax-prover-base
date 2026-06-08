@@ -15,9 +15,11 @@ from ax_prover.tools.local_lean_search import (
     SearchLeanLocalConfig,
     _body_matching_declarations,
     _declaration_line,
+    _fuzzy_score,
     _identifier_match,
     _iter_lean_files,
     _matching_declaration_names,
+    _normalize_tokens,
     _search_root,
     _walk_down_for_roots,
     _walk_up_for_root,
@@ -760,3 +762,26 @@ def test_searcher_records_nothing_on_miss(tmp_path):
     searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
     searcher.search("totally_absent_name")
     assert searcher.returned_declarations == {}
+
+
+def test_normalize_tokens_splits_camel_snake_and_qualifier():
+    assert _normalize_tokens("BinaryHeap.decreaseKey") == ["decrease", "key"]
+    assert _normalize_tokens("extract_min") == ["extract", "min"]
+
+
+def test_fuzzy_score_high_for_near_miss():
+    # Underscore/spelling differences still score high.
+    assert _fuzzy_score("extractmin", "BinaryHeap.extract_min") >= 0.8
+    assert _fuzzy_score("decrese_min", "decrease_min") >= 0.7  # typo
+
+
+def test_fuzzy_score_rewards_single_token_match():
+    # Query matches one token of a compound name.
+    assert _fuzzy_score("priority", "decreasePriority") >= 0.6
+
+
+def test_fuzzy_score_low_for_unrelated():
+    # An unrelated name must score below the suggestion gate, so it is never suggested.
+    from ax_prover.tools.local_lean_search import FUZZY_THRESHOLD
+
+    assert _fuzzy_score("heapify", "WeightedGraph") < FUZZY_THRESHOLD

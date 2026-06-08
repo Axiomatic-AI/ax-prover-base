@@ -9,6 +9,7 @@ import os
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from langchain_core.tools import StructuredTool
@@ -104,6 +105,39 @@ _KEYWORDS_PATTERN = "|".join(
 # non-identifier characters (so "query_aux" won't hit inside "query_auxN" and "insert"
 # won't hit inside "Treap.insert").
 _IDENT_CHAR = r"[0-9A-Za-z_'.]"
+
+
+# Minimum similarity for a fuzzy name suggestion when exact matching finds nothing.
+FUZZY_THRESHOLD = 0.6
+
+
+def _normalize_tokens(name: str) -> list[str]:
+    """Lowercased identifier tokens: drop the namespace qualifier, split on '_' and camelCase."""
+    simple = name.rsplit(".", 1)[-1]
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", simple)
+    return [part.lower() for part in re.split(r"[._\s]+", spaced) if part]
+
+
+def _fuzzy_score(query: str, name: str) -> float:
+    """Similarity in [0, 1] between `query` and a declaration's (final) name.
+
+    Combines a whole-string ratio (ignoring underscores) with the best per-query-token ratio, so a
+    query matching a single token of a compound name (e.g. 'priority' vs 'decreasePriority') still
+    scores well.
+    """
+    simple = name.rsplit(".", 1)[-1].lower()
+    query_squashed = query.lower().replace("_", "").replace(" ", "")
+    whole = SequenceMatcher(None, query_squashed, simple.replace("_", "")).ratio()
+
+    name_tokens = _normalize_tokens(name)
+    query_tokens = _normalize_tokens(query) or [query_squashed]
+    token_score = 0.0
+    for query_token in query_tokens:
+        best = max(
+            (SequenceMatcher(None, query_token, nt).ratio() for nt in name_tokens), default=0.0
+        )
+        token_score = max(token_score, best)
+    return max(whole, token_score)
 
 
 def _identifier_match(token: str, text: str) -> bool:
