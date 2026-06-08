@@ -831,6 +831,30 @@ def test_format_results_default_header_unchanged():
     assert out.startswith('Found 1 declaration(s) matching "foo":')
 
 
+def test_search_root_exact_match_wins_no_fuzzy(tmp_path):
+    (tmp_path / "Def.lean").write_text("def extract_min : Nat := 0\n", encoding="utf-8")
+    text, decls = _search_root(tmp_path, "extract_min", SearchLeanLocalConfig())
+    assert "No exact match" not in text
+    assert text.startswith('Found 1 declaration(s) matching "extract_min":')
+    assert len(decls) == 1
+
+
+def test_search_root_fuzzy_fires_on_exact_miss(tmp_path):
+    (tmp_path / "Def.lean").write_text("def extract_min : Nat := 0\n", encoding="utf-8")
+    # "extractmin" is NOT a substring of "extract_min" (underscore) -> exact miss -> fuzzy.
+    text, decls = _search_root(tmp_path, "extractmin", SearchLeanLocalConfig())
+    assert "No exact match" in text
+    assert "extract_min" in text
+    assert decls and decls[0][0] == "extract_min"
+
+
+def test_search_root_genuine_miss_returns_empty(tmp_path):
+    (tmp_path / "Def.lean").write_text("def extract_min : Nat := 0\n", encoding="utf-8")
+    text, decls = _search_root(tmp_path, "zzz_no_name_zzz", SearchLeanLocalConfig())
+    assert "No declarations matching" in text
+    assert decls == []
+
+
 def test_collect_fuzzy_matches_ranks_closer_suffix_first(tmp_path):
     (tmp_path / "Def.lean").write_text(
         "def decrease_key : Nat := 0\ndef decrease_min : Nat := 1\n", encoding="utf-8"

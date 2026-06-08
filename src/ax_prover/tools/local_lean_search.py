@@ -442,10 +442,14 @@ def _collect_fuzzy_matches(
 def _search_root(
     root: Path, query: str, config: SearchLeanLocalConfig, *, label: str = "LocalLeanSearch"
 ) -> tuple[str, list[tuple[str, str, list[tuple[Path, int]]]]]:
-    """Search `root` by declaration name; fall back to body search only if name finds nothing.
+    """Search by declaration name; if none, fall back to body-identifier search; if still none,
+    fall back to fuzzy name suggestions.
 
-    Returns the formatted text plus the structured declarations it formatted (empty on no match).
-    Walks the tree and reads each file once; the body fallback reuses the cached contents.
+    A body match is an exact-identifier hit and so outranks an approximate fuzzy name match;
+    fuzzy is the last resort before reporting no match. Each tier fires only when the previous
+    one finds nothing, so good exact searches are unaffected. Returns the formatted text plus the
+    structured declarations it formatted (empty on no match). Walks the tree and reads each file
+    once; later tiers reuse the cached contents.
     """
     files = _read_lean_files(root)
     decls = _collect_matches(files, query, body=False)
@@ -456,6 +460,10 @@ def _search_root(
     if body_decls:
         logger.info(f"{label}: Found {len(body_decls)} body matches for '{query}' under {root}")
         return _format_results(query, body_decls, config, body_match=True), body_decls
+    fuzzy_decls = _collect_fuzzy_matches(files, query, config)
+    if fuzzy_decls:
+        logger.info(f"{label}: Found {len(fuzzy_decls)} fuzzy matches for '{query}' under {root}")
+        return _format_results(query, fuzzy_decls, config, fuzzy=True), fuzzy_decls
     logger.info(f"{label}: No results for '{query}'")
     return f'No declarations matching "{query}" found.', []
 
@@ -525,6 +533,7 @@ class LocalLeanSearchInput(BaseModel):
             "Keyword(s) to match against declaration names (case-insensitive). "
             "Multiple words match names containing all of them, e.g. 'Treap insert' "
             "finds `Treap.insert`."
+            " If nothing matches exactly, the closest names are returned as suggestions."
         ),
     )
 
@@ -545,6 +554,7 @@ Mathlib and other dependencies are excluded — use the lean_search tool for tho
 
 Pass a single keyword (e.g. "Treap" or "extract_min"). Multiple words match names
 containing all of them, so "Treap insert" finds `Treap.insert`.
+If no name matches your keyword exactly, the closest declaration names are returned as fuzzy suggestions.
 
 Use this to retrieve project-local definitions you need to reference in a proof,
 e.g. search "Treap" to get the definition of a local `Treap` structure.""",
