@@ -14,10 +14,15 @@ from ax_prover.tools.local_lean_search import (
     LocalLeanSearcher,
     SearchLeanLocalConfig,
     _body_matching_declarations,
+    _collect_fuzzy_matches,
     _declaration_line,
+    _format_results,
+    _fuzzy_matching_declarations,
+    _fuzzy_score,
     _identifier_match,
     _iter_lean_files,
     _matching_declaration_names,
+    _normalize_tokens,
     _search_root,
     _walk_down_for_roots,
     _walk_up_for_root,
@@ -760,3 +765,111 @@ def test_searcher_records_nothing_on_miss(tmp_path):
     searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
     searcher.search("totally_absent_name")
     assert searcher.returned_declarations == {}
+
+
+def test_normalize_tokens_splits_camel_snake_and_qualifier():
+    assert _normalize_tokens("BinaryHeap.decreaseKey") == ["decrease", "key"]
+    assert _normalize_tokens("extract_min") == ["extract", "min"]
+
+
+def test_fuzzy_score_high_for_near_miss():
+    # Underscore/spelling differences still score high.
+    assert _fuzzy_score("extractmin", "BinaryHeap.extract_min") >= 0.8
+    assert _fuzzy_score("decrese_min", "decrease_min") >= 0.7  # typo
+
+
+def test_fuzzy_score_rewards_single_token_match():
+    # Query matches one token of a compound name.
+    assert _fuzzy_score("priority", "decreasePriority") >= 0.6
+
+
+def test_fuzzy_score_low_for_unrelated():
+    # An unrelated name must score below the suggestion gate, so it is never suggested.
+    from ax_prover.tools.local_lean_search import FUZZY_THRESHOLD
+
+    assert _fuzzy_score("heapify", "WeightedGraph") < FUZZY_THRESHOLD
+
+
+def test_fuzzy_matching_declarations_finds_close_name():
+    content = "def extract_min : Nat := 0\ndef heapify : Nat := 1\n"
+    matches = _fuzzy_matching_declarations(content, "extractmin")
+    names = [qualified for _simple, qualified, _occ, _score in matches]
+    assert "extract_min" in names
+    assert "heapify" not in names
+
+
+def test_collect_fuzzy_matches_sorts_by_score_and_caps(tmp_path):
+    (tmp_path / "Def.lean").write_text(
+        "def decrease_key : Nat := 0\ndef decrease_min : Nat := 1\ndef unrelated : Nat := 2\n",
+        encoding="utf-8",
+    )
+    files = [(Path("Def.lean"), (tmp_path / "Def.lean").read_text(encoding="utf-8"))]
+    results = _collect_fuzzy_matches(files, "decrease_mn", SearchLeanLocalConfig(max_results=1))
+    assert len(results) == 1  # cap respected
+    assert results[0][0] == "decrease_min"  # closest by score ranked first
+
+
+def test_fuzzy_score_preserves_recall_for_single_token_of_long_name():
+    from ax_prover.tools.local_lean_search import FUZZY_THRESHOLD
+
+    # A short query that exactly matches one token of a long compound name must stay suggestible.
+    assert _fuzzy_score("fold", "Algebra.leftFoldOverMonoidWithIdentity") >= FUZZY_THRESHOLD
+
+
+def test_format_results_fuzzy_header():
+    decls = [("extract_min", "def extract_min := 0", [(Path("Def.lean"), 1)])]
+    out = _format_results("extractmin", decls, SearchLeanLocalConfig(), fuzzy=True)
+    assert out.startswith('No exact match for "extractmin". Closest declaration(s):')
+    assert "No exact match" in out
+    assert "extractmin" in out
+    assert "fuzzy match" in out
+
+
+def test_format_results_default_header_unchanged():
+    decls = [("foo", "def foo := 0", [(Path("Def.lean"), 1)])]
+    out = _format_results("foo", decls, SearchLeanLocalConfig())
+    assert out.startswith('Found 1 declaration(s) matching "foo":')
+
+
+def test_search_root_exact_match_wins_no_fuzzy(tmp_path):
+    (tmp_path / "Def.lean").write_text("def extract_min : Nat := 0\n", encoding="utf-8")
+    text, decls = _search_root(tmp_path, "extract_min", SearchLeanLocalConfig())
+    assert "No exact match" not in text
+    assert text.startswith('Found 1 declaration(s) matching "extract_min":')
+    assert len(decls) == 1
+
+
+def test_search_root_fuzzy_fires_on_exact_miss(tmp_path):
+    (tmp_path / "Def.lean").write_text("def extract_min : Nat := 0\n", encoding="utf-8")
+    # "extractmin" is NOT a substring of "extract_min" (underscore) -> exact miss -> fuzzy.
+    text, decls = _search_root(tmp_path, "extractmin", SearchLeanLocalConfig())
+    assert "No exact match" in text
+    assert "extract_min" in text
+    assert decls and decls[0][0] == "extract_min"
+
+
+def test_search_root_genuine_miss_returns_empty(tmp_path):
+    (tmp_path / "Def.lean").write_text("def extract_min : Nat := 0\n", encoding="utf-8")
+    text, decls = _search_root(tmp_path, "zzz_no_name_zzz", SearchLeanLocalConfig())
+    assert "No declarations matching" in text
+    assert decls == []
+
+
+def test_collect_fuzzy_matches_ranks_closer_suffix_first(tmp_path):
+    (tmp_path / "Def.lean").write_text(
+        "def decrease_key : Nat := 0\ndef decrease_min : Nat := 1\n", encoding="utf-8"
+    )
+    files = [(Path("Def.lean"), (tmp_path / "Def.lean").read_text(encoding="utf-8"))]
+    results = _collect_fuzzy_matches(files, "decrease_mn", SearchLeanLocalConfig(max_results=2))
+    names = [name for name, _block, _locs in results]
+    assert names == ["decrease_min", "decrease_key"]  # closer suffix ranked first
+
+
+def test_searcher_search_returns_fuzzy_suggestion_on_exact_miss(tmp_path):
+    root = _make_lake_project(tmp_path)
+    (root / "Def.lean").write_text("def extract_min : Nat := 0\n", encoding="utf-8")
+    searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
+    # "extractmin" exact-misses (underscore) and isn't a body identifier -> fuzzy fallback fires.
+    result = searcher.search("extractmin")
+    assert "No exact match" in result
+    assert "extract_min" in result

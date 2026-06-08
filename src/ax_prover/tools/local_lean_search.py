@@ -9,6 +9,7 @@ import os
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from langchain_core.tools import StructuredTool
@@ -104,6 +105,44 @@ _KEYWORDS_PATTERN = "|".join(
 # non-identifier characters (so "query_aux" won't hit inside "query_auxN" and "insert"
 # won't hit inside "Treap.insert").
 _IDENT_CHAR = r"[0-9A-Za-z_'.]"
+
+
+# Minimum similarity for a fuzzy name suggestion when exact matching finds nothing.
+FUZZY_THRESHOLD = 0.6
+
+
+def _normalize_tokens(name: str) -> list[str]:
+    """Lowercased identifier tokens: drop the namespace qualifier, split on '_' and camelCase."""
+    simple = name.rsplit(".", 1)[-1]
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", simple)
+    return [part.lower() for part in re.split(r"[._\s]+", spaced) if part]
+
+
+def _fuzzy_score(query: str, name: str) -> float:
+    """Similarity in [0, 1] between `query` and a declaration's (final) name.
+
+    Takes the larger of a whole-string ratio (ignoring underscores) and a token score that
+    averages, over each query token, its best match against the name's tokens. Averaging keeps a
+    short query that matches one token of a long compound name scoring high (recall), while still
+    discriminating names that differ only in a non-shared token so ranking can break ties (e.g.
+    `decrease_min` outranks `decrease_key` for query `decrease_mn`).
+    """
+    simple = name.rsplit(".", 1)[-1].lower()
+    query_squashed = query.lower().replace("_", "").replace(" ", "")
+    whole = SequenceMatcher(None, query_squashed, simple.replace("_", "")).ratio()
+
+    name_tokens = _normalize_tokens(name)
+    query_tokens = _normalize_tokens(query)
+    if query_tokens and name_tokens:
+        token_score = sum(
+            max(
+                SequenceMatcher(None, query_token, name_token).ratio() for name_token in name_tokens
+            )
+            for query_token in query_tokens
+        ) / len(query_tokens)
+    else:
+        token_score = 0.0
+    return max(whole, token_score)
 
 
 def _identifier_match(token: str, text: str) -> bool:
@@ -247,6 +286,26 @@ def _body_matching_declarations(content: str, query: str) -> list[tuple[str, str
     return results
 
 
+def _fuzzy_matching_declarations(
+    content: str, query: str, threshold: float = FUZZY_THRESHOLD
+) -> list[tuple[str, str, int, float]]:
+    """`(simple_name, qualified_name, occurrence, score)` for declarations whose name is a close
+    fuzzy match to `query` (score >= threshold). De-duplicated by qualified name, source order.
+    """
+    if not query.strip():
+        return []
+    results: list[tuple[str, str, int, float]] = []
+    seen: set[str] = set()
+    for declaration, qualified, occurrence in _iter_searchable(content):
+        if qualified in seen:
+            continue
+        score = _fuzzy_score(query, qualified)
+        if score >= threshold:
+            seen.add(qualified)
+            results.append((declaration.name, qualified, occurrence, score))
+    return results
+
+
 def _declaration_line(content: str, name: str, occurrence: int = 0) -> int:
     """1-based line number where the declaration of `name` begins (keyword line).
 
@@ -271,6 +330,7 @@ def _format_results(
     declarations: list[tuple[str, str, list[tuple[Path, int]]]],
     config: SearchLeanLocalConfig,
     body_match: bool = False,
+    fuzzy: bool = False,
 ) -> str:
     """Render unique declarations, capping by max_results and max_chars.
 
@@ -280,8 +340,12 @@ def _format_results(
     caps) is listed by name.
     """
     truncation_marker = "\n-- … (truncated; refine your query for the full declaration)"
-    header = f'Found {len(declarations)} declaration(s) matching "{query}":'
-    note = " (matched in body)" if body_match else ""
+    if fuzzy:
+        header = f'No exact match for "{query}". Closest declaration(s):'
+        note = " (fuzzy match)"
+    else:
+        header = f'Found {len(declarations)} declaration(s) matching "{query}":'
+        note = " (matched in body)" if body_match else ""
     shown: list[str] = []
     overflow: list[str] = []
     total = len(header)
@@ -354,13 +418,38 @@ def _collect_matches(
     return [(name, block, locations) for (name, block), locations in grouped.items()]
 
 
+def _collect_fuzzy_matches(
+    files: list[tuple[Path, str]], query: str, config: SearchLeanLocalConfig
+) -> list[tuple[str, str, list[tuple[Path, int]]]]:
+    """Group fuzzy matches across files, ranked by descending score, capped to `max_results`."""
+    grouped: dict[tuple[str, str], list[tuple[Path, int]]] = {}
+    scores: dict[str, float] = {}
+    for relative_path, content in files:
+        for simple_name, qualified_name, occurrence, score in _fuzzy_matching_declarations(
+            content, query
+        ):
+            block = extract_function_from_content(content, simple_name, occurrence)
+            if block is None:
+                continue
+            line = _declaration_line(content, simple_name, occurrence)
+            grouped.setdefault((qualified_name, block), []).append((relative_path, line))
+            scores[qualified_name] = max(scores.get(qualified_name, 0.0), score)
+    results = [(name, block, locations) for (name, block), locations in grouped.items()]
+    results.sort(key=lambda result: scores.get(result[0], 0.0), reverse=True)
+    return results[: config.max_results]
+
+
 def _search_root(
     root: Path, query: str, config: SearchLeanLocalConfig, *, label: str = "LocalLeanSearch"
 ) -> tuple[str, list[tuple[str, str, list[tuple[Path, int]]]]]:
-    """Search `root` by declaration name; fall back to body search only if name finds nothing.
+    """Search by declaration name; if none, fall back to body-identifier search; if still none,
+    fall back to fuzzy name suggestions.
 
-    Returns the formatted text plus the structured declarations it formatted (empty on no match).
-    Walks the tree and reads each file once; the body fallback reuses the cached contents.
+    A body match is an exact-identifier hit and so outranks an approximate fuzzy name match;
+    fuzzy is the last resort before reporting no match. Each tier fires only when the previous
+    one finds nothing, so good exact searches are unaffected. Returns the formatted text plus the
+    structured declarations it formatted (empty on no match). Walks the tree and reads each file
+    once; later tiers reuse the cached contents.
     """
     files = _read_lean_files(root)
     decls = _collect_matches(files, query, body=False)
@@ -371,6 +460,10 @@ def _search_root(
     if body_decls:
         logger.info(f"{label}: Found {len(body_decls)} body matches for '{query}' under {root}")
         return _format_results(query, body_decls, config, body_match=True), body_decls
+    fuzzy_decls = _collect_fuzzy_matches(files, query, config)
+    if fuzzy_decls:
+        logger.info(f"{label}: Found {len(fuzzy_decls)} fuzzy matches for '{query}' under {root}")
+        return _format_results(query, fuzzy_decls, config, fuzzy=True), fuzzy_decls
     logger.info(f"{label}: No results for '{query}'")
     return f'No declarations matching "{query}" found.', []
 
@@ -440,6 +533,7 @@ class LocalLeanSearchInput(BaseModel):
             "Keyword(s) to match against declaration names (case-insensitive). "
             "Multiple words match names containing all of them, e.g. 'Treap insert' "
             "finds `Treap.insert`."
+            " If nothing matches exactly, the closest names are returned as suggestions."
         ),
     )
 
@@ -460,6 +554,7 @@ Mathlib and other dependencies are excluded — use the lean_search tool for tho
 
 Pass a single keyword (e.g. "Treap" or "extract_min"). Multiple words match names
 containing all of them, so "Treap insert" finds `Treap.insert`.
+If no name matches your keyword exactly, the closest declaration names are returned as fuzzy suggestions.
 
 Use this to retrieve project-local definitions you need to reference in a proof,
 e.g. search "Treap" to get the definition of a local `Treap` structure.""",

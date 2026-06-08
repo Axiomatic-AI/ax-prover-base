@@ -162,11 +162,18 @@ later iteration even if a subsequent attempt stops referencing it. The list is *
 
 ### Behavior
 
-A new matching tier inside `_search_root`, **firing only when exact name matching returns zero**:
+A new matching tier inside `_search_root`, **firing only when both exact name matching and the
+body-identifier fallback return zero**:
 
 ```
-exact name match  →  (NEW) fuzzy name match  →  body-identifier match
+exact name match  →  body-identifier match  →  (NEW) fuzzy name match
 ```
+
+> **Implementation note:** the tier order was refined during implementation from the originally
+> planned exact → fuzzy → body to **exact → body → fuzzy**. A body-identifier match is an *exact*
+> hit (the literal identifier appears inside a declaration's body, e.g. a `where`-helper), so it
+> should outrank an *approximate* fuzzy name guess. Fuzzy is therefore the true last resort before
+> a genuine no-match.
 
 This keeps exact searches clean and fast and only spends recall effort on a genuine miss — important
 because WS1's whole purpose is reducing context bloat, so fuzzy must not blend approximate matches
@@ -180,8 +187,9 @@ into otherwise-good exact results.
   threshold (≈0.6). Returns the same `(simple_name, qualified_name, occurrence)` tuple shape the
   existing tiers use, so `_collect_matches`-style grouping and `_format_results` are reused.
 - `_format_results` gains a fuzzy flag that renders a clear header:
-  `No exact match — closest names:` (analogous to the existing `body_match` note). Capped by the same
-  `max_results` / `max_chars` budget so it cannot bloat context.
+  `No exact match for "<query>". Closest declaration(s):` (analogous to the existing `body_match`
+  note, plus a per-entry `(fuzzy match)` marker). Capped by the same `max_results` / `max_chars`
+  budget so it cannot bloat context.
 - Tool description and the `query` field description mention the fuzzy fallback.
 
 ### Files (WS2)
