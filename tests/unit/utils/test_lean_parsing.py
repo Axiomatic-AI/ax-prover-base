@@ -1,21 +1,31 @@
 """Tests for Lean code parsing utilities."""
 
-import pytest
+from unittest.mock import AsyncMock, MagicMock
 
-from ax_prover.models.declaration import Declaration, DeclarationType
+import pytest
+from lean_interact.interface import (
+    DeclarationInfo,
+    DeclModifiers,
+    DeclSignature,
+    Pos,
+    Range,
+    ScopeInfo,
+    Sorry,
+)
+
+from ax_prover.models.declaration import Declaration
 from ax_prover.utils.lean_parsing import (
     count_pattern,
     extract_function_from_content,
     extract_theorem_name,
     find_declaration_by_name,
-    list_all_declarations_in_lean_code,
+    format_goal_state_at_sorries,
+    list_declarations_from_code,
     normalize_location,
     strip_comments,
 )
 
 SAMPLE_LEAN_CODE = r"""
-import Mathlib.Topology.Basic
-
 /-- Addition of naturals. -/
 def add (a b : Nat) : Nat :=
   a + b
@@ -28,47 +38,11 @@ theorem add_comm (a b : Nat) : add a b = add b a := by
 lemma helper_lemma{n : Nat} : n + 0 = n := by
   sorry
 
-def Κατ.Μοδ.αβ_γ'δε₀₁₂³_ℕtoℤ_φψ''ωΩ_über_café_∂Δ_Привет?! := 42
+def Κατ.Μοδ.αβ_γ'δε₀₁₂³_ℕtoℤ_φψ''ωΩ_über_café_∂Δ?! := 42
 
 theorem Some.Very.«Nested.Theorem»?: P :=
     sorry
 """
-
-# Trailing whitespace in content comes from strip_comments replacing doc comments
-# and block comments with spaces (to preserve byte offsets), then the parser
-# appending those whitespace-only lines as part of the preceding declaration's content.
-EXPECTED_DECLARATIONS: list[Declaration] = [
-    Declaration(
-        declaration_type=DeclarationType.Import,
-        name="Mathlib.Topology.Basic",
-        content="",
-    ),
-    Declaration(
-        declaration_type=DeclarationType.Definition,
-        name="add",
-        content="(a b : Nat) : Nat :=\n  a + b",
-    ),
-    Declaration(
-        declaration_type=DeclarationType.Theorem,
-        name="add_comm",
-        content="(a b : Nat) : add a b = add b a := by\n  simp [add]\n  omega",
-    ),
-    Declaration(
-        declaration_type=DeclarationType.Lemma,
-        name="helper_lemma",
-        content=r"{n : Nat} : n + 0 = n := by" + "\n  sorry",
-    ),
-    Declaration(
-        declaration_type=DeclarationType.Definition,
-        name="Κατ.Μοδ.αβ_γ'δε₀₁₂³_ℕtoℤ_φψ''ωΩ_über_café_∂Δ_Привет?!",
-        content=":= 42",
-    ),
-    Declaration(
-        declaration_type=DeclarationType.Theorem,
-        name="Some.Very.«Nested.Theorem»?",
-        content=": P :=\n    sorry",
-    ),
-]
 
 EXPECTED_FUNCTION_EXTRACTIONS: list[tuple[str, str | None]] = [
     ("add", "/-- Addition of naturals. -/\ndef add (a b : Nat) : Nat :=\n  a + b"),
@@ -261,62 +235,125 @@ class TestExtractTheoremName:
         assert extract_theorem_name(stmt) == expected
 
 
-class TestListAllDeclarationsInLeanCode:
-    """Tests for list_all_declarations_in_lean_code function."""
+def _make_decl_info(
+    name: str,
+    start: tuple[int, int],
+    finish: tuple[int, int],
+    *,
+    kind: str = "def",
+    pp: str | None = None,
+) -> DeclarationInfo:
+    """Build a minimal DeclarationInfo for unit tests.
 
-    def test_finds_all_declarations(self):
-        """Finds exactly the expected declarations in order."""
-        declarations = list_all_declarations_in_lean_code(SAMPLE_LEAN_CODE)
-        names = [d.name for d in declarations]
-        expected_names = [d.name for d in EXPECTED_DECLARATIONS]
-        assert names == expected_names
-
-    @pytest.mark.parametrize(
-        "expected",
-        EXPECTED_DECLARATIONS,
-        ids=[d.name for d in EXPECTED_DECLARATIONS],
+    Only the fields read by the code under test (`name`, `range`, `pp`) need realistic
+    values; the rest are filled with defaults accepted by `lean_interact`'s models.
+    """
+    start_pos = Pos(line=start[0], column=start[1])
+    finish_pos = Pos(line=finish[0], column=finish[1])
+    decl_range = Range(synthetic=False, start=start_pos, finish=finish_pos)
+    return DeclarationInfo(
+        pp=pp or f"{kind} {name} := sorry",
+        range=decl_range,
+        scope=ScopeInfo(currNamespace=""),
+        name=name,
+        fullName=name,
+        kind=kind,
+        modifiers=DeclModifiers(),
+        signature=DeclSignature(pp="", constants=[], range=decl_range),
     )
-    def test_declaration_type_correct(self, expected):
-        """Each declaration has the correct type."""
-        declarations = list_all_declarations_in_lean_code(SAMPLE_LEAN_CODE)
-        by_name = {d.name: d for d in declarations}
-        assert expected.name in by_name
-        assert by_name[expected.name].declaration_type == expected.declaration_type
 
-    @pytest.mark.parametrize(
-        "expected",
-        EXPECTED_DECLARATIONS,
-        ids=[d.name for d in EXPECTED_DECLARATIONS],
+
+def _make_sorry(line: int, column: int, goal: str = "⊢ False") -> Sorry:
+    return Sorry(
+        pos=Pos(line=line, column=column),
+        endPos=Pos(line=line, column=column + 5),
+        goal=goal,
     )
-    def test_declaration_content_correct(self, expected):
-        """Each declaration has the expected content (ignoring trailing whitespace)."""
-        declarations = list_all_declarations_in_lean_code(SAMPLE_LEAN_CODE)
-        by_name = {d.name: d for d in declarations}
-        assert expected.name in by_name
-        assert str(by_name[expected.name]) == str(expected)
 
-    def test_import_detected(self):
-        """Import statements are listed as declarations."""
-        declarations = list_all_declarations_in_lean_code(SAMPLE_LEAN_CODE)
-        expected_imports = [
-            d for d in EXPECTED_DECLARATIONS if d.declaration_type == DeclarationType.Import
+
+class TestListDeclarationsFromCode:
+    """Tests for list_declarations_from_code.
+
+    Given a Lean interact server response, we build Declaration objects whose statement (`pp`/`kind`)
+    and `sorries` match what the response contains.
+    """
+
+    @pytest.fixture
+    def scenarios(self) -> list[tuple[DeclarationInfo, list[Sorry]]]:
+        """Single source of truth: each DeclarationInfo paired with the sorries
+        that fall inside its range. The mock server response and the expected
+        output are both derived from this list, so editing a scenario does not
+        require rewriting any assertion.
+        """
+        return [
+            (
+                _make_decl_info(
+                    "add",
+                    start=(1, 0),
+                    finish=(1, 30),
+                    kind="def",
+                    pp="noncomputable def add (a b : Nat) : Nat := a + b",
+                ),
+                [],
+            ),
+            (
+                _make_decl_info(
+                    "add_zero_proven",
+                    start=(3, 0),
+                    finish=(3, 50),
+                    kind="theorem",
+                    pp="theorem add_zero_proven (a : Nat) : add a 0 = a := rfl",
+                ),
+                [],
+            ),
+            (
+                _make_decl_info(
+                    "with_sorry",
+                    start=(5, 0),
+                    finish=(5, 50),
+                    kind="theorem",
+                    pp="theorem with_sorry (a : Nat) : add a 0 = a := by sorry",
+                ),
+                [_make_sorry(line=5, column=45, goal="⊢ add a 0 = a")],
+            ),
         ]
-        actual_imports = [d for d in declarations if d.declaration_type == DeclarationType.Import]
-        assert len(actual_imports) == len(expected_imports)
-        for actual, expected in zip(actual_imports, expected_imports, strict=True):
-            assert actual.name == expected.name
 
-    def test_empty_code(self):
-        """Empty code returns empty list."""
-        assert list_all_declarations_in_lean_code("") == []
+    @pytest.fixture
+    def fake_server(self, scenarios):
+        declarations = [info for info, _ in scenarios]
+        sorries = [s for _, decl_sorries in scenarios for s in decl_sorries]
+        response = MagicMock(declarations=declarations, sorries=sorries)
+        return MagicMock(run=AsyncMock(return_value=response))
 
-    def test_comments_ignored(self):
-        """Declarations inside comments are not detected."""
-        code = "/- def hidden := 42 -/\ndef visible := 1"
-        declarations = list_all_declarations_in_lean_code(code)
-        names = [d.name for d in declarations]
-        assert "visible" in names
-        assert "hidden" not in names
+    async def test_builds_one_declaration_per_response_entry_with_its_sorries(
+        self, fake_server, scenarios
+    ):
+        """Output mirrors the response: one Declaration per entry (statement preserved),
+        with each sorry attached to the declaration whose range contains it."""
+        result = await list_declarations_from_code(fake_server, "...")
+
+        expected = [Declaration(info=info, sorries=sorries) for info, sorries in scenarios]
+        assert result == expected
+
+
+class TestFormatGoalStateAtSorries:
+    """Tests for format_goal_state_at_sorries function."""
+
+    def test_empty_returns_no_sorries_message(self):
+        """An empty list yields the sentinel message."""
+        assert format_goal_state_at_sorries([]) == "No sorries found in code."
+
+    def test_formats_with_index_position_and_goal(self):
+        """Each sorry produces an entry with 1-based index, line/column, and goal text."""
+        result = format_goal_state_at_sorries(
+            [
+                _make_sorry(line=5, column=10, goal="⊢ x + 0 = x"),
+                _make_sorry(line=7, column=2, goal="⊢ True"),
+            ]
+        )
+        assert result == (
+            "Sorry #1 at line 5, column 10:\n⊢ x + 0 = x\n\nSorry #2 at line 7, column 2:\n⊢ True\n"
+        )
 
 
 class TestNormalizeLocation:
@@ -341,22 +378,20 @@ class TestFindDeclarationByName:
 
     @pytest.fixture
     def declarations(self):
-        """Sample declarations list."""
         return [
-            Declaration(declaration_type=DeclarationType.Definition, name="foo", content="42"),
-            Declaration(declaration_type=DeclarationType.Theorem, name="bar", content=": P"),
+            Declaration(info=_make_decl_info("foo", start=(1, 0), finish=(2, 0))),
+            Declaration(info=_make_decl_info("bar", start=(3, 0), finish=(4, 0), kind="theorem")),
         ]
 
     def test_finds_existing(self, declarations):
         """Returns the declaration when found."""
         result = find_declaration_by_name(declarations, "foo")
         assert result is not None
-        assert result.name == "foo"
+        assert result.info.name == "foo"
 
     def test_returns_none_for_missing(self, declarations):
         """Returns None when name not found."""
-        result = find_declaration_by_name(declarations, "baz")
-        assert result is None
+        assert find_declaration_by_name(declarations, "baz") is None
 
     def test_empty_list(self):
         """Returns None for empty declarations list."""
