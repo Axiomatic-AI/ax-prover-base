@@ -1,5 +1,6 @@
 """Tests for the WS1 used-definition caching feature."""
 
+import asyncio
 import inspect
 from types import SimpleNamespace
 
@@ -67,6 +68,27 @@ def test_memory_node_wires_in_accumulation():
     source = inspect.getsource(ProverAgent._memory_processor_node)
     assert "_accumulate_used_definitions(" in source
     assert "used_definitions" in source
+
+
+def test_memory_node_preserves_experience_and_adds_used_definitions():
+    """Behavioral: _memory_processor_node keeps the memory strategy's output and adds the cache."""
+    from ax_prover.prover.agent import ProverAgent
+
+    class _StubMemory:
+        async def process(self, state):
+            return {"experience": "LESSON-X"}
+
+    state = ProverAgentState(item=TargetItem(title="t"))  # used_definitions defaults to {}
+
+    fake = SimpleNamespace(memory=_StubMemory(), _local_searcher=None)
+    # Bind the real methods to the fake so the no-op accumulation path runs.
+    fake._accumulate_used_definitions = ProverAgent._accumulate_used_definitions.__get__(fake)
+    bound_node = ProverAgent._memory_processor_node.__get__(fake)
+
+    result = asyncio.run(bound_node(state))
+
+    assert result["experience"] == "LESSON-X"  # memory strategy output preserved
+    assert result["used_definitions"] == {}  # cache added (empty: no searcher / no proposal)
 
 
 def test_proposer_node_injects_local_definitions():
