@@ -118,21 +118,17 @@ def _normalize_tokens(name: str) -> list[str]:
     return [part.lower() for part in re.split(r"[._\s]+", spaced) if part]
 
 
-def _fuzzy_score(query: str, name: str) -> float:
-    """Similarity in [0, 1] between `query` and a declaration's (final) name.
+def _score_name(query_squashed: str, query_tokens: list[str], name: str) -> float:
+    """Similarity in [0, 1] between a (pre-normalized) query and a declaration's (final) name.
 
-    Takes the larger of a whole-string ratio (ignoring underscores) and a token score that
-    averages, over each query token, its best match against the name's tokens. Averaging keeps a
-    short query that matches one token of a long compound name scoring high (recall), while still
-    discriminating names that differ only in a non-shared token so ranking can break ties (e.g.
-    `decrease_min` outranks `decrease_key` for query `decrease_mn`).
+    `query_squashed` is the lowercased, underscore/space-stripped query; `query_tokens` is its
+    `_normalize_tokens` split. Keeping these as parameters lets a caller normalize the query once
+    and reuse it across every candidate name, rather than recomputing per declaration.
     """
     simple = name.rsplit(".", 1)[-1].lower()
-    query_squashed = query.lower().replace("_", "").replace(" ", "")
     whole = SequenceMatcher(None, query_squashed, simple.replace("_", "")).ratio()
 
     name_tokens = _normalize_tokens(name)
-    query_tokens = _normalize_tokens(query)
     if query_tokens and name_tokens:
         token_score = sum(
             max(
@@ -143,6 +139,20 @@ def _fuzzy_score(query: str, name: str) -> float:
     else:
         token_score = 0.0
     return max(whole, token_score)
+
+
+def _fuzzy_score(query: str, name: str) -> float:
+    """Similarity in [0, 1] between `query` and a declaration's (final) name.
+
+    Takes the larger of a whole-string ratio (ignoring underscores) and a token score that
+    averages, over each query token, its best match against the name's tokens. Averaging keeps a
+    short query that matches one token of a long compound name scoring high (recall), while still
+    discriminating names that differ only in a non-shared token so ranking can break ties (e.g.
+    `decrease_min` outranks `decrease_key` for query `decrease_mn`).
+    """
+    return _score_name(
+        query.lower().replace("_", "").replace(" ", ""), _normalize_tokens(query), name
+    )
 
 
 def _identifier_match(token: str, text: str) -> bool:
@@ -162,6 +172,69 @@ def format_cached_definition_entry(qualified_name: str, block: str, path: Path, 
     return f"-- {qualified_name} — {path}:{line}\n{block}"
 
 
+# Simple names so common in Mathlib/core that a bare (unqualified) occurrence in proof code is far
+# more likely a library reference than the local declaration sharing the name. A returned local
+# declaration whose simple name is one of these is cached only when its FULLY-QUALIFIED name appears
+# in the code, to avoid caching an irrelevant local def that merely collides on a generic name.
+_AMBIGUOUS_BARE_NAMES = frozenset(
+    {
+        "min",
+        "max",
+        "map",
+        "get",
+        "set",
+        "add",
+        "mul",
+        "sub",
+        "div",
+        "mod",
+        "neg",
+        "insert",
+        "erase",
+        "union",
+        "inter",
+        "size",
+        "length",
+        "mem",
+        "comp",
+        "id",
+        "zero",
+        "one",
+        "succ",
+        "pred",
+        "cast",
+        "lift",
+        "join",
+        "bind",
+        "pure",
+        "val",
+        "fst",
+        "snd",
+        "left",
+        "right",
+        "cons",
+        "nil",
+        "head",
+        "tail",
+    }
+)
+
+
+def _used_in_code(qualified_name: str, code: str) -> bool:
+    """Whether a returned declaration is referenced in `code` (precision-aware).
+
+    A fully-qualified reference always counts. A bare simple-name reference counts only when the
+    simple name is distinctive; ubiquitous identifiers (see `_AMBIGUOUS_BARE_NAMES`) require the
+    qualified form, so a local `Foo.min` is not cached just because the proof used Mathlib's `min`.
+    """
+    if _identifier_match(qualified_name, code):
+        return True
+    simple = qualified_name.rsplit(".", 1)[-1]
+    if simple in _AMBIGUOUS_BARE_NAMES:
+        return False
+    return _identifier_match(simple, code)
+
+
 def accumulate_used_definitions(
     cached: dict[str, str],
     returned_declarations: dict[str, tuple[str, Path, int]],
@@ -171,9 +244,10 @@ def accumulate_used_definitions(
     """Append local-search results that `code` actually used to the run-scoped `cached` map.
 
     Append-only and deduped by qualified name. An entry is added only when the local-search tool
-    returned it (it is in `returned_declarations`) AND it is referenced in `code` as a whole
-    identifier. The target theorem's own simple name is excluded. Respects MAX_CACHED_DEFINITIONS
-    and MAX_CACHED_DEFINITION_CHARS; existing entries are never removed.
+    returned it (it is in `returned_declarations`) AND it is referenced in `code` (see `_used_in_code`
+    for the precision-aware match). The target theorem's own simple name is excluded. Respects
+    MAX_CACHED_DEFINITIONS and MAX_CACHED_DEFINITION_CHARS; existing entries are never removed, and an
+    over-budget entry is skipped (not a hard stop) so smaller later definitions can still be cached.
     """
     merged = dict(cached)
     total_chars = sum(len(entry) for entry in merged.values())
@@ -185,11 +259,11 @@ def accumulate_used_definitions(
             break
         if target_simple and qualified_name.rsplit(".", 1)[-1] == target_simple:
             continue
-        if not identifier_in_code(qualified_name, code):
+        if not _used_in_code(qualified_name, code):
             continue
         entry = format_cached_definition_entry(qualified_name, block, path, line)
         if total_chars + len(entry) > MAX_CACHED_DEFINITION_CHARS:
-            break
+            continue
         merged[qualified_name] = entry
         total_chars += len(entry)
     return merged
@@ -294,12 +368,15 @@ def _fuzzy_matching_declarations(
     """
     if not query.strip():
         return []
+    # Normalize the query once and reuse it across every candidate name.
+    query_squashed = query.lower().replace("_", "").replace(" ", "")
+    query_tokens = _normalize_tokens(query)
     results: list[tuple[str, str, int, float]] = []
     seen: set[str] = set()
     for declaration, qualified, occurrence in _iter_searchable(content):
         if qualified in seen:
             continue
-        score = _fuzzy_score(query, qualified)
+        score = _score_name(query_squashed, query_tokens, qualified)
         if score >= threshold:
             seen.add(qualified)
             results.append((declaration.name, qualified, occurrence, score))

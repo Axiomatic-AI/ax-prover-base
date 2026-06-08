@@ -95,5 +95,36 @@ def test_proposer_node_injects_local_definitions():
     from ax_prover.prover.agent import ProverAgent
 
     source = inspect.getsource(ProverAgent._proposer_node)
+    assert "_render_used_definitions" in source
     assert "state.used_definitions" in source
-    assert "LOCAL_DEFINITIONS_USER_PROMPT" in source
+
+
+def test_render_used_definitions_drops_trailing_entries_over_budget():
+    from ax_prover.prover.agent import ProverAgent
+
+    fake = SimpleNamespace(max_input_tokens=400)  # budget = 100 chars
+    render = ProverAgent._render_used_definitions.__get__(fake)
+    used = {"A.one": "x" * 60, "A.two": "y" * 60, "A.three": "z" * 60}
+    block = render(used)
+    assert "x" * 60 in block  # first entry kept
+    assert "y" * 60 not in block  # over budget -> dropped
+    assert "omitted to fit" in block  # drop is noted
+
+
+def test_render_used_definitions_keeps_all_when_budget_ample():
+    from ax_prover.prover.agent import ProverAgent
+
+    fake = SimpleNamespace(max_input_tokens=1_000_000)
+    render = ProverAgent._render_used_definitions.__get__(fake)
+    block = render({"A.one": "def one := 1", "A.two": "def two := 2"})
+    assert "def one := 1" in block
+    assert "def two := 2" in block
+    assert "omitted" not in block
+
+
+def test_render_used_definitions_empty_returns_none():
+    from ax_prover.prover.agent import ProverAgent
+
+    fake = SimpleNamespace(max_input_tokens=1000)
+    render = ProverAgent._render_used_definitions.__get__(fake)
+    assert render({}) is None

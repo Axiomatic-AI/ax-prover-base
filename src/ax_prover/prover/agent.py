@@ -252,6 +252,10 @@ class ProverAgent:
                 bound = getattr(getattr(tool, "func", None), "__self__", None)
                 if isinstance(bound, LocalLeanSearcher):
                     return bound
+                self.logger.warning(
+                    "Local search tool is configured but its searcher instance could not be "
+                    "recovered; used-definition caching is disabled for this run."
+                )
         return None
 
     def _accumulate_used_definitions(self, state: ProverAgentState) -> dict[str, str]:
@@ -265,6 +269,32 @@ class ProverAgent:
             state.last_proposal.code,
             target_name,
         )
+
+    def _render_used_definitions(self, used_definitions: dict[str, str]) -> str | None:
+        """Render the <local-definitions> block, bounded to a fraction of the input budget.
+
+        Whole entries are dropped from the end (verbatim source is never chopped mid-definition) so
+        the cache cannot crowd out the proof state on a token-tight model; at least one entry is
+        always kept, and any drop is noted. Returns None when there is nothing to inject.
+        """
+        if not used_definitions:
+            return None
+        budget = self.max_input_tokens // 4  # chars; an upper bound on the block's token cost
+        kept: list[str] = []
+        total = 0
+        omitted = 0
+        for entry in used_definitions.values():
+            if kept and total + len(entry) > budget:
+                omitted += 1
+                continue
+            kept.append(entry)
+            total += len(entry)
+        definitions = "\n\n".join(kept)
+        if omitted:
+            definitions += (
+                f"\n\n-- ({omitted} more cached definition(s) omitted to fit the context)"
+            )
+        return LOCAL_DEFINITIONS_USER_PROMPT.format(definitions=definitions)
 
     async def _memory_processor_node(self, state: ProverAgentState) -> dict:
         """Process memory using the configured strategy, plus accumulate used local definitions."""
@@ -313,10 +343,8 @@ class ProverAgent:
         if state.experience:
             query = "\n\n".join([query, state.experience])
 
-        if state.used_definitions:
-            definitions_block = LOCAL_DEFINITIONS_USER_PROMPT.format(
-                definitions="\n\n".join(state.used_definitions.values())
-            )
+        definitions_block = self._render_used_definitions(state.used_definitions)
+        if definitions_block:
             query = "\n\n".join([query, definitions_block])
 
         context_messages = [
