@@ -9,6 +9,7 @@ from ax_prover.models.declaration import DeclarationType
 from ax_prover.tools import create_search_lean_local_tool
 from ax_prover.tools.local_lean_search import (
     LOCAL_LEAN_SEARCH_TOOL_TYPE,
+    MAX_CACHED_DEFINITIONS,
     SEARCHABLE_TYPES,
     LocalLeanSearcher,
     SearchLeanLocalConfig,
@@ -17,8 +18,12 @@ from ax_prover.tools.local_lean_search import (
     _identifier_match,
     _iter_lean_files,
     _matching_declaration_names,
+    _search_root,
     _walk_down_for_roots,
     _walk_up_for_root,
+    accumulate_used_definitions,
+    format_cached_definition_entry,
+    identifier_in_code,
 )
 from ax_prover.tools.registry import TOOL_REGISTRY
 
@@ -565,6 +570,28 @@ class TestBodyMatchingDeclarations:
         assert _body_matching_declarations(WHERE_BLOCK_LEAN, "quer") == []
 
 
+def _write(tmp_path: Path, name: str, text: str) -> None:
+    (tmp_path / name).write_text(text, encoding="utf-8")
+
+
+def test_search_root_returns_text_and_decls_on_name_match(tmp_path):
+    _write(tmp_path, "Def.lean", "def extract_min : Nat := 0\n")
+    text, decls = _search_root(tmp_path, "extract_min", SearchLeanLocalConfig())
+    assert "extract_min" in text
+    assert len(decls) == 1
+    qualified_name, block, locations = decls[0]
+    assert qualified_name == "extract_min"
+    assert "def extract_min" in block
+    assert locations and locations[0][1] == 1  # (path, line)
+
+
+def test_search_root_returns_empty_decls_on_no_match(tmp_path):
+    _write(tmp_path, "Def.lean", "def foo : Nat := 0\n")
+    text, decls = _search_root(tmp_path, "nonexistent_name", SearchLeanLocalConfig())
+    assert "No declarations matching" in text
+    assert decls == []
+
+
 @pytest.fixture
 def where_project(tmp_path):
     root = tmp_path / "proj"
@@ -611,3 +638,125 @@ class TestBodySearchEndToEnd:
         assert "matched in body" in out
         assert read_counts  # at least one .lean file was read
         assert all(count == 1 for count in read_counts.values()), read_counts
+
+
+def test_identifier_in_code_matches_qualified_and_simple():
+    assert identifier_in_code("BinaryHeap.extract_min", "  exact extract_min h")
+    assert identifier_in_code("BinaryHeap.extract_min", "  exact BinaryHeap.extract_min h")
+    assert not identifier_in_code(
+        "extract_min", "  exact extract_minimum h"
+    )  # not whole-identifier
+    assert not identifier_in_code("heapify", "  simp")
+
+
+def test_format_cached_definition_entry_has_location_header_and_block():
+    entry = format_cached_definition_entry("A.foo", "def foo := 1", Path("Def.lean"), 3)
+    assert entry == "-- A.foo — Def.lean:3\ndef foo := 1"
+
+
+def _pool():
+    return {
+        "BinaryHeap.extract_min": ("def extract_min : Nat := 0", Path("Def.lean"), 5),
+        "BinaryHeap.heapify": ("def heapify : Nat := 1", Path("Def.lean"), 9),
+    }
+
+
+def test_accumulate_adds_only_used_definitions():
+    code = "theorem t : True := by have := extract_min; trivial"
+    result = accumulate_used_definitions({}, _pool(), code, target_name="t")
+    assert "BinaryHeap.extract_min" in result
+    assert "BinaryHeap.heapify" not in result  # returned but not used in code
+
+
+def test_accumulate_excludes_target_by_simple_name():
+    pool = {"Foo.extract_min": ("def extract_min := 0", Path("Def.lean"), 1)}
+    code = "theorem extract_min : True := by exact extract_min"
+    result = accumulate_used_definitions({}, pool, code, target_name="extract_min")
+    assert result == {}  # the only candidate shares the target's simple name
+
+
+def test_accumulate_is_monotonic_and_dedups():
+    prior = {"BinaryHeap.heapify": "-- cached earlier"}
+    code = "theorem t : True := by exact extract_min"  # heapify NOT used now
+    result = accumulate_used_definitions(prior, _pool(), code, target_name="t")
+    assert result["BinaryHeap.heapify"] == "-- cached earlier"  # preserved, not wiped
+    assert "BinaryHeap.extract_min" in result  # newly used, added
+    again = accumulate_used_definitions(result, _pool(), code, target_name="t")
+    assert again == result
+
+
+def test_accumulate_respects_count_cap():
+    pool = {
+        f"N.def_{i}": (f"def def_{i} := {i}", Path("Def.lean"), i + 1)
+        for i in range(MAX_CACHED_DEFINITIONS + 5)
+    }
+    code = " ".join(f"def_{i}" for i in range(MAX_CACHED_DEFINITIONS + 5))
+    result = accumulate_used_definitions({}, pool, code, target_name="t")
+    assert len(result) == MAX_CACHED_DEFINITIONS
+
+
+def test_accumulate_respects_char_cap():
+    big_block = "x" * 9000  # two of these exceed the 12000-char cap
+    pool = {
+        "N.a": (big_block, Path("Def.lean"), 1),
+        "N.b": (big_block, Path("Def.lean"), 2),
+    }
+    code = "a b"  # both 'a' and 'b' referenced as whole identifiers
+    result = accumulate_used_definitions({}, pool, code, target_name="t")
+    assert len(result) == 1  # second entry would blow the char budget
+
+
+def test_accumulate_none_target_and_empty_pool_are_safe():
+    # None target_name must not crash; empty returned_declarations returns the cache unchanged.
+    assert accumulate_used_definitions({}, {}, "some code", None) == {}
+    prior = {"A.foo": "-- A.foo — Def.lean:1\ndef foo := 1"}
+    assert accumulate_used_definitions(prior, {}, "foo", None) == prior
+
+
+def test_accumulate_none_target_still_adds_used_definition():
+    returned = {"BinaryHeap.extract_min": ("def extract_min : Nat := 0", Path("Def.lean"), 5)}
+    code = "theorem t : True := by exact extract_min"
+    result = accumulate_used_definitions(
+        cached={}, returned_declarations=returned, code=code, target_name=None
+    )
+    assert "BinaryHeap.extract_min" in result
+
+
+def test_searcher_accumulates_returned_declarations_across_calls(tmp_path):
+    root = _make_lake_project(tmp_path)
+    (root / "Def.lean").write_text(
+        "def extract_min : Nat := 0\ndef heapify : Nat := 1\n", encoding="utf-8"
+    )
+    searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
+
+    searcher.search("extract_min")
+    assert "extract_min" in searcher.returned_declarations
+    block, path, line = searcher.returned_declarations["extract_min"]
+    assert "def extract_min" in block
+
+    searcher.search("heapify")
+    # First result is retained; second is added (accumulation, not replacement).
+    assert set(searcher.returned_declarations) == {"extract_min", "heapify"}
+
+
+def test_searcher_first_seen_wins_on_repeat_search(tmp_path):
+    root = _make_lake_project(tmp_path)
+    (root / "Def.lean").write_text(
+        "def extract_min : Nat := 0\ndef heapify : Nat := 1\n", encoding="utf-8"
+    )
+    searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
+    searcher.search("extract_min")
+    first_value = searcher.returned_declarations["extract_min"]
+    # Searching the same name again must not replace the recorded entry.
+    searcher.search("extract_min")
+    assert searcher.returned_declarations["extract_min"] == first_value
+
+
+def test_searcher_records_nothing_on_miss(tmp_path):
+    root = _make_lake_project(tmp_path)
+    (root / "Def.lean").write_text(
+        "def extract_min : Nat := 0\ndef heapify : Nat := 1\n", encoding="utf-8"
+    )
+    searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
+    searcher.search("totally_absent_name")
+    assert searcher.returned_declarations == {}
