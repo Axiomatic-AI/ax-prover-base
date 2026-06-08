@@ -33,6 +33,7 @@ Think carefully about the current proof state and the knowledge gathered from th
 3. **Quality Standards**
     - Use appropriate Lean 4 tactics and syntax
     - When searching for lemmas, match the search tool to the file's imports: if the file imports `Mathlib.*`, use the Mathlib search tool (`search_lean_search_tool`); if it imports `Cslib.*`, use the CSLib search tool (`search_cslib_tool`); for declarations from the project's own modules (any other local imports, neither Mathlib nor CSLib), use the local project search tool (`search_lean_local_tool`).
+    - If a <local-definitions> section is present in the message, the project definitions you have already used are listed there verbatim — reference them directly and do NOT search for them again.
     - Add imports as needed for any lemmas or tactics you use
 </requirements>
 
@@ -252,6 +253,14 @@ Complete the proof for the following target theorem within the given file.
 {complete_file}
 ```
 </complete-file>
+"""
+
+LOCAL_DEFINITIONS_USER_PROMPT = """
+These project definitions were referenced in your previous attempts and are provided verbatim, so you do NOT need to search for them again:
+
+<local-definitions>
+{definitions}
+</local-definitions>
 """
 
 REVIEWER_SYSTEM_PROMPT = """

@@ -69,7 +69,8 @@ class CslibSearcher:
         if cslib is None:
             logger.warning(f"CslibSearch: {error}")
             return error
-        return _search_root(cslib, query, self.config, label="CslibSearch")
+        text, _decls = _search_root(cslib, query, self.config, label="CslibSearch")
+        return text
 
 
 class CslibSearchInput(BaseModel):
