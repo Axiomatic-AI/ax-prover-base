@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 
 from lean_interact import Command
-from lean_interact.interface import DeclarationInfo
+from lean_interact.interface import DeclarationInfo, Sorry
 
 from ..models.declaration import Declaration, DeclarationType
 from ..models.files import Location
@@ -416,7 +416,7 @@ def list_all_declarations_in_path_as_text(
 
 def find_declaration_by_name(declarations: list[Declaration], name: str) -> Declaration | None:
     for declaration in declarations:
-        if declaration.name == name:
+        if declaration.info.name == name:
             return declaration
     return None
 
@@ -468,32 +468,21 @@ def find_declaration_at_line(content: str, line_number: int) -> str | None:
     return None
 
 
-async def get_goal_state_at_sorries(
-    server: LeanInteractServer, base_folder: str, file_path: str
-) -> str:
-    """Extract goal states at all sorry locations using LeanInteract (async).
-
-    Uses a shared AutoLeanServer instance for efficient resource usage across
-    multiple concurrent experiment runs. The server is thread-safe and processes
-    requests sequentially.
+def format_goal_state_at_sorries(sorries: list[Sorry]) -> str:
+    """
+    Get the goal state at all sorry locations in a declaration.
 
     Args:
-        server: LeanInteractServer instance
-        base_folder: Base folder of the Lean project
-        file_path: Relative path to the Lean file (relative to base_folder)
+        sorries: List of Sorry objects
 
     Returns:
         Formatted string with goal states at each sorry location
     """
-    lean_code = (Path(base_folder) / file_path).read_text()
-
-    response = await server.run(Command(cmd=lean_code))
-
-    if not response.sorries:
+    if not sorries:
         return "No sorries found in code."
 
     goal_states = []
-    for idx, sorry in enumerate(response.sorries, start=1):
+    for idx, sorry in enumerate(sorries, start=1):
         goal_states.append(
             f"Sorry #{idx} at line {sorry.start_pos.line}, column {sorry.start_pos.column}:\n"
             f"{sorry.goal}\n"
@@ -507,12 +496,31 @@ async def list_declarations_from_code(
 ) -> list[DeclarationInfo]:
     """List all declarations from a code snippet."""
     response = await server.run(Command(cmd=code, declarations=True))
-    return response.declarations
+    return _get_declarations_with_sorries(response.declarations, response.sorries)
 
 
 async def list_declarations_from_file(
-    server: LeanInteractServer, file_path: str
+    server: LeanInteractServer, file_path: Path
 ) -> list[DeclarationInfo]:
     """List all declarations from a file."""
-    code = Path(file_path).read_text()
+    code = file_path.read_text()
     return await list_declarations_from_code(server, code)
+
+
+def _get_declarations_with_sorries(
+    declaration_infos: list[DeclarationInfo], sorries: list[Sorry]
+) -> list[Declaration]:
+    """Match the sorries with the declaration information from the lean interact response,
+    and combine them into a single Declaration object."""
+    declarations = []
+    for declaration_info in declaration_infos:
+        sorries_in_declaration = []
+        for sorry in sorries:
+            if (
+                sorry.start_pos > declaration_info.range.start
+                and sorry.start_pos < declaration_info.range.finish
+            ):
+                sorries_in_declaration.append(sorry)
+        declarations.append(Declaration(declaration_info, sorries_in_declaration))
+
+    return declarations
