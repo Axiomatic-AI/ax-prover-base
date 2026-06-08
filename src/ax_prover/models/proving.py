@@ -72,6 +72,14 @@ class ProverAgentState(BaseModel):
         description="Context with the key lessons learned from the prover's previous attempts in natural language",
     )
 
+    used_definitions: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Run-scoped cache of local-search definitions the proof actually used, keyed by "
+            "qualified name → rendered verbatim entry. Append-only across iterations."
+        ),
+    )
+
     summary: str = Field(default="", description="LLM-generated summary of the prover run")
 
     @model_validator(mode="before")
