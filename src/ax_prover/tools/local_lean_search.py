@@ -308,23 +308,23 @@ def _collect_matches(
 
 def _search_root(
     root: Path, query: str, config: SearchLeanLocalConfig, *, label: str = "LocalLeanSearch"
-) -> str:
+) -> tuple[str, list[tuple[str, str, list[tuple[Path, int]]]]]:
     """Search `root` by declaration name; fall back to body search only if name finds nothing.
 
-    Walks the tree and reads each file once; the body fallback reuses the cached contents
-    rather than re-walking and re-reading on a name-miss.
+    Returns the formatted text plus the structured declarations it formatted (empty on no match).
+    Walks the tree and reads each file once; the body fallback reuses the cached contents.
     """
     files = _read_lean_files(root)
     decls = _collect_matches(files, query, body=False)
     if decls:
         logger.info(f"{label}: Found {len(decls)} declarations for '{query}' under {root}")
-        return _format_results(query, decls, config)
+        return _format_results(query, decls, config), decls
     body_decls = _collect_matches(files, query, body=True)
     if body_decls:
         logger.info(f"{label}: Found {len(body_decls)} body matches for '{query}' under {root}")
-        return _format_results(query, body_decls, config, body_match=True)
+        return _format_results(query, body_decls, config, body_match=True), body_decls
     logger.info(f"{label}: No results for '{query}'")
-    return f'No declarations matching "{query}" found.'
+    return f'No declarations matching "{query}" found.', []
 
 
 class LocalLeanSearcher:
@@ -371,7 +371,8 @@ class LocalLeanSearcher:
             logger.warning(f"LocalLeanSearch: {error}")
             return error
 
-        return _search_root(root, query, self.config)
+        text, _decls = _search_root(root, query, self.config)
+        return text
 
 
 class LocalLeanSearchInput(BaseModel):

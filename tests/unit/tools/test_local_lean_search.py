@@ -17,6 +17,7 @@ from ax_prover.tools.local_lean_search import (
     _identifier_match,
     _iter_lean_files,
     _matching_declaration_names,
+    _search_root,
     _walk_down_for_roots,
     _walk_up_for_root,
 )
@@ -563,6 +564,28 @@ class TestBodyMatchingDeclarations:
     def test_body_search_respects_identifier_boundary(self):
         # 'quer' is a prefix, not a whole identifier in the body -> no match.
         assert _body_matching_declarations(WHERE_BLOCK_LEAN, "quer") == []
+
+
+def _write(tmp_path: Path, name: str, text: str) -> None:
+    (tmp_path / name).write_text(text, encoding="utf-8")
+
+
+def test_search_root_returns_text_and_decls_on_name_match(tmp_path):
+    _write(tmp_path, "Def.lean", "def extract_min : Nat := 0\n")
+    text, decls = _search_root(tmp_path, "extract_min", SearchLeanLocalConfig())
+    assert "extract_min" in text
+    assert len(decls) == 1
+    qualified_name, block, locations = decls[0]
+    assert qualified_name == "extract_min"
+    assert "def extract_min" in block
+    assert locations and locations[0][1] == 1  # (path, line)
+
+
+def test_search_root_returns_empty_decls_on_no_match(tmp_path):
+    _write(tmp_path, "Def.lean", "def foo : Nat := 0\n")
+    text, decls = _search_root(tmp_path, "nonexistent_name", SearchLeanLocalConfig())
+    assert "No declarations matching" in text
+    assert decls == []
 
 
 @pytest.fixture
