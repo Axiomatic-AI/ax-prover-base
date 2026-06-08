@@ -18,3 +18,18 @@ def test_used_definitions_accepts_mapping():
         used_definitions={"A.foo": "-- A.foo — Def.lean:1\ndef foo := 1"},
     )
     assert "A.foo" in state.used_definitions
+
+
+def test_local_definitions_prompt_wraps_definitions():
+    from ax_prover.prover.prompts import LOCAL_DEFINITIONS_USER_PROMPT
+
+    rendered = LOCAL_DEFINITIONS_USER_PROMPT.format(definitions="-- A.foo\ndef foo := 1")
+    assert "<local-definitions>" in rendered
+    assert "</local-definitions>" in rendered
+    assert "def foo := 1" in rendered
+
+
+def test_iterative_system_prompt_mentions_local_definitions():
+    from ax_prover.prover.prompts import PROPOSER_SYSTEM_PROMPT
+
+    assert "<local-definitions>" in PROPOSER_SYSTEM_PROMPT
