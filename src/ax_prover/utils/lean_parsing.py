@@ -527,6 +527,6 @@ def _get_declarations_with_sorries(
                 and sorry.start_pos < declaration_info.range.finish
             ):
                 sorries_in_declaration.append(sorry)
-        declarations.append(Declaration(declaration_info, sorries_in_declaration))
+        declarations.append(Declaration(info=declaration_info, sorries=sorries_in_declaration))
 
     return declarations
