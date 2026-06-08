@@ -806,3 +806,20 @@ def test_collect_fuzzy_matches_sorts_by_score_and_caps(tmp_path):
     results = _collect_fuzzy_matches(files, "decrease_mn", SearchLeanLocalConfig(max_results=1))
     assert len(results) == 1  # cap respected
     assert results[0][0] == "decrease_min"  # closest by score ranked first
+
+
+def test_fuzzy_score_preserves_recall_for_single_token_of_long_name():
+    from ax_prover.tools.local_lean_search import FUZZY_THRESHOLD
+
+    # A short query that exactly matches one token of a long compound name must stay suggestible.
+    assert _fuzzy_score("fold", "Algebra.leftFoldOverMonoidWithIdentity") >= FUZZY_THRESHOLD
+
+
+def test_collect_fuzzy_matches_ranks_closer_suffix_first(tmp_path):
+    (tmp_path / "Def.lean").write_text(
+        "def decrease_key : Nat := 0\ndef decrease_min : Nat := 1\n", encoding="utf-8"
+    )
+    files = [(Path("Def.lean"), (tmp_path / "Def.lean").read_text(encoding="utf-8"))]
+    results = _collect_fuzzy_matches(files, "decrease_mn", SearchLeanLocalConfig(max_results=2))
+    names = [name for name, _block, _locs in results]
+    assert names == ["decrease_min", "decrease_key"]  # closer suffix ranked first

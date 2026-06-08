@@ -121,25 +121,28 @@ def _normalize_tokens(name: str) -> list[str]:
 def _fuzzy_score(query: str, name: str) -> float:
     """Similarity in [0, 1] between `query` and a declaration's (final) name.
 
-    Blends a whole-string ratio (ignoring underscores) with the best per-query-token ratio. The
-    whole-string component lets a discriminating suffix break ties between names that share a common
-    token (e.g. ranks `decrease_min` over `decrease_key` for query `decrease_mn`); the token
-    component keeps a query that matches a single token of a compound name (e.g. `priority` vs
-    `decreasePriority`) scoring well.
+    Takes the larger of a whole-string ratio (ignoring underscores) and a token score that
+    averages, over each query token, its best match against the name's tokens. Averaging keeps a
+    short query that matches one token of a long compound name scoring high (recall), while still
+    discriminating names that differ only in a non-shared token so ranking can break ties (e.g.
+    `decrease_min` outranks `decrease_key` for query `decrease_mn`).
     """
     simple = name.rsplit(".", 1)[-1].lower()
     query_squashed = query.lower().replace("_", "").replace(" ", "")
     whole = SequenceMatcher(None, query_squashed, simple.replace("_", "")).ratio()
 
     name_tokens = _normalize_tokens(name)
-    query_tokens = _normalize_tokens(query) or [query_squashed]
-    token_score = 0.0
-    for query_token in query_tokens:
-        best = max(
-            (SequenceMatcher(None, query_token, nt).ratio() for nt in name_tokens), default=0.0
-        )
-        token_score = max(token_score, best)
-    return 0.5 * whole + 0.5 * token_score
+    query_tokens = _normalize_tokens(query)
+    if query_tokens and name_tokens:
+        token_score = sum(
+            max(
+                SequenceMatcher(None, query_token, name_token).ratio() for name_token in name_tokens
+            )
+            for query_token in query_tokens
+        ) / len(query_tokens)
+    else:
+        token_score = 0.0
+    return max(whole, token_score)
 
 
 def _identifier_match(token: str, text: str) -> bool:
