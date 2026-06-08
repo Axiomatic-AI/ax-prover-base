@@ -385,6 +385,7 @@ class LocalLeanSearcher:
         self.config = config
         self.base_folder = base_folder
         self._resolution: tuple[Path | None, str] | None = None
+        self.returned_declarations: dict[str, tuple[str, Path, int]] = {}
 
     def _resolve_root(self) -> tuple[Path | None, str]:
         if self._resolution is None:
@@ -419,8 +420,17 @@ class LocalLeanSearcher:
             logger.warning(f"LocalLeanSearch: {error}")
             return error
 
-        text, _decls = _search_root(root, query, self.config)
+        text, decls = _search_root(root, query, self.config)
+        self._record_returned(decls)
         return text
+
+    def _record_returned(self, decls: list[tuple[str, str, list[tuple[Path, int]]]]) -> None:
+        """Accumulate returned declarations for the run, keyed by qualified name (first-seen wins)."""
+        for qualified_name, block, locations in decls:
+            if qualified_name in self.returned_declarations or not locations:
+                continue
+            path, line = locations[0]
+            self.returned_declarations[qualified_name] = (block, path, line)
 
 
 class LocalLeanSearchInput(BaseModel):

@@ -720,3 +720,30 @@ def test_accumulate_none_target_still_adds_used_definition():
         cached={}, returned_declarations=returned, code=code, target_name=None
     )
     assert "BinaryHeap.extract_min" in result
+
+
+def test_searcher_accumulates_returned_declarations_across_calls(tmp_path):
+    root = _make_lake_project(tmp_path)
+    (root / "Def.lean").write_text(
+        "def extract_min : Nat := 0\ndef heapify : Nat := 1\n", encoding="utf-8"
+    )
+    searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
+
+    searcher.search("extract_min")
+    assert "extract_min" in searcher.returned_declarations
+    block, path, line = searcher.returned_declarations["extract_min"]
+    assert "def extract_min" in block
+
+    searcher.search("heapify")
+    # First result is retained; second is added (accumulation, not replacement).
+    assert set(searcher.returned_declarations) == {"extract_min", "heapify"}
+
+
+def test_searcher_records_nothing_on_miss(tmp_path):
+    root = _make_lake_project(tmp_path)
+    (root / "Def.lean").write_text(
+        "def extract_min : Nat := 0\ndef heapify : Nat := 1\n", encoding="utf-8"
+    )
+    searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
+    searcher.search("totally_absent_name")
+    assert searcher.returned_declarations == {}
