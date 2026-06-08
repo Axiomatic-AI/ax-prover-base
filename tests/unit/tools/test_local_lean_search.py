@@ -14,7 +14,9 @@ from ax_prover.tools.local_lean_search import (
     LocalLeanSearcher,
     SearchLeanLocalConfig,
     _body_matching_declarations,
+    _collect_fuzzy_matches,
     _declaration_line,
+    _fuzzy_matching_declarations,
     _fuzzy_score,
     _identifier_match,
     _iter_lean_files,
@@ -785,3 +787,22 @@ def test_fuzzy_score_low_for_unrelated():
     from ax_prover.tools.local_lean_search import FUZZY_THRESHOLD
 
     assert _fuzzy_score("heapify", "WeightedGraph") < FUZZY_THRESHOLD
+
+
+def test_fuzzy_matching_declarations_finds_close_name():
+    content = "def extract_min : Nat := 0\ndef heapify : Nat := 1\n"
+    matches = _fuzzy_matching_declarations(content, "extractmin")
+    names = [qualified for _simple, qualified, _occ, _score in matches]
+    assert "extract_min" in names
+    assert "heapify" not in names
+
+
+def test_collect_fuzzy_matches_sorts_by_score_and_caps(tmp_path):
+    (tmp_path / "Def.lean").write_text(
+        "def decrease_key : Nat := 0\ndef decrease_min : Nat := 1\ndef unrelated : Nat := 2\n",
+        encoding="utf-8",
+    )
+    files = [(Path("Def.lean"), (tmp_path / "Def.lean").read_text(encoding="utf-8"))]
+    results = _collect_fuzzy_matches(files, "decrease_mn", SearchLeanLocalConfig(max_results=1))
+    assert len(results) == 1  # cap respected
+    assert results[0][0] == "decrease_min"  # closest by score ranked first

@@ -121,9 +121,11 @@ def _normalize_tokens(name: str) -> list[str]:
 def _fuzzy_score(query: str, name: str) -> float:
     """Similarity in [0, 1] between `query` and a declaration's (final) name.
 
-    Combines a whole-string ratio (ignoring underscores) with the best per-query-token ratio, so a
-    query matching a single token of a compound name (e.g. 'priority' vs 'decreasePriority') still
-    scores well.
+    Blends a whole-string ratio (ignoring underscores) with the best per-query-token ratio. The
+    whole-string component lets a discriminating suffix break ties between names that share a common
+    token (e.g. ranks `decrease_min` over `decrease_key` for query `decrease_mn`); the token
+    component keeps a query that matches a single token of a compound name (e.g. `priority` vs
+    `decreasePriority`) scoring well.
     """
     simple = name.rsplit(".", 1)[-1].lower()
     query_squashed = query.lower().replace("_", "").replace(" ", "")
@@ -137,7 +139,7 @@ def _fuzzy_score(query: str, name: str) -> float:
             (SequenceMatcher(None, query_token, nt).ratio() for nt in name_tokens), default=0.0
         )
         token_score = max(token_score, best)
-    return max(whole, token_score)
+    return 0.5 * whole + 0.5 * token_score
 
 
 def _identifier_match(token: str, text: str) -> bool:
@@ -281,6 +283,26 @@ def _body_matching_declarations(content: str, query: str) -> list[tuple[str, str
     return results
 
 
+def _fuzzy_matching_declarations(
+    content: str, query: str, threshold: float = FUZZY_THRESHOLD
+) -> list[tuple[str, str, int, float]]:
+    """`(simple_name, qualified_name, occurrence, score)` for declarations whose name is a close
+    fuzzy match to `query` (score >= threshold). De-duplicated by qualified name, source order.
+    """
+    if not query.strip():
+        return []
+    results: list[tuple[str, str, int, float]] = []
+    seen: set[str] = set()
+    for declaration, qualified, occurrence in _iter_searchable(content):
+        if qualified in seen:
+            continue
+        score = _fuzzy_score(query, qualified)
+        if score >= threshold:
+            seen.add(qualified)
+            results.append((declaration.name, qualified, occurrence, score))
+    return results
+
+
 def _declaration_line(content: str, name: str, occurrence: int = 0) -> int:
     """1-based line number where the declaration of `name` begins (keyword line).
 
@@ -386,6 +408,27 @@ def _collect_matches(
             line = _declaration_line(content, simple_name, occurrence)
             grouped.setdefault((qualified_name, block), []).append((relative_path, line))
     return [(name, block, locations) for (name, block), locations in grouped.items()]
+
+
+def _collect_fuzzy_matches(
+    files: list[tuple[Path, str]], query: str, config: SearchLeanLocalConfig
+) -> list[tuple[str, str, list[tuple[Path, int]]]]:
+    """Group fuzzy matches across files, ranked by descending score, capped to `max_results`."""
+    grouped: dict[tuple[str, str], list[tuple[Path, int]]] = {}
+    scores: dict[str, float] = {}
+    for relative_path, content in files:
+        for simple_name, qualified_name, occurrence, score in _fuzzy_matching_declarations(
+            content, query
+        ):
+            block = extract_function_from_content(content, simple_name, occurrence)
+            if block is None:
+                continue
+            line = _declaration_line(content, simple_name, occurrence)
+            grouped.setdefault((qualified_name, block), []).append((relative_path, line))
+            scores[qualified_name] = max(scores.get(qualified_name, 0.0), score)
+    results = [(name, block, locations) for (name, block), locations in grouped.items()]
+    results.sort(key=lambda result: scores.get(result[0], 0.0), reverse=True)
+    return results[: config.max_results]
 
 
 def _search_root(
