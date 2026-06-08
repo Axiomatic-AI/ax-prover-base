@@ -13,7 +13,8 @@ from .lean_parsing import (
     get_function_from_location,
     get_unproven,
     list_all_declarations_in_lean_code,
-    list_all_declarations_in_path_as_text,
+    list_declarations_from_code,
+    list_declarations_from_file,
     normalize_location,
     strip_comments,
 )
@@ -49,7 +50,8 @@ __all__ = [
     "get_function_from_location",
     "get_unproven",
     "list_all_declarations_in_lean_code",
-    "list_all_declarations_in_path_as_text",
+    "list_declarations_from_code",
+    "list_declarations_from_file",
     "normalize_location",
     # Logging
     "get_logger",
