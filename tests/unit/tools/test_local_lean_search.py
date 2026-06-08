@@ -16,6 +16,7 @@ from ax_prover.tools.local_lean_search import (
     _body_matching_declarations,
     _collect_fuzzy_matches,
     _declaration_line,
+    _format_results,
     _fuzzy_matching_declarations,
     _fuzzy_score,
     _identifier_match,
@@ -813,6 +814,20 @@ def test_fuzzy_score_preserves_recall_for_single_token_of_long_name():
 
     # A short query that exactly matches one token of a long compound name must stay suggestible.
     assert _fuzzy_score("fold", "Algebra.leftFoldOverMonoidWithIdentity") >= FUZZY_THRESHOLD
+
+
+def test_format_results_fuzzy_header():
+    decls = [("extract_min", "def extract_min := 0", [(Path("Def.lean"), 1)])]
+    out = _format_results("extractmin", decls, SearchLeanLocalConfig(), fuzzy=True)
+    assert "No exact match" in out
+    assert "extractmin" in out
+    assert "fuzzy match" in out
+
+
+def test_format_results_default_header_unchanged():
+    decls = [("foo", "def foo := 0", [(Path("Def.lean"), 1)])]
+    out = _format_results("foo", decls, SearchLeanLocalConfig())
+    assert out.startswith('Found 1 declaration(s) matching "foo":')
 
 
 def test_collect_fuzzy_matches_ranks_closer_suffix_first(tmp_path):

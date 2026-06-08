@@ -330,6 +330,7 @@ def _format_results(
     declarations: list[tuple[str, str, list[tuple[Path, int]]]],
     config: SearchLeanLocalConfig,
     body_match: bool = False,
+    fuzzy: bool = False,
 ) -> str:
     """Render unique declarations, capping by max_results and max_chars.
 
@@ -339,8 +340,15 @@ def _format_results(
     caps) is listed by name.
     """
     truncation_marker = "\n-- … (truncated; refine your query for the full declaration)"
-    header = f'Found {len(declarations)} declaration(s) matching "{query}":'
-    note = " (matched in body)" if body_match else ""
+    if fuzzy:
+        header = f'No exact match for "{query}". Closest declaration(s):'
+        note = " (fuzzy match)"
+    elif body_match:
+        header = f'Found {len(declarations)} declaration(s) matching "{query}":'
+        note = " (matched in body)"
+    else:
+        header = f'Found {len(declarations)} declaration(s) matching "{query}":'
+        note = ""
     shown: list[str] = []
     overflow: list[str] = []
     total = len(header)
