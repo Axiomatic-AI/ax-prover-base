@@ -220,10 +220,11 @@ def normalize_location(location_str: str) -> str:
     return location_str
 
 
-def get_unproven(base_folder: str, file_path: str) -> list[str]:
+async def get_unproven(server: LeanInteractServer, base_folder: str, file_path: str) -> list[str]:
     """Get all function/theorem/lemma names that contain 'sorry' in their body.
 
     Args:
+        server: Lean interact server
         base_folder: Base folder path
         file_path: Path to file relative to base_folder
 
@@ -231,7 +232,9 @@ def get_unproven(base_folder: str, file_path: str) -> list[str]:
         List of function names that contain 'sorry' in their implementation
     """
 
-    all_defs = list_all_declarations_in_path_as_text(base_folder, file_path, show_statements=False)
+    all_defs = await list_all_declarations_in_path_as_text(
+        server, base_folder, file_path, show_statements=False
+    )
 
     if not all_defs:
         return []
@@ -354,16 +357,16 @@ def list_all_declarations_in_lean_code(raw_code: str) -> list[Declaration]:
     return declarations
 
 
-def _list_all_declarations_in_path(
-    base_folder: str = ".", path: str = ""
+async def _list_all_declarations_in_path(
+    server: LeanInteractServer, base_folder: str = ".", path: str = ""
 ) -> list[tuple[Path, Declaration]]:
     """
     List all theorems, definitions, lemmas, axioms, and other Lean constructs; in a given path.
 
     Args:
+        server: Lean interact server
         base_folder: Base folder to search in
         path: Path to subfolder or file to search in
-
     Returns:
         List of tuples (file_path, declaration)
     """
@@ -384,19 +387,23 @@ def _list_all_declarations_in_path(
 
     declarations = []
     for file_path in file_list:
-        for declaration in list_all_declarations_in_lean_code(file_path.read_text()):
+        for declaration in await list_declarations_from_file(server, file_path):
             declarations.append((file_path, declaration))
 
     return declarations
 
 
-def list_all_declarations_in_path_as_text(
-    base_folder: str = ".", path: str = "", show_statements: bool = False
+async def list_all_declarations_in_path_as_text(
+    server: LeanInteractServer,
+    base_folder: str = ".",
+    path: str = "",
+    show_statements: bool = False,
 ) -> str:
     """
     List all theorems, definitions, lemmas, axioms, and other Lean constructs as text; in a given path.
 
     Args:
+        server: Lean interact server
         base_folder: Base folder to search in
         path: Path to subfolder or file to search in
         show_statements: If True, show full statements
@@ -404,13 +411,12 @@ def list_all_declarations_in_path_as_text(
     Returns:
         Text (string) containing all paths and declarations
     """
-    declarations = _list_all_declarations_in_path(base_folder, path)
+    declarations = await _list_all_declarations_in_path(server, base_folder, path)
     if show_statements:
         return "\n".join(f"{decl_path}:{str(decl)}" for decl_path, decl in declarations)
     else:
         return "\n".join(
-            f"{decl_path}:{decl.declaration_type.value} {decl.name}"
-            for decl_path, decl in declarations
+            f"{decl_path}:{decl.info.kind} {decl.info.name}" for decl_path, decl in declarations
         )
 
 
