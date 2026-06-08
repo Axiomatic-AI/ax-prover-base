@@ -36,6 +36,10 @@ LAKE_ROOT_MARKERS = ("lakefile.toml", "lakefile.lean", "lake-manifest.json")
 # Build artifacts + vendored dependencies (Mathlib) live here; never searched.
 EXCLUDED_DIR = ".lake"
 
+# Caps for the run-scoped cache of used local definitions (consumed by the memory node).
+MAX_CACHED_DEFINITIONS = 24
+MAX_CACHED_DEFINITION_CHARS = 12000
+
 # Declaration kinds worth returning. Excludes structural keywords (open, end,
 # namespace, section, import) that DeclarationType also enumerates.
 SEARCHABLE_TYPES = frozenset(
@@ -106,6 +110,50 @@ def _identifier_match(token: str, text: str) -> bool:
     """True if `token` appears in `text` as a whole identifier (case-insensitive)."""
     pattern = rf"(?<!{_IDENT_CHAR}){re.escape(token)}(?!{_IDENT_CHAR})"
     return re.search(pattern, text, re.IGNORECASE) is not None
+
+
+def identifier_in_code(name: str, code: str) -> bool:
+    """True if `name` or its final dotted segment appears in `code` as a whole identifier."""
+    candidates = {name, name.rsplit(".", 1)[-1]}
+    return any(_identifier_match(candidate, code) for candidate in candidates)
+
+
+def format_cached_definition_entry(qualified_name: str, block: str, path: Path, line: int) -> str:
+    """Render one cached definition as a located, verbatim source entry."""
+    return f"-- {qualified_name} — {path}:{line}\n{block}"
+
+
+def accumulate_used_definitions(
+    cached: dict[str, str],
+    returned_declarations: dict[str, tuple[str, Path, int]],
+    code: str,
+    target_name: str | None,
+) -> dict[str, str]:
+    """Append local-search results that `code` actually used to the run-scoped `cached` map.
+
+    Append-only and deduped by qualified name. An entry is added only when the local-search tool
+    returned it (it is in `returned_declarations`) AND it is referenced in `code` as a whole
+    identifier. The target theorem's own simple name is excluded. Respects MAX_CACHED_DEFINITIONS
+    and MAX_CACHED_DEFINITION_CHARS; existing entries are never removed.
+    """
+    merged = dict(cached)
+    total_chars = sum(len(entry) for entry in merged.values())
+    target_simple = target_name.rsplit(".", 1)[-1] if target_name else None
+    for qualified_name, (block, path, line) in returned_declarations.items():
+        if qualified_name in merged:
+            continue
+        if len(merged) >= MAX_CACHED_DEFINITIONS:
+            break
+        if target_simple and qualified_name.rsplit(".", 1)[-1] == target_simple:
+            continue
+        if not identifier_in_code(qualified_name, code):
+            continue
+        entry = format_cached_definition_entry(qualified_name, block, path, line)
+        if total_chars + len(entry) > MAX_CACHED_DEFINITION_CHARS:
+            break
+        merged[qualified_name] = entry
+        total_chars += len(entry)
+    return merged
 
 
 def _iter_lean_files(root: Path) -> Iterator[Path]:
