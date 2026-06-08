@@ -739,6 +739,19 @@ def test_searcher_accumulates_returned_declarations_across_calls(tmp_path):
     assert set(searcher.returned_declarations) == {"extract_min", "heapify"}
 
 
+def test_searcher_first_seen_wins_on_repeat_search(tmp_path):
+    root = _make_lake_project(tmp_path)
+    (root / "Def.lean").write_text(
+        "def extract_min : Nat := 0\ndef heapify : Nat := 1\n", encoding="utf-8"
+    )
+    searcher = LocalLeanSearcher(SearchLeanLocalConfig(), base_folder=str(root))
+    searcher.search("extract_min")
+    first_value = searcher.returned_declarations["extract_min"]
+    # Searching the same name again must not replace the recorded entry.
+    searcher.search("extract_min")
+    assert searcher.returned_declarations["extract_min"] == first_value
+
+
 def test_searcher_records_nothing_on_miss(tmp_path):
     root = _make_lake_project(tmp_path)
     (root / "Def.lean").write_text(
