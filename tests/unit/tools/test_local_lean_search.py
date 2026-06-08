@@ -704,3 +704,19 @@ def test_accumulate_respects_char_cap():
     code = "a b"  # both 'a' and 'b' referenced as whole identifiers
     result = accumulate_used_definitions({}, pool, code, target_name="t")
     assert len(result) == 1  # second entry would blow the char budget
+
+
+def test_accumulate_none_target_and_empty_pool_are_safe():
+    # None target_name must not crash; empty returned_declarations returns the cache unchanged.
+    assert accumulate_used_definitions({}, {}, "some code", None) == {}
+    prior = {"A.foo": "-- A.foo — Def.lean:1\ndef foo := 1"}
+    assert accumulate_used_definitions(prior, {}, "foo", None) == prior
+
+
+def test_accumulate_none_target_still_adds_used_definition():
+    returned = {"BinaryHeap.extract_min": ("def extract_min : Nat := 0", Path("Def.lean"), 5)}
+    code = "theorem t : True := by exact extract_min"
+    result = accumulate_used_definitions(
+        cached={}, returned_declarations=returned, code=code, target_name=None
+    )
+    assert "BinaryHeap.extract_min" in result
