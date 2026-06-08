@@ -343,12 +343,9 @@ def _format_results(
     if fuzzy:
         header = f'No exact match for "{query}". Closest declaration(s):'
         note = " (fuzzy match)"
-    elif body_match:
-        header = f'Found {len(declarations)} declaration(s) matching "{query}":'
-        note = " (matched in body)"
     else:
         header = f'Found {len(declarations)} declaration(s) matching "{query}":'
-        note = ""
+        note = " (matched in body)" if body_match else ""
     shown: list[str] = []
     overflow: list[str] = []
     total = len(header)

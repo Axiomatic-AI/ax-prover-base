@@ -819,6 +819,7 @@ def test_fuzzy_score_preserves_recall_for_single_token_of_long_name():
 def test_format_results_fuzzy_header():
     decls = [("extract_min", "def extract_min := 0", [(Path("Def.lean"), 1)])]
     out = _format_results("extractmin", decls, SearchLeanLocalConfig(), fuzzy=True)
+    assert out.startswith('No exact match for "extractmin". Closest declaration(s):')
     assert "No exact match" in out
     assert "extractmin" in out
     assert "fuzzy match" in out
