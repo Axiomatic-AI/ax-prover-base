@@ -93,7 +93,7 @@ class TestLocationAbsolutePath:
     """Tests for absolute_path method."""
 
     def test_local_path(self, tmp_path):
-        """Local locations resolve to base_folder / module_path-as-path."""
+        """Local locations resolve to base_folder / module_path."""
         loc = Location(name="foo", module_path="My.Project.File", is_external=False)
         assert loc.absolute_path(str(tmp_path)) == tmp_path / "My/Project/File.lean"
 
