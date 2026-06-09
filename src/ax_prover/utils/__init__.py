@@ -14,7 +14,6 @@ from .lean_parsing import (
     get_unproven,
     list_declarations_from_code,
     list_declarations_from_file,
-    normalize_location,
     strip_comments,
 )
 
@@ -50,7 +49,6 @@ __all__ = [
     "get_unproven",
     "list_declarations_from_code",
     "list_declarations_from_file",
-    "normalize_location",
     # Logging
     "get_logger",
     "reconfigure_log_level",

@@ -208,18 +208,6 @@ def get_function_from_location(base_folder: str, location: Location) -> str | No
         return None
 
 
-def normalize_location(location_str: str) -> str:
-    """Normalize location string to module path format.
-
-    Converts file paths to module paths: "path/to/file.lean:func" -> "path.to.file:func"
-    """
-    if ".lean:" in location_str:
-        file_part, func_part = location_str.rsplit(":", 1)
-        module_part = file_part.replace("/", ".").removesuffix(".lean")
-        return f"{module_part}:{func_part}"
-    return location_str
-
-
 async def get_unproven(server: LeanInteractServer, base_folder: str, file_path: str) -> list[str]:
     """Get all function/theorem/lemma names that contain 'sorry' in their body.
 

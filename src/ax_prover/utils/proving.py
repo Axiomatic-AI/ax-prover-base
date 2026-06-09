@@ -13,7 +13,6 @@ from .lean_parsing import (
     find_declaration_at_line,
     get_function_from_location,
     get_unproven,
-    normalize_location,
 )
 from .logging import get_logger
 
