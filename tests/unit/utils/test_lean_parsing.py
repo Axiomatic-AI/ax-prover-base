@@ -21,7 +21,6 @@ from ax_prover.utils.lean_parsing import (
     find_declaration_by_name,
     format_goal_state_at_sorries,
     list_declarations_from_code,
-    normalize_location,
     strip_comments,
 )
 
