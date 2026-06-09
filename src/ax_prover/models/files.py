@@ -60,6 +60,6 @@ class Location(BaseModel):
             )
 
         module_path, name = target.rsplit(":", 1)
-        module_path = module_path.removesuffix(".lean")
+        module_path = module_path.replace("/", ".").removesuffix(".lean")
 
         return cls(name=name, module_path=module_path, is_external=is_external)
