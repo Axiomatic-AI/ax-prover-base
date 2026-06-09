@@ -153,7 +153,7 @@ async def _run_experiment_sample(inputs: dict[str, str], config: Config, runtime
     logger.info(f"Running experiment for: {target}")
 
     try:
-        items = parse_prove_target(runtime.base_folder, target)
+        items = await parse_prove_target(runtime.lean_interact_server, runtime.base_folder, target)
 
         if not items:
             logger.warning(f"No unproven functions found in: {target}")

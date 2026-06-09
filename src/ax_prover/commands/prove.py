@@ -31,21 +31,21 @@ async def prove(
     """
     base_path = str(Path(folder).resolve())
 
+    return await _prove_all_items(base_path, target, config, overwrite, output_file)
+
+
+async def _get_target_items(rt: Runtime, base_path: str, target: str) -> list[TargetItem]:
+    """Get all the items to prove in the path given the target specification."""
     try:
-        items_to_prove = parse_prove_target(base_path, target)
+        return await parse_prove_target(rt.lean_interact_server, base_path, target)
     except ValueError as e:
         logger.error(str(e))
-        return 1
-
-    if not items_to_prove:
-        return 1
-
-    return await _prove_all_items(base_path, items_to_prove, config, overwrite, output_file)
+        return []
 
 
 async def _prove_all_items(
     folder: str,
-    items: list[TargetItem],
+    target: str,
     config: Config,
     overwrite: bool,
     output_file: str | None = None,
@@ -53,6 +53,11 @@ async def _prove_all_items(
     """Prove all items in the list."""
     tool_lifespans = await create_tool_lifespans(config.prover.proposer_tools)
     async with Runtime.open(config.runtime, folder, tool_lifespans) as rt:
+        items = await _get_target_items(rt, folder, target)
+        if not items:
+            logger.warning(f"No items to prove in {target}")
+            return 1
+
         failed = False
         outputs: dict[str, ProverOutput] = {}
 

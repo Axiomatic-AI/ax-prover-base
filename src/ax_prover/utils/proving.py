@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from ..models import TargetItem
 from ..models.files import Location
 from ..models.proving import ProverAgentState
+from .lean_interact import LeanInteractServer
 from .lean_parsing import (
     count_pattern,
     find_declaration_at_line,
@@ -48,7 +49,9 @@ def get_item_from_location(folder: str, location_str: str) -> TargetItem | None:
     return item
 
 
-def get_items_from_lean_file(folder: str, target: str) -> list[TargetItem]:
+async def get_items_from_lean_file(
+    server: LeanInteractServer, folder: str, target: str
+) -> list[TargetItem]:
     """Get all unproven functions from a Lean file."""
     file_path = target if target.endswith(".lean") else target.replace(".", "/") + ".lean"
 
@@ -56,7 +59,7 @@ def get_items_from_lean_file(folder: str, target: str) -> list[TargetItem]:
         logger.error(f"File not found: {file_path}")
         return []
 
-    unproven_names = get_unproven(folder, file_path)
+    unproven_names = await get_unproven(server, folder, file_path)
     if not unproven_names:
         logger.info(f"No unproven functions found in {file_path}")
         return []
@@ -97,7 +100,9 @@ def get_item_from_line(folder: str, target: str, line: int) -> TargetItem | None
     return get_item_from_location(folder, location_str)
 
 
-def parse_prove_target(folder: str, target: str) -> list[TargetItem]:
+async def parse_prove_target(
+    server: LeanInteractServer, folder: str, target: str
+) -> list[TargetItem]:
     """Parse a prove target string and return items to prove.
 
     Supports formats:
@@ -127,7 +132,7 @@ def parse_prove_target(folder: str, target: str) -> list[TargetItem]:
         if not item:
             raise ValueError(f"Could not create item from location: {target}")
         return [item]
-    return get_items_from_lean_file(folder, target)
+    return await get_items_from_lean_file(server, folder, target)
 
 
 async def prove_single_item(

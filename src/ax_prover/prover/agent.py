@@ -1,6 +1,7 @@
 """Prover agent for creating and completing proofs in Lean 4."""
 
 from collections.abc import Sequence
+from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -46,8 +47,9 @@ from ..utils.files import read_file
 from ..utils.git import get_repo_metadata
 from ..utils.lean_parsing import (
     find_declaration_by_name,
-    get_goal_state_at_sorries,
-    list_all_declarations_in_lean_code,
+    format_goal_state_at_sorries,
+    list_declarations_from_code,
+    list_declarations_from_file,
     strip_comments,
 )
 from ..utils.llm import LLMClient, agentic_loop, get_reasoning
@@ -309,16 +311,6 @@ class ProverAgent:
         if not state.last_proposal:
             raise Exception("Builder expects proposal")
 
-        if state.item.location:
-            declarations = list_all_declarations_in_lean_code(state.last_proposal.code)
-            proposed_proof = find_declaration_by_name(declarations, state.item.location.name)
-            if not proposed_proof:
-                self.logger.warning(
-                    f"Theorem '{state.item.location.name}' not found in proposed code"
-                )
-                feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
-                return {"messages": [feedback]}
-
         with TemporaryProposal(
             self.runtime.base_folder, state.item.location, state.last_proposal
         ) as applier:
@@ -355,18 +347,24 @@ class ProverAgent:
             if build_success:
                 self.logger.info("Build successful")
 
-                if sorry_count := count_pattern(
-                    state.last_proposal.code, pattern=r"\b(sorry|admit)\b"
-                )[0]:
-                    self.logger.info("The proposed code contains sorries.")
-                    goal_state_at_sorries = await get_goal_state_at_sorries(
-                        self.runtime.lean_interact_server,
-                        self.runtime.base_folder,
-                        applier.location.path,
+                declarations = await list_declarations_from_file(
+                    self.runtime.lean_interact_server,
+                    Path(self.runtime.base_folder) / applier.location.path,
+                )
+
+                proposed_proof = find_declaration_by_name(declarations, state.item.location.name)
+                if not proposed_proof:
+                    self.logger.warning(
+                        f"Theorem '{state.item.location.name}' not found in proposed code"
                     )
+                    feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
+                    return {"messages": [feedback]}
+
+                if proposed_proof.sorries:
+                    self.logger.info("The proposed code contains sorries.")
                     feedback = SorriesGoalStateFeedback(
-                        sorry_count=sorry_count,
-                        goal_state_at_sorries=goal_state_at_sorries,
+                        sorry_count=len(proposed_proof.sorries),
+                        goal_state_at_sorries=format_goal_state_at_sorries(proposed_proof.sorries),
                     )
                     return {"messages": [feedback]}
 
@@ -405,7 +403,9 @@ class ProverAgent:
     async def _reviewer_node(self, state: ProverAgentState, config: RunnableConfig) -> dict:
         self.logger.info("Reviewing proof")
 
-        declarations = list_all_declarations_in_lean_code(state.last_proposal.code)
+        declarations = await list_declarations_from_code(
+            self.runtime.lean_interact_server, state.last_proposal.code
+        )
         proposed_proof = str(find_declaration_by_name(declarations, state.item.location.name))
 
         query = REVIEWER_USER_PROMPT.format(

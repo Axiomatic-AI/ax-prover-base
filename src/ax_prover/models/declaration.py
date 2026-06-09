@@ -3,6 +3,7 @@
 import logging
 from enum import StrEnum
 
+from lean_interact.interface import DeclarationInfo, Sorry
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -34,13 +35,8 @@ class DeclarationType(StrEnum):
 
 
 class Declaration(BaseModel):
-    declaration_type: DeclarationType = Field(
-        description="What type of declaration is it (def, theorem, ...)"
-    )
-    name: str = Field(description="Name of the declaration")
-    content: str = Field(
-        description="Raw text of the full content right after the declaration type and the name"
-    )
+    info: DeclarationInfo
+    sorries: list[Sorry] = Field(default_factory=list)
 
     def __str__(self):
-        return f"{self.declaration_type.value} {self.name} {self.content.rstrip()}"
+        return self.info.pp
