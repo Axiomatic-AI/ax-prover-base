@@ -28,7 +28,7 @@ def get_item_from_location(folder: str, location_str: str) -> TargetItem | None:
     logger.info(f"Proving theorem at: {location_str}")
 
     try:
-        location = Location.from_formatted_context(location_str)
+        location = Location.parse(location_str)
     except ValueError as e:
         logger.error(str(e))
         return None
@@ -128,7 +128,7 @@ async def parse_prove_target(
         return [item]
 
     if ":" in target:
-        item = get_item_from_location(folder, normalize_location(target))
+        item = get_item_from_location(folder, target)
         if not item:
             raise ValueError(f"Could not create item from location: {target}")
         return [item]
