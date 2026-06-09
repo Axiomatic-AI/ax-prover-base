@@ -1,7 +1,6 @@
 """Prover agent for creating and completing proofs in Lean 4."""
 
 from collections.abc import Sequence
-from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
