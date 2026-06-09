@@ -316,6 +316,29 @@ class TestListDeclarationsFromCode:
                 ),
                 [_make_sorry(line=5, column=45, goal="⊢ add a 0 = a")],
             ),
+            (
+                _make_decl_info(
+                    "Κατ.Μοδ.αβ_γ'δε₀₁₂_ℕtoℤ_φψ''ωΩ_über_café_Δ?!",
+                    start=(25, 2),
+                    finish=(25, 56),
+                    kind="def",
+                    pp="def Κατ.Μοδ.αβ_γ'δε₀₁₂_ℕtoℤ_φψ''ωΩ_über_café_Δ?! := 42",
+                ),
+                [],
+            ),
+            (
+                _make_decl_info(
+                    "double_sorry",
+                    start=(25, 0),
+                    finish=(28, 7),
+                    kind="theorem",
+                    pp="theorem double_sorry{n : Nat} : n + 0 = n := by\n  have h : n + 0 = n := by\n    sorry\n sorry",
+                ),
+                [
+                    _make_sorry(line=27, column=6, goal="n : ℕ\n⊢ n + 0 = n"),
+                    _make_sorry(line=28, column=2, goal="n : ℕ\nh : n + 0 = n\n⊢ n + 0 = n"),
+                ],
+            ),
         ]
 
     @pytest.fixture
