@@ -290,7 +290,7 @@ class TestListDeclarationsFromCode:
                 _make_decl_info(
                     "add",
                     start=(1, 0),
-                    finish=(1, 30),
+                    finish=(1, 48),
                     kind="def",
                     pp="noncomputable def add (a b : Nat) : Nat := a + b",
                 ),
@@ -300,7 +300,7 @@ class TestListDeclarationsFromCode:
                 _make_decl_info(
                     "add_zero_proven",
                     start=(3, 0),
-                    finish=(3, 50),
+                    finish=(3, 54),
                     kind="theorem",
                     pp="theorem add_zero_proven (a : Nat) : add a 0 = a := rfl",
                 ),
@@ -310,7 +310,7 @@ class TestListDeclarationsFromCode:
                 _make_decl_info(
                     "with_sorry",
                     start=(5, 0),
-                    finish=(5, 50),
+                    finish=(5, 54),
                     kind="theorem",
                     pp="theorem with_sorry (a : Nat) : add a 0 = a := by sorry",
                 ),
