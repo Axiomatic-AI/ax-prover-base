@@ -187,17 +187,10 @@ def get_function_from_location(base_folder: str, location: Location) -> str | No
     Returns:
         The complete definition block, or None if not found
     """
-    if location.is_external:
-        # Resolve external library path (already in dot notation)
-        full_path = _resolve_external_path(base_folder, location.module_path)
-        if not full_path:
-            logger.warning(f"This path does not exist: {location.module_path}.")
-            return None
-    else:
-        # Local project file - use the path property which converts to file path
-        full_path = Path(base_folder) / location.path
+    full_path = location.absolute_path(base_folder)
 
-    if not full_path.exists():
+    if not full_path or not full_path.exists():
+        logger.warning(f"This path does not exist: {location.module_path}.")
         return None
 
     try:
