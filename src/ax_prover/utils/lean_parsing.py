@@ -322,41 +322,6 @@ def extract_theorem_name(theorem_statement: str) -> str | None:
     return None
 
 
-def list_all_declarations_in_lean_code(raw_code: str) -> list[Declaration]:
-    """
-    List all theorems, definitions, lemmas, axioms, and other Lean constructs in a given string of code.
-
-    Args:
-        raw_code: Raw code to search in
-
-    Returns:
-        List of declarations
-    """
-
-    declarations = []
-    declaration = None
-    declaration_pattern = re.compile(r"(\w+)\s+([^\s:({[\]},]+)\s*(.*)")
-    code = strip_comments(raw_code)
-
-    for line in code.split("\n"):
-        declaration_match = declaration_pattern.match(line.strip())
-        if declaration_match and declaration_match.group(1) in DeclarationType:
-            if declaration is not None:
-                declarations.append(declaration)
-            declaration = Declaration(
-                declaration_type=declaration_match.group(1),
-                name=declaration_match.group(2),
-                content=declaration_match.group(3),
-            )
-        elif declaration is not None:
-            declaration.content += "\n" + line
-
-    if declaration is not None:
-        declarations.append(declaration)
-
-    return declarations
-
-
 async def _list_all_declarations_in_path(
     server: LeanInteractServer, base_folder: str = ".", path: str = ""
 ) -> list[tuple[Path, Declaration]]:
