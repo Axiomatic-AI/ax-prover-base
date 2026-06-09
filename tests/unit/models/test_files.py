@@ -87,3 +87,29 @@ class TestLocationParse:
         loc = Location.parse("A.B:")
         assert loc.module_path == "A.B"
         assert loc.name == ""
+
+
+class TestLocationAbsolutePath:
+    """Tests for absolute_path method."""
+
+    def test_local_path(self, tmp_path):
+        """Local locations resolve to base_folder / module_path-as-path."""
+        loc = Location(name="foo", module_path="My.Project.File", is_external=False)
+        assert loc.absolute_path(str(tmp_path)) == tmp_path / "My/Project/File.lean"
+
+    def test_external_path_via_lake_packages(self, tmp_path):
+        """External locations resolve via .lake/packages, case-insensitive on package name."""
+        (tmp_path / ".lake" / "packages" / "mathlib").mkdir(parents=True)
+        loc = Location(
+            name="add_comm",
+            module_path="Mathlib.Algebra.Group.Defs",
+            is_external=True,
+        )
+        expected = tmp_path / ".lake/packages/mathlib/Mathlib/Algebra/Group/Defs.lean"
+        assert loc.absolute_path(str(tmp_path)) == expected
+
+    def test_external_returns_none_when_package_missing(self, tmp_path):
+        """External lookups return None when the package isn't in .lake/packages."""
+        (tmp_path / ".lake" / "packages" / "std").mkdir(parents=True)
+        loc = Location(name="foo", module_path="Mathlib.Foo", is_external=True)
+        assert loc.absolute_path(str(tmp_path)) is None
