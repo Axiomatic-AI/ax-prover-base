@@ -44,14 +44,22 @@ class Location(BaseModel):
         return location_str
 
     @classmethod
-    def from_formatted_context(cls, formatted_context: str) -> "Location":
-        """Parse a 'ModulePath:name' string into a Location object."""
-        if ":" not in formatted_context:
+    def parse(cls, target: str, is_external: bool = False) -> "Location":
+        """Parse a target string into a Location object.
+        Accepts dotted and slash notation:
+
+            Module.Path:name -> Location(name="name", module_path="Module.Path")
+            path/to/file.lean:name -> Location(name="name", module_path="path.to.file")
+
+        Raises:
+            ValueError: If the target string does not contain a colon ':'.
+        """
+        if ":" not in target:
             raise ValueError(
-                f"Invalid location format: '{formatted_context}'. "
-                "Expected format: 'ModulePath:name' (e.g., 'QuantumLib.Operators:my_theorem')"
+                f"Invalid target string: '{target}'. Expected format: 'modulepath:name'"
             )
 
-        module_path, name = formatted_context.rsplit(":", 1)
+        module_path, name = target.rsplit(":", 1)
+        module_path = module_path.removesuffix(".lean")
 
-        return cls(name=name, module_path=module_path, is_external=False)
+        return cls(name=name, module_path=module_path, is_external=is_external)

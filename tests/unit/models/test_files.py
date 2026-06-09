@@ -59,29 +59,29 @@ class TestLocationProperties:
         assert loc2.path == loc.path
 
 
-class TestLocationFromFormattedContext:
-    """Tests for from_formatted_context class method."""
+class TestLocationParse:
+    """Tests for parse class method."""
 
     def test_parses_valid_format(self):
         """Parses 'Module.Path:name' correctly."""
-        loc = Location.from_formatted_context("Module.Path:theorem_name")
+        loc = Location.parse("Module.Path:theorem_name")
         assert loc.module_path == "Module.Path"
         assert loc.name == "theorem_name"
         assert loc.is_external is False
 
     def test_missing_colon_raises(self):
         """Raises ValueError when no colon present."""
-        with pytest.raises(ValueError, match="Invalid location format"):
-            Location.from_formatted_context("no_colon_here")
+        with pytest.raises(ValueError, match="Invalid target"):
+            Location.parse("no_colon_here")
 
     def test_colon_in_name_uses_rsplit(self):
         """Uses rsplit so colons in module path are preserved."""
-        loc = Location.from_formatted_context("A.B:name")
+        loc = Location.parse("A.B:name")
         assert loc.module_path == "A.B"
         assert loc.name == "name"
 
     def test_empty_name_still_parses(self):
         """Edge case: empty name after colon still parses."""
-        loc = Location.from_formatted_context("A.B:")
+        loc = Location.parse("A.B:")
         assert loc.module_path == "A.B"
         assert loc.name == ""
