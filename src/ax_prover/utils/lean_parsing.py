@@ -239,44 +239,6 @@ async def get_unproven(server: LeanInteractServer, base_folder: str, file_path: 
     return unproven_functions
 
 
-def _resolve_external_path(base_folder: str, import_path: str) -> Path | None:
-    """Resolve an external library import path to a file path.
-
-    Args:
-        base_folder: Base folder path
-        import_path: Import path like "Mathlib.Algebra.Group.Defs"
-
-    Returns:
-        Full path to the file, or None if not found
-    """
-    packages_dir = Path(base_folder) / ".lake" / "packages"
-
-    # Build case-insensitive package directory map
-    package_dir_map = {
-        d.lower(): d for d in os.listdir(packages_dir) if (packages_dir / d).is_dir()
-    }
-
-    # Split import path
-    # E.g., "Mathlib.Algebra.Group.Defs" -> ["Mathlib", "Algebra", "Group", "Defs"]
-    parts = import_path.split(".")
-    if not parts:
-        return None
-
-    package_name = parts[0]
-    dir_name = package_dir_map.get(package_name.lower())
-    if not dir_name:
-        return None
-
-    # Build file path: package_dir/part1/part2/.../partN
-    # For "Mathlib.Algebra.Group.Defs" -> ".lake/packages/mathlib/Mathlib/Algebra/Group/Defs.lean"
-    file_path = packages_dir / dir_name / "/".join(parts)
-
-    if not str(file_path).endswith(".lean"):
-        file_path = Path(str(file_path) + ".lean")
-
-    return file_path if file_path.exists() else None
-
-
 def extract_theorem_name(theorem_statement: str) -> str | None:
     """Extract theorem name from a theorem statement.
 
