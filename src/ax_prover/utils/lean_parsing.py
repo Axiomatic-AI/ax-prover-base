@@ -7,8 +7,11 @@ import re
 from enum import Enum
 from pathlib import Path
 
+from lean_interact import Command
+
 from ..models.declaration import Declaration, DeclarationType
 from ..models.files import Location
+from .lean_interact import LeanInteractServer
 from .logging import get_logger
 
 logger = get_logger(__name__)
@@ -317,7 +320,7 @@ def extract_theorem_name(theorem_statement: str) -> str | None:
 
 def list_all_declarations_in_lean_code(raw_code: str) -> list[Declaration]:
     """
-    List all theorems, definitions, lemmas, axioms, and other Lean constructs; in a given string of code.
+    List all theorems, definitions, lemmas, axioms, and other Lean constructs in a given string of code.
 
     Args:
         raw_code: Raw code to search in
@@ -462,3 +465,37 @@ def find_declaration_at_line(content: str, line_number: int) -> str | None:
             return name
 
     return None
+
+
+async def get_goal_state_at_sorries(
+    server: LeanInteractServer, base_folder: str, file_path: str
+) -> str:
+    """Extract goal states at all sorry locations using LeanInteract (async).
+
+    Uses a shared AutoLeanServer instance for efficient resource usage across
+    multiple concurrent experiment runs. The server is thread-safe and processes
+    requests sequentially.
+
+    Args:
+        server: LeanInteractServer instance
+        base_folder: Base folder of the Lean project
+        file_path: Relative path to the Lean file (relative to base_folder)
+
+    Returns:
+        Formatted string with goal states at each sorry location
+    """
+    lean_code = (Path(base_folder) / file_path).read_text()
+
+    response = await server.run(Command(cmd=lean_code))
+
+    if not response.sorries:
+        return "No sorries found in code."
+
+    goal_states = []
+    for idx, sorry in enumerate(response.sorries, start=1):
+        goal_states.append(
+            f"Sorry #{idx} at line {sorry.start_pos.line}, column {sorry.start_pos.column}:\n"
+            f"{sorry.goal}\n"
+        )
+
+    return "\n".join(goal_states)

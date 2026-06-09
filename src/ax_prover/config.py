@@ -11,15 +11,9 @@ Example:
     >>> prover = ProverAgent(config=cfg.prover)
 """
 
-from asyncio import Semaphore
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
-
-from omegaconf import DictConfig, OmegaConf
-
-if TYPE_CHECKING:
-    from .prover import ProverAgent
+from typing import Any
 
 __all__ = [
     "LLMConfig",
@@ -40,6 +34,18 @@ class LogLevel(StrEnum):
     CRITICAL = "CRITICAL"
 
 
+DEFAULT_LLM_RETRY_CONFIG = {
+    "stop_after_attempt": 10000,  # 10k attempts at 3s is about 8h 20min.
+    "wait_exponential_jitter": True,
+    "exponential_jitter_params": {
+        "initial": 0.5,
+        "max": 3,
+        "exp_base": 2.0,
+        "jitter": 1.0,
+    },
+}
+
+
 @dataclass
 class LLMConfig:
     """
@@ -51,18 +57,7 @@ class LLMConfig:
 
     model: str
     provider_config: dict[str, Any] = field(default_factory=dict)
-    retry_config: dict[str, Any] = field(
-        default_factory=lambda: {
-            "stop_after_attempt": 10000,  # 10k attempts at 3s is about 8h 20min.
-            "wait_exponential_jitter": True,
-            "exponential_jitter_params": {
-                "initial": 0.5,
-                "max": 3,
-                "exp_base": 2.0,
-                "jitter": 1.0,
-            },
-        }
-    )
+    retry_config: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_LLM_RETRY_CONFIG))
 
 
 @dataclass
@@ -86,7 +81,7 @@ class ProverConfig:
     """Configuration for ProverAgent."""
 
     prover_llm: LLMConfig | None = None  # None is a placeholder to allow merging configs in main
-    proposer_tools: dict[str, Any] = field(default_factory=dict)
+    proposer_tools: dict[str, dict[str, Any] | None] = field(default_factory=dict)
     max_iterations: int = 0
     memory_config: MemoryConfig = field(
         default_factory=lambda: MemoryConfig(class_name="ExperienceProcessor")
@@ -132,43 +127,3 @@ class Config:
 
     prover: ProverConfig = field(default_factory=ProverConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
-
-    async def create_prover(
-        self,
-        lean_semaphore: Semaphore | None = None,
-        base_folder: str = ".",
-    ) -> "ProverAgent":
-        """Create a prover instance from the config.
-
-        Args:
-            lean_semaphore: Optional semaphore for limiting concurrent Lean operations (default: None).
-            base_folder: Base folder for the Lean project (default: ".")
-
-        Returns:
-            ProverAgent: A fully initialized prover instance ready to use
-
-        Raises:
-            ValueError: If prover.prover_llm is not set (e.g. when no YAML config was provided).
-        """
-        from .prover import ProverAgent
-
-        prover_config = (
-            OmegaConf.to_object(self.prover) if isinstance(self.prover, DictConfig) else self.prover
-        )
-        runtime_config = (
-            OmegaConf.to_object(self.runtime)
-            if isinstance(self.runtime, DictConfig)
-            else self.runtime
-        )
-
-        if prover_config.prover_llm is None:
-            raise ValueError(
-                "prover.prover_llm must be set in config (e.g. pass a YAML file with prover.prover_llm)"
-            )
-
-        return await ProverAgent.create(
-            config=prover_config,
-            runtime_config=runtime_config,
-            lean_semaphore=lean_semaphore,
-            base_folder=base_folder,
-        )

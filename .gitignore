@@ -150,6 +150,7 @@ runs/
 checkpoints/
 *.ckpt
 logs/
+data/
 
 .env.secrets
 .env.secrets.gcp

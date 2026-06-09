@@ -5,7 +5,9 @@ from pathlib import Path
 
 from ..config import Config
 from ..models import ProverAgentState, ProverOutput, TargetItem
-from ..tools.lean_search import lean_search_session_manager
+from ..prover.agent import ProverAgent
+from ..runtime import Runtime
+from ..tools import create_tool_lifespans
 from ..utils import get_logger, parse_prove_target, prove_single_item, write_json_output
 
 logger = get_logger(__name__)
@@ -49,7 +51,8 @@ async def _prove_all_items(
     output_file: str | None = None,
 ) -> int:
     """Prove all items in the list."""
-    async with lean_search_session_manager():
+    tool_lifespans = await create_tool_lifespans(config.prover.proposer_tools)
+    async with Runtime.open(config.runtime, folder, tool_lifespans) as rt:
         failed = False
         outputs: dict[str, ProverOutput] = {}
 
@@ -61,7 +64,7 @@ async def _prove_all_items(
             key = item.location.formatted_context
 
             try:
-                result_state = await _prove_item(config, folder, item)
+                result_state = await _prove_item(config, rt, item)
 
                 if not result_state.item.proven:
                     failed = True
@@ -83,7 +86,7 @@ async def _prove_all_items(
 
 async def _prove_item(
     config: Config,
-    folder: str,
+    runtime: Runtime,
     item: TargetItem,
 ) -> ProverAgentState:
     """Prove a single item."""
@@ -94,7 +97,9 @@ async def _prove_item(
     thread_id = f"prove_{item.location.name}_{timestamp}"
     logger.debug(f"Using thread_id: {thread_id}")
 
-    result = await prove_single_item(config, folder, item, thread_id=thread_id)
+    prover = await ProverAgent.create(config=config.prover, runtime=runtime)
+
+    result = await prove_single_item(prover, item, thread_id=thread_id)
 
     if result.item.proven:
         logger.info(f"✓ Proven: {result.item.location.formatted_context}")

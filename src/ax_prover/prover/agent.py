@@ -1,6 +1,5 @@
 """Prover agent for creating and completing proofs in Lean 4."""
 
-from asyncio import Semaphore
 from collections.abc import Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -8,7 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from ..config import ProverConfig, RuntimeConfig
+from ..config import ProverConfig
 from ..models import ProverAgentState
 from ..models.messages import (
     AxiomDetectedFeedback,
@@ -26,6 +25,7 @@ from ..models.messages import (
     StructuredOutputParsingFailedFeedback,
 )
 from ..models.proving import ProverResult, ReviewDecision
+from ..runtime import Runtime
 from ..tools import create_tool
 from ..utils import (
     attach_builder_files,
@@ -44,9 +44,9 @@ from ..utils.build import (
 )
 from ..utils.files import read_file
 from ..utils.git import get_repo_metadata
-from ..utils.lean_interact import get_goal_state_at_sorries
 from ..utils.lean_parsing import (
     find_declaration_by_name,
+    get_goal_state_at_sorries,
     list_all_declarations_in_lean_code,
     strip_comments,
 )
@@ -72,24 +72,18 @@ class ProverAgent:
     """
 
     llm_client: LLMClient
+    summary_llm_client: LLMClient
     memory: BaseMemory
     app: CompiledStateGraph
 
     def __init__(
         self,
         config: ProverConfig,
-        runtime_config: RuntimeConfig,
-        lean_semaphore: Semaphore | None = None,
-        base_folder: str = ".",
+        runtime: Runtime,
     ):
         self.config = config
-        self.runtime_config = runtime_config
+        self.runtime = runtime
         self.logger = get_logger(__name__)
-        self.base_folder = base_folder
-        self.lean_semaphore = lean_semaphore
-
-        if not self.lean_semaphore:
-            self.lean_semaphore = Semaphore(self.runtime_config.lean.max_concurrent_builds)
 
         self.proposer_tools = []
 
@@ -105,31 +99,24 @@ class ProverAgent:
         if self.max_input_tokens < 1000:
             self.logger.error("Error: max_input_tokens abnormally small")
 
-    # TODO: this is creating extra confusion. But we require some things to be run asynchronously
     @classmethod
     async def create(
         cls,
         config: ProverConfig,
-        runtime_config: RuntimeConfig,
-        base_folder: str = ".",
-        lean_semaphore: Semaphore | None = None,
+        runtime: Runtime,
     ) -> "ProverAgent":
         """Async factory method to create a ProverAgent with async initialization.
 
         Args:
             config: Prover configuration
-            runtime_config: Runtime configuration
-            base_folder: Base folder for the Lean project
-            lean_semaphore: Optional semaphore for controlling concurrent Lean builds
+            runtime: Runtime environment
 
         Returns:
             Fully initialized ProverAgent instance
         """
         instance = cls(
             config=config,
-            runtime_config=runtime_config,
-            lean_semaphore=lean_semaphore,
-            base_folder=base_folder,
+            runtime=runtime,
         )
 
         instance.proposer_tools = await instance._create_tools()
@@ -143,7 +130,7 @@ class ProverAgent:
         for tool_config in self.config.proposer_tools.values():
             if tool_config is None:
                 continue
-            tool = await create_tool(tool_config)
+            tool = await create_tool(tool_config, self.runtime)
             if tool is not None:
                 tools.append(tool)
         return tools
@@ -251,7 +238,7 @@ class ProverAgent:
             feedback = MaxIterationsFeedback(max_iterations=self.config.max_iterations)
             return {"messages": [feedback]}
 
-        complete_file = read_file(self.base_folder, state.item.location.path)
+        complete_file = read_file(self.runtime.base_folder, state.item.location.path)
 
         system_prompt = (
             PROPOSER_SYSTEM_PROMPT_SINGLE_SHOT
@@ -290,7 +277,7 @@ class ProverAgent:
             context_messages,
             tools=self.proposer_tools,
             output_schema=ProverResult,
-            max_tool_iterations=self.runtime_config.max_tool_calling_iterations,
+            max_tool_iterations=self.runtime.config.max_tool_calling_iterations,
         )
 
         try:
@@ -333,14 +320,14 @@ class ProverAgent:
                 return {"messages": [feedback]}
 
         with TemporaryProposal(
-            self.base_folder, state.item.location, state.last_proposal
+            self.runtime.base_folder, state.item.location, state.last_proposal
         ) as applier:
             if not applier.success:
                 feedback = BuildFailedFeedback(error_output=applier.error)
                 return {"messages": [feedback]}
 
             attach_builder_files(
-                base_folder=self.base_folder,
+                base_folder=self.runtime.base_folder,
                 original_file_relative_path=str(state.item.location.path),
                 modified_file_relative_path=str(applier.location.path),
             )
@@ -348,10 +335,10 @@ class ProverAgent:
             self.logger.info(f"Running Lean compiler on {applier.location.path}...")
             try:
                 build_success, message = await check_lean_file(
-                    self.base_folder,
+                    self.runtime.base_folder,
                     applier.location.path,
-                    self.runtime_config.lean,
-                    self.lean_semaphore,
+                    self.runtime.config.lean,
+                    self.runtime.lean_semaphore,
                     show_warnings=False,
                     build=True,
                 )
@@ -373,9 +360,9 @@ class ProverAgent:
                 )[0]:
                     self.logger.info("The proposed code contains sorries.")
                     goal_state_at_sorries = await get_goal_state_at_sorries(
-                        self.base_folder,
+                        self.runtime.lean_interact_server,
+                        self.runtime.base_folder,
                         applier.location.path,
-                        self.runtime_config.lean_interact,
                     )
                     feedback = SorriesGoalStateFeedback(
                         sorry_count=sorry_count,
@@ -422,7 +409,9 @@ class ProverAgent:
         proposed_proof = str(find_declaration_by_name(declarations, state.item.location.name))
 
         query = REVIEWER_USER_PROMPT.format(
-            original_theorem=get_function_from_location(self.base_folder, state.item.location),
+            original_theorem=get_function_from_location(
+                self.runtime.base_folder, state.item.location
+            ),
             proposed_proof=proposed_proof,
         )
 
@@ -455,7 +444,7 @@ class ProverAgent:
         if actual_approved:
             output = ReviewApprovedFeedback(comments=reasoning)
             with TemporaryProposal(
-                self.base_folder, state.item.location, state.last_proposal
+                self.runtime.base_folder, state.item.location, state.last_proposal
             ) as applier:
                 applier.apply_permanently()
         else:
@@ -566,7 +555,7 @@ class ProverAgent:
                     "initial_state": initial_state.model_dump(),
                     "git_hash": get_git_hash(),
                     "git_dirty": is_git_dirty(),
-                    "repo": get_repo_metadata(self.base_folder),
+                    "repo": get_repo_metadata(self.runtime.base_folder),
                 },
             }
 

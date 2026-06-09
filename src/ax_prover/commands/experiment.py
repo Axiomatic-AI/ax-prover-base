@@ -1,6 +1,5 @@
 """Experiment command for ax-prover CLI."""
 
-from asyncio import Semaphore
 from pathlib import Path
 
 from langsmith import Client, traceable
@@ -19,10 +18,11 @@ from ..evaluators import (
 )
 from ..models import ProverOutput, TargetItem
 from ..models.proving import ProverAgentState
-from ..tools.lean_search import lean_search_session_manager
+from ..prover.agent import ProverAgent
+from ..runtime import Runtime
+from ..tools import create_tool_lifespans
 from ..utils import get_logger, parse_prove_target, prove_single_item, write_json_output
 from ..utils.git import get_git_hash, is_git_dirty
-from ..utils.lean_interact import lean_interact_session_manager
 
 logger = get_logger(__name__)
 
@@ -52,24 +52,14 @@ async def experiment(
     if experiment_prefix is None:
         experiment_prefix = "experiment"
 
+    base_path = str(Path(folder).resolve())
+
     logger.info(f"Running experiment on dataset: {dataset}")
     logger.debug(f"Max concurrency: {max_concurrency}")
     logger.debug(f"Experiment prefix: {experiment_prefix}")
 
     try:
         client = Client()
-
-        lean_semaphore = Semaphore(config.runtime.lean.max_concurrent_builds)
-        logger.debug(
-            f"Lean build semaphore: max {config.runtime.lean.max_concurrent_builds} concurrent builds"
-        )
-
-        # Create a wrapper function that includes the config and folder
-        # We need to use a lambda instead of partial to avoid LangSmith's
-        # internal config parameter collision
-        @traceable
-        async def experiment_func(inputs: dict[str, str]) -> dict:
-            return await run_experiment(inputs, config, lean_semaphore, folder)
 
         def _tool_usage(run: Run) -> dict[str, int]:
             # Wrapper to pass the config to the tool_usage evaluator preserving the signature
@@ -88,63 +78,67 @@ async def experiment(
             "git_dirty": is_git_dirty(),
         }
 
-        async with lean_search_session_manager():
-            async with lean_interact_session_manager():
-                results = await client.aevaluate(
-                    experiment_func,
-                    data=dataset,
-                    evaluators=[
-                        build_timeout_count,
-                        compilation_error_count,
-                        is_proven,
-                        number_of_iterations,
-                        _tool_usage,
-                        max_iterations_reached,
-                        reviewer_rejections,
-                    ],
-                    max_concurrency=max_concurrency,
-                    experiment_prefix=experiment_prefix,
-                    metadata=experiment_metadata,
-                )
+        tool_lifespans = await create_tool_lifespans(config.prover.proposer_tools)
+        async with Runtime.open(config.runtime, base_path, tool_lifespans) as rt:
+            # Create a wrapper function that includes the config and runtime. We need to use a
+            # lambda instead of partial to avoid LangSmith's internal config parameter collision.
+            @traceable
+            async def experiment_func(inputs: dict[str, str]) -> dict:
+                return await _run_experiment_sample(inputs, config, rt)
 
-                await results.wait()
+            results = await client.aevaluate(
+                experiment_func,
+                data=dataset,
+                evaluators=[
+                    build_timeout_count,
+                    compilation_error_count,
+                    is_proven,
+                    number_of_iterations,
+                    _tool_usage,
+                    max_iterations_reached,
+                    reviewer_rejections,
+                ],
+                max_concurrency=max_concurrency,
+                experiment_prefix=experiment_prefix,
+                metadata=experiment_metadata,
+            )
 
-                error_count = 0
-                for result in results._results:
-                    outputs = result["run"].outputs
-                    if outputs and outputs.get("error") == "exception":
-                        error_count += 1
-                        logger.error(
-                            f"Experiment failed for {outputs.get('path')}: {outputs.get('message')}"
-                        )
+            await results.wait()
 
-                if output_file:
-                    prover_outputs = {}
-                    for result in results._results:
-                        out = result["run"].outputs
-                        if out and out.get("error") == "exception":
-                            path = out.get("path", "unknown")
-                            prover_outputs[path] = ProverOutput(
-                                success=False, error=out.get("message")
-                            )
-                        else:
-                            state = ProverAgentState.model_validate(out)
-                            key = (
-                                state.item.location.formatted_context
-                                if state.item.location
-                                else state.item.title
-                            )
-                            prover_outputs[key] = ProverOutput.from_prover_state(state)
-                    write_json_output(prover_outputs, output_file)
-
-                if error_count > 0:
+            error_count = 0
+            for result in results._results:
+                outputs = result["run"].outputs
+                if outputs and outputs.get("error") == "exception":
+                    error_count += 1
                     logger.error(
-                        f"Experiment completed with {error_count} unhandled error(s). Marking as failed."
+                        f"Experiment failed for {outputs.get('path')}: {outputs.get('message')}"
                     )
-                    return 1
 
-                logger.info("Experiment completed successfully")
-                return 0
+            if output_file:
+                prover_outputs = {}
+                for result in results._results:
+                    out = result["run"].outputs
+                    if out and out.get("error") == "exception":
+                        path = out.get("path", "unknown")
+                        prover_outputs[path] = ProverOutput(success=False, error=out.get("message"))
+                    else:
+                        state = ProverAgentState.model_validate(out)
+                        key = (
+                            state.item.location.formatted_context
+                            if state.item.location
+                            else state.item.title
+                        )
+                        prover_outputs[key] = ProverOutput.from_prover_state(state)
+                write_json_output(prover_outputs, output_file)
+
+            if error_count > 0:
+                logger.error(
+                    f"Experiment completed with {error_count} unhandled error(s). Marking as failed."
+                )
+                return 1
+
+            logger.info("Experiment completed successfully")
+            return 0
 
     except Exception as e:
         logger.error(f"Error running experiment: {e}")
@@ -153,16 +147,13 @@ async def experiment(
 
 
 @traceable
-async def run_experiment(
-    inputs: dict[str, str], config: Config, lean_semaphore: Semaphore, folder: str
-) -> dict:
+async def _run_experiment_sample(inputs: dict[str, str], config: Config, runtime: Runtime) -> dict:
     """Run prover on a single item for a LangSmith experiment."""
     target = inputs["path"]
     logger.info(f"Running experiment for: {target}")
 
     try:
-        base_path = str(Path(folder).resolve())
-        items = parse_prove_target(base_path, target)
+        items = parse_prove_target(runtime.base_folder, target)
 
         if not items:
             logger.warning(f"No unproven functions found in: {target}")
@@ -178,7 +169,8 @@ async def run_experiment(
         item = items[0]
 
         logger.info(f"Running prover experiment on: {item.location.formatted_context}")
-        result = await prove_single_item(config, base_path, item, lean_semaphore=lean_semaphore)
+        prover = await ProverAgent.create(config=config.prover, runtime=runtime)
+        result = await prove_single_item(prover, item)
         logger.info("Experiment completed successfully")
         return result.model_dump()
 
