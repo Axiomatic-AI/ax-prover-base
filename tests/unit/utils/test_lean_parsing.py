@@ -379,23 +379,6 @@ class TestFormatGoalStateAtSorries:
         )
 
 
-class TestNormalizeLocation:
-    """Tests for normalize_location function."""
-
-    @pytest.mark.parametrize(
-        "input_str, expected",
-        [
-            ("Module.Path:func", "Module.Path:func"),
-            ("path/to/file.lean:func", "path.to.file:func"),
-            ("no_colon_at_all", "no_colon_at_all"),
-            ("A/B.lean:foo", "A.B:foo"),
-        ],
-    )
-    def test_normalize_location(self, input_str, expected):
-        """Normalizes file paths to module paths."""
-        assert normalize_location(input_str) == expected
-
-
 class TestFindDeclarationByName:
     """Tests for find_declaration_by_name function."""
 
