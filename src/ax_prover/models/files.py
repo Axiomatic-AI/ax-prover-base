@@ -1,6 +1,7 @@
 """Models for file operations."""
 
 import logging
+from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -43,6 +44,15 @@ class Location(BaseModel):
             location_str += " (external)"
         return location_str
 
+    def absolute_path(self, base_folder: str) -> Path:
+        """Resolve an absolute path to the location given a base folder."""
+        base_path = Path(base_folder)
+
+        if self.is_external:
+            return _resolve_lake_package_path(base_path, self.module_path)
+        else:
+            return base_path / self.path
+
     @classmethod
     def parse(cls, target: str, is_external: bool = False) -> "Location":
         """Parse a target string into a Location object.
@@ -63,3 +73,38 @@ class Location(BaseModel):
         module_path = module_path.replace("/", ".").removesuffix(".lean")
 
         return cls(name=name, module_path=module_path, is_external=is_external)
+
+
+def _resolve_lake_package_path(base: Path, module_path: str) -> Path | None:
+    """Resolve a dotted module path under .lake/packages/ to its .lean file.
+
+    The first component of `module_path` is matched case-insensitively against
+    Lake package directory names; the remaining components are joined as a
+    filesystem path with a .lean suffix appended.
+
+    Example::
+
+        _resolve_lake_package_path(
+            Path("/proj"), "Mathlib.Algebra.Group.Defs"
+        )
+        # -> Path("/proj/.lake/packages/mathlib/Mathlib/Algebra/Group/Defs.lean")
+
+    Returns None if the .lake/packages directory or the package itself cannot
+    be located. (Existence of the .lean file is the caller's concern.)
+    """
+    packages_dir = base / ".lake" / "packages"
+    if not packages_dir.is_dir():
+        return None
+
+    parts = module_path.split(".")
+    if not parts:
+        return None
+
+    package_dirs = {
+        entry.name.lower(): entry.name for entry in packages_dir.iterdir() if entry.is_dir()
+    }
+    pkg_dir = package_dirs.get(parts[0].lower())
+    if pkg_dir is None:
+        return None
+
+    return packages_dir / pkg_dir / Path(*parts).with_suffix(".lean")
