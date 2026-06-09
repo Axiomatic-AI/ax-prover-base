@@ -85,7 +85,7 @@ def edit_function(
         logger.error("Cannot edit external library functions")
         return False
 
-    full_path = Path(base_folder) / location.path
+    full_path = location.absolute_path(base_folder)
 
     if not full_path.exists():
         full_path.parent.mkdir(parents=True, exist_ok=True)
