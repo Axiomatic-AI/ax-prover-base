@@ -18,9 +18,6 @@ from .messages import (
 class TargetItem(BaseModel):
     """A single item to be proven (definition, theorem, lemma, etc.)."""
 
-    title: str = Field(
-        description="Unique identifier for this item (e.g., 'group_def', 'cayley_theorem')"
-    )
     location: Location | None = Field(
         default=None,
         description="Location where the formalization is stored (includes path and Lean name)",
@@ -29,6 +26,11 @@ class TargetItem(BaseModel):
         default=False,
         description="Whether this item has been proven",
     )
+
+    @property
+    def name(self) -> str:
+        "Title of the item to prove."
+        return self.location.name
 
 
 class ProverMetrics(BaseModel, validate_assignment=True):
