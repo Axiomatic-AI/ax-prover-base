@@ -341,51 +341,32 @@ def find_declaration_by_name(declarations: list[Declaration], name: str) -> Decl
     return None
 
 
-def find_declaration_at_line(content: str, line_number: int) -> str | None:
-    """Find the declaration name containing the given line number.
+def find_declaration_at_line(
+    declarations: list[Declaration], line_number: int
+) -> Declaration | None:
+    """Find the declaration that contains the given line number.
 
     Args:
-        content: Lean code content as string
+        declarations: List of declarations
         line_number: 1-indexed line number to search for
 
     Returns:
-        The name of the declaration containing the line, or None if not found
+        The declaration, or None if not found
     """
-    if line_number < 1:
+    matches = [
+        declaration
+        for declaration in declarations
+        if declaration.info.range.start.line <= line_number <= declaration.info.range.finish.line
+    ]
+
+    if not matches:
         return None
 
-    # strip_comments preserves newlines, so line numbers remain valid
-    stripped = strip_comments(content)
-    lines = stripped.split("\n")
+    if len(matches) > 1:
+        logger.warning(f"Multiple declarations found at line {line_number}: {matches}")
 
-    if line_number > len(lines):
-        return None
-
-    keywords_pattern = "|".join(LEAN_KEYWORDS)
-    pattern = rf"^(\s*)({keywords_pattern})\s+([\w.]+)"
-
-    declarations: list[tuple[str, int, int]] = []
-
-    for i, line in enumerate(lines):
-        match = re.match(pattern, line)
-        if match:
-            name = match.group(3)
-            # Split on punctuation that can follow the name
-            name = re.split(r"[:({[\[]", name)[0]
-            start_line = i + 1  # Convert to 1-indexed
-
-            # Close previous declaration at same or lower indent
-            if declarations:
-                prev_name, prev_start, _ = declarations[-1]
-                declarations[-1] = (prev_name, prev_start, i + 1)  # end is exclusive, 1-indexed
-
-            declarations.append((name, start_line, len(lines) + 1))
-
-    for name, start, end in declarations:
-        if start <= line_number < end:
-            return name
-
-    return None
+    # In case of multiple matches, return the one with the smallest range that contains the line
+    return min(matches, key=lambda d: d.info.range.finish.line - d.info.range.start.line)
 
 
 def format_goal_state_at_sorries(sorries: list[Sorry]) -> str:
