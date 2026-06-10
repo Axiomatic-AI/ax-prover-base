@@ -322,14 +322,12 @@ async def list_all_declarations_in_path_as_text(
     if show_statements:
         return "\n".join(f"{decl_path}:{str(decl)}" for decl_path, decl in declarations)
     else:
-        return "\n".join(
-            f"{decl_path}:{decl.info.kind} {decl.info.name}" for decl_path, decl in declarations
-        )
+        return "\n".join(f"{decl_path}:{decl.kind} {decl.name}" for decl_path, decl in declarations)
 
 
 def find_declaration_by_name(declarations: list[Declaration], name: str) -> Declaration | None:
     for declaration in declarations:
-        if declaration.info.name == name:
+        if declaration.name == name:
             return declaration
     return None
 

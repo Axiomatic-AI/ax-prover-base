@@ -38,5 +38,15 @@ class Declaration(BaseModel):
     info: DeclarationInfo
     sorries: list[Sorry] = Field(default_factory=list)
 
+    @property
+    def name(self) -> str:
+        """Name of the declaration."""
+        return self.info.name
+
+    @property
+    def kind(self) -> str:
+        "Kind of the declaration."
+        return self.info.kind
+
     def __str__(self):
         return self.info.pp
