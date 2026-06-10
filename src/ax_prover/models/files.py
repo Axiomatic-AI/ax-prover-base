@@ -44,8 +44,12 @@ class Location(BaseModel):
             location_str += " (external)"
         return location_str
 
-    def absolute_path(self, base_folder: str) -> Path:
-        """Resolve an absolute path to the location given a base folder."""
+    def absolute_path(self, base_folder: str) -> Path | None:
+        """Resolve an absolute path to the location given a base folder.
+
+        Returns None for external locations that cannot be resolved under
+        .lake/packages (see _resolve_lake_package_path).
+        """
         base_path = Path(base_folder)
 
         if self.is_external:
