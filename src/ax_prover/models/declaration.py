@@ -39,14 +39,19 @@ class Declaration(BaseModel):
     sorries: list[Sorry] = Field(default_factory=list)
 
     @property
-    def name(self) -> str:
-        """Name of the declaration."""
-        return self.info.name
+    def code(self) -> str:
+        "Source code of the declaration."
+        return self.info.pp
 
     @property
     def kind(self) -> str:
         "Kind of the declaration."
         return self.info.kind
+
+    @property
+    def name(self) -> str:
+        """Name of the declaration."""
+        return self.info.name
 
     def __str__(self):
         return self.info.pp
