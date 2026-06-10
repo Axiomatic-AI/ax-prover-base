@@ -53,5 +53,9 @@ class Declaration(BaseModel):
         """Name of the declaration."""
         return self.info.name
 
+    def contains_line(self, line_number: int) -> bool:
+        """Check if the declaration contains the given line number."""
+        return self.info.range.start.line <= line_number <= self.info.range.finish.line
+
     def __str__(self):
         return self.info.pp

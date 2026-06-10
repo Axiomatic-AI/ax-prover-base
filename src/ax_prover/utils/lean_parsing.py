@@ -354,9 +354,7 @@ def find_declaration_at_line(
         The declaration, or None if not found
     """
     matches = [
-        declaration
-        for declaration in declarations
-        if declaration.info.range.start.line <= line_number <= declaration.info.range.finish.line
+        declaration for declaration in declarations if declaration.contains_line(line_number)
     ]
 
     if not matches:
