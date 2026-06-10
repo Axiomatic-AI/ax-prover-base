@@ -408,9 +408,7 @@ class ProverAgent:
         proposed_proof = str(find_declaration_by_name(declarations, state.item.location.name))
 
         query = REVIEWER_USER_PROMPT.format(
-            original_theorem=get_function_from_location(
-                self.runtime.base_folder, state.item.location
-            ),
+            original_theorem=state.item.original_source,
             proposed_proof=proposed_proof,
         )
 
