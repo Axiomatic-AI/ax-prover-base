@@ -383,9 +383,9 @@ class TemporaryProposal:
                 self.error = "No location set"
                 return self
 
-            if self.original_location.is_external and self.proposal.has_changes:
+            if self.original_location.is_external:
                 self.error = (
-                    f"Cannot modify external library location: "
+                    f"Cannot create a temporary proposal for an external library location: "
                     f"{self.original_location.formatted_context}"
                 )
                 return self
