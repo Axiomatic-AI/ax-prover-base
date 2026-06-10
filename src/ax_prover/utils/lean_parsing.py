@@ -326,6 +326,15 @@ async def list_all_declarations_in_path_as_text(
 
 
 def find_declaration_by_name(declarations: list[Declaration], name: str) -> Declaration | None:
+    """Find a declaration by name.
+
+    Args:
+        declarations: List of declarations
+        name: Name of the declaration to find
+
+    Returns:
+        The declaration, or None if not found
+    """
     for declaration in declarations:
         if declaration.name == name:
             return declaration
