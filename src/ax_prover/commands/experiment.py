@@ -126,7 +126,7 @@ async def experiment(
                         key = (
                             state.item.location.formatted_context
                             if state.item.location
-                            else state.item.title
+                            else state.item.name
                         )
                         prover_outputs[key] = ProverOutput.from_prover_state(state)
                 write_json_output(prover_outputs, output_file)
@@ -157,13 +157,13 @@ async def _run_experiment_sample(inputs: dict[str, str], config: Config, runtime
 
         if not items:
             logger.warning(f"No unproven functions found in: {target}")
-            item = TargetItem(title="no_unproven_functions", proven=True)
+            item = TargetItem(proven=True)
             return ProverAgentState(item=item).model_dump()
 
         if len(items) > 1:
             logger.warning(
                 f"Multiple items found ({len(items)}), "
-                f"using first: {items[0].title}. "
+                f"using first: {items[0].name}. "
                 f"Use location string (Module:theorem) for specific theorem."
             )
         item = items[0]

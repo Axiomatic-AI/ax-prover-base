@@ -41,7 +41,6 @@ def get_item_from_location(folder: str, location_str: str) -> TargetItem | None:
     logger.debug(f"Found theorem with {sorry_count} sorrie(s)")
 
     item = TargetItem(
-        title=location.name,
         location=location,
         proven=sorry_count == 0,
     )
@@ -141,5 +140,5 @@ async def prove_single_item(
 ) -> ProverAgentState:
     """Prove a single item and return the full state."""
     initial_state = ProverAgentState(item=item)
-    run_name = f"prove:{item.title}"
+    run_name = f"prove:{item.name}"
     return await prover.chat(initial_state, run_name=run_name, thread_id=thread_id)

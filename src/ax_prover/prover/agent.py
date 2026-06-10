@@ -501,7 +501,7 @@ class ProverAgent:
         last_feedback_str = state.last_feedback.content if state.last_feedback else "No feedback"
 
         query = SUMMARIZE_OUTPUT_USER_PROMPT.format(
-            theorem_name=state.item.title,
+            theorem_name=state.item.name,
             location=location_str,
             proven=state.approved,
             iterations=state.metrics.number_of_iterations,

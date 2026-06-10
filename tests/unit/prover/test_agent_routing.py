@@ -24,7 +24,7 @@ from ax_prover.prover.agent import ProverAgent
 @pytest.fixture
 def sample_item():
     loc = Location(name="thm", module_path="Test.Module", is_external=False)
-    return TargetItem(title="Test", location=loc)
+    return TargetItem(name="Test", location=loc)
 
 
 @pytest.fixture
