@@ -10,11 +10,8 @@ from ..models.files import Location
 from ..models.proving import ProverAgentState
 from .lean_interact import LeanInteractServer
 from .lean_parsing import (
-    count_pattern,
     find_declaration_at_line,
     find_declaration_by_name,
-    get_function_from_location,
-    get_unproven,
     list_declarations_from_file,
 )
 from .logging import get_logger
@@ -23,82 +20,6 @@ if TYPE_CHECKING:
     from ..prover.agent import ProverAgent
 
 logger = get_logger(__name__)
-
-
-def get_item_from_location(folder: str, location_str: str) -> TargetItem | None:
-    """Create a TargetItem from a location string."""
-    logger.info(f"Proving theorem at: {location_str}")
-
-    try:
-        location = Location.parse(location_str)
-    except ValueError as e:
-        logger.error(str(e))
-        return None
-
-    theorem_content = get_function_from_location(folder, location)
-    if not theorem_content:
-        logger.error(f"Theorem not found: {location.formatted_context}")
-        return None
-
-    sorry_count, _ = count_pattern(theorem_content, pattern=r"\b(sorry|admit)\b")
-    logger.debug(f"Found theorem with {sorry_count} sorrie(s)")
-
-    item = TargetItem(
-        location=location,
-        is_proven=sorry_count == 0,
-    )
-    return item
-
-
-async def get_items_from_lean_file(
-    server: LeanInteractServer, folder: str, target: str
-) -> list[TargetItem]:
-    """Get all unproven functions from a Lean file."""
-    file_path = target if target.endswith(".lean") else target.replace(".", "/") + ".lean"
-
-    if not (Path(folder) / file_path).exists():
-        logger.error(f"File not found: {file_path}")
-        return []
-
-    unproven_names = await get_unproven(server, folder, file_path)
-    if not unproven_names:
-        logger.info(f"No unproven functions found in {file_path}")
-        return []
-
-    logger.info(
-        f"Found {len(unproven_names)} unproven function(s) in {file_path}: {', '.join(unproven_names)}"
-    )
-
-    module_path = file_path.replace("/", ".").removesuffix(".lean")
-    items = []
-    for func_name in unproven_names:
-        item = get_item_from_location(folder, f"{module_path}:{func_name}")
-        if item:
-            items.append(item)
-
-    return items
-
-
-def get_item_from_line(folder: str, target: str, line: int) -> TargetItem | None:
-    """Create a TargetItem from a file path and line number."""
-    file_path = target if target.endswith(".lean") else target.replace(".", "/") + ".lean"
-    full_path = Path(folder) / file_path
-
-    if not full_path.exists():
-        logger.error(f"File not found: {file_path}")
-        return None
-
-    content = full_path.read_text(encoding="utf-8")
-    decl_name = find_declaration_at_line(content, line)
-
-    if not decl_name:
-        logger.error(f"No declaration found at line {line} in {file_path}")
-        return None
-
-    module_path = file_path.replace("/", ".").removesuffix(".lean")
-    location_str = f"{module_path}:{decl_name}"
-
-    return get_item_from_location(folder, location_str)
 
 
 _LINE_SUFFIX_RE = re.compile(r"#L(\d+)$")
