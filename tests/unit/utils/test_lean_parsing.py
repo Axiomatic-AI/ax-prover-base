@@ -18,6 +18,7 @@ from ax_prover.utils.lean_parsing import (
     count_pattern,
     extract_function_from_content,
     extract_theorem_name,
+    find_declaration_at_line,
     find_declaration_by_name,
     format_goal_state_at_sorries,
     list_declarations_from_code,
@@ -255,7 +256,7 @@ def _make_decl_info(
         range=decl_range,
         scope=ScopeInfo(currNamespace=""),
         name=name,
-        fullName=name,
+        full_name=name,
         kind=kind,
         modifiers=DeclModifiers(),
         signature=DeclSignature(pp="", constants=[], range=decl_range),
@@ -401,3 +402,36 @@ class TestFindDeclarationByName:
     def test_empty_list(self):
         """Returns None for empty declarations list."""
         assert find_declaration_by_name([], "foo") is None
+
+
+class TestFindDeclarationAtLine:
+    """Tests for find_declaration_at_line function.
+
+    Each case provides its own declarations and the exact declaration expected to be
+    returned (compared by identity), so there are no magic names to keep in sync and
+    new scenarios can be added by appending a row.
+    """
+
+    FIRST = Declaration(info=_make_decl_info("first", start=(1, 0), finish=(3, 5)))
+    SECOND = Declaration(info=_make_decl_info("second", start=(5, 0), finish=(8, 5)))
+    OUTER = Declaration(info=_make_decl_info("outer", start=(1, 0), finish=(10, 15)))
+    INNER = Declaration(info=_make_decl_info("inner", start=(4, 0), finish=(6, 18)))
+
+    @pytest.mark.parametrize(
+        "declarations, line, expected",
+        [
+            ([FIRST, SECOND], 1, FIRST),  # start boundary is inclusive
+            ([FIRST, SECOND], 2, FIRST),  # interior line
+            ([FIRST, SECOND], 3, FIRST),  # finish boundary is inclusive
+            ([FIRST, SECOND], 5, SECOND),  # start boundary of a later declaration
+            ([FIRST, SECOND], 8, SECOND),  # finish boundary of a later declaration
+            ([FIRST, SECOND], 4, None),  # gap between declarations
+            ([FIRST, SECOND], 9, None),  # beyond all declarations
+            ([OUTER, INNER], 5, INNER),  # nested: smallest containing range wins
+            ([OUTER, INNER], 2, OUTER),  # nested: only the outer range contains the line
+            ([], 1, None),  # empty list
+        ],
+    )
+    def test_find_declaration_at_line(self, declarations, line, expected):
+        """Returns the smallest-range declaration containing the line, or None."""
+        assert find_declaration_at_line(declarations, line) is expected
