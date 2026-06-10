@@ -562,7 +562,7 @@ class ProverAgent:
             final_state = ProverAgentState(**result)
 
             if final_state.approved:
-                final_state.item.proven = True
+                final_state.item.is_proven = True
                 self.logger.info(
                     f"Successfully proved {final_state.item.location.formatted_context}"
                 )

@@ -42,7 +42,7 @@ def get_item_from_location(folder: str, location_str: str) -> TargetItem | None:
 
     item = TargetItem(
         location=location,
-        proven=sorry_count == 0,
+        is_proven=sorry_count == 0,
     )
     return item
 

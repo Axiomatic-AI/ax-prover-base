@@ -62,7 +62,7 @@ async def _prove_all_items(
         outputs: dict[str, ProverOutput] = {}
 
         for item in items:
-            if item.proven and not overwrite:
+            if item.is_proven and not overwrite:
                 logger.info(f"Already proven: {item.location.formatted_context}")
                 continue
 
@@ -71,7 +71,7 @@ async def _prove_all_items(
             try:
                 result_state = await _prove_item(config, rt, item)
 
-                if not result_state.item.proven:
+                if not result_state.item.is_proven:
                     failed = True
 
                 outputs[key] = ProverOutput.from_prover_state(result_state)
@@ -106,7 +106,7 @@ async def _prove_item(
 
     result = await prove_single_item(prover, item, thread_id=thread_id)
 
-    if result.item.proven:
+    if result.item.is_proven:
         logger.info(f"✓ Proven: {result.item.location.formatted_context}")
     else:
         logger.warning(f"✗ Not proven: {result.item.location.formatted_context}")

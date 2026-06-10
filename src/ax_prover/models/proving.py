@@ -22,7 +22,11 @@ class TargetItem(BaseModel):
         default=None,
         description="Location where the formalization is stored (includes path and Lean name)",
     )
-    proven: bool = Field(
+    original_source: str | None = Field(
+        default=None,
+        description="Original source code for this item, including the signature and body.",
+    )
+    is_proven: bool = Field(
         default=False,
         description="Whether this item has been proven",
     )

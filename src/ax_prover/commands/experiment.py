@@ -157,7 +157,7 @@ async def _run_experiment_sample(inputs: dict[str, str], config: Config, runtime
 
         if not items:
             logger.warning(f"No unproven functions found in: {target}")
-            item = TargetItem(proven=True)
+            item = TargetItem(is_proven=True)
             return ProverAgentState(item=item).model_dump()
 
         if len(items) > 1:

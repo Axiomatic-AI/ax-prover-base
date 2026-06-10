@@ -19,7 +19,7 @@ class ProverOutput(BaseModel):
     @classmethod
     def from_prover_state(cls, state: ProverAgentState) -> "ProverOutput":
         """Create output from ProverAgentState."""
-        return cls(success=state.item.proven, error=None, summary=state.summary)
+        return cls(success=state.item.is_proven, error=None, summary=state.summary)
 
     @classmethod
     def from_exception(cls, exc: Exception) -> "ProverOutput":
