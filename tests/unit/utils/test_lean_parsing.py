@@ -17,7 +17,6 @@ from ax_prover.models.declaration import Declaration
 from ax_prover.utils.lean_parsing import (
     count_pattern,
     extract_function_from_content,
-    extract_theorem_name,
     find_declaration_at_line,
     find_declaration_by_name,
     format_goal_state_at_sorries,
@@ -210,29 +209,6 @@ class TestExtractFunctionFromContent:
         """Functions with dots in names can be extracted."""
         code = "theorem Poly.not_principal : P := by sorry"
         assert extract_function_from_content(code, "Poly.not_principal") == code
-
-
-class TestExtractTheoremName:
-    """Tests for extract_theorem_name function."""
-
-    @pytest.mark.parametrize(
-        "stmt, expected",
-        [
-            ("theorem foo : P := sorry", "foo"),
-            ("lemma bar(n : Nat) : n > 0 := by sorry", "bar"),
-            ("def baz := 42", "baz"),
-            (
-                "theorem Polynomial.not_isPrincipalIdealRing : P := sorry",
-                "Polynomial.not_isPrincipalIdealRing",
-            ),
-            ("-- just a comment", None),
-            ("", None),
-            ("instance myInstance : Foo := {}", "myInstance"),
-        ],
-    )
-    def test_extract_theorem_name(self, stmt, expected):
-        """Extracts theorem name from various declaration types."""
-        assert extract_theorem_name(stmt) == expected
 
 
 def _make_decl_info(

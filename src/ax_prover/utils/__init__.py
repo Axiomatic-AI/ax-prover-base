@@ -9,9 +9,7 @@ from .lean_parsing import (
     LEAN_KEYWORDS,
     count_pattern,
     extract_function_from_content,
-    extract_theorem_name,
     get_function_from_location,
-    get_unproven,
     list_declarations_from_code,
     list_declarations_from_file,
     strip_comments,
@@ -28,9 +26,6 @@ from .logging import (
 
 # Export proving utilities
 from .proving import (
-    get_item_from_line,
-    get_item_from_location,
-    get_items_from_lean_file,
     parse_prove_target,
     prove_single_item,
 )
@@ -43,12 +38,6 @@ __all__ = [
     "save_config",
     # Files
     "write_json_output",
-    "extract_function_from_content",
-    "extract_theorem_name",
-    "get_function_from_location",
-    "get_unproven",
-    "list_declarations_from_code",
-    "list_declarations_from_file",
     # Logging
     "get_logger",
     "reconfigure_log_level",
@@ -62,11 +51,12 @@ __all__ = [
     # Lean
     "LEAN_KEYWORDS",
     "count_pattern",
+    "extract_function_from_content",
+    "get_function_from_location",
+    "list_declarations_from_code",
+    "list_declarations_from_file",
     "strip_comments",
     # Proving
-    "get_item_from_line",
-    "get_item_from_location",
-    "get_items_from_lean_file",
     "parse_prove_target",
     "prove_single_item",
 ]
