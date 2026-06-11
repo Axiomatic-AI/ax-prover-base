@@ -41,3 +41,7 @@ class Declaration(BaseModel):
 
     def __str__(self):
         return self.info.pp
+
+    @property
+    def search_tactics(self) -> list[Tactic]:
+        return [tactic for tactic in self.tactics if tactic.tactic.endswith("?")]

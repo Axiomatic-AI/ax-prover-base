@@ -381,14 +381,11 @@ class ProverAgent:
                     feedback = AxiomDetectedFeedback(count=len(axioms), locations=formatted)
                     return {"messages": [feedback]}
 
-                tactic_count, tactic_locations = count_pattern(
-                    stripped_code, pattern=r"\b(apply|exact)\?"
-                )
-                if tactic_count:
+                if proposed_proof.search_tactics:
                     self.logger.info("The proposed code contains search tactics.")
-                    formatted = "\n".join(ctx for _, ctx in tactic_locations)
+                    formatted = "\n".join(tactic.tactic for tactic in proposed_proof.search_tactics)
                     feedback = SearchTacticsDetectedFeedback(
-                        count=tactic_count, locations=formatted
+                        count=len(proposed_proof.search_tactics), locations=formatted
                     )
                     return {"messages": [feedback]}
 
