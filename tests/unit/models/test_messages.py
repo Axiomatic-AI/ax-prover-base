@@ -24,7 +24,7 @@ from ax_prover.models.messages import (
 @pytest.fixture
 def sample_location():
     """A reusable Location for tests."""
-    return Location(name="my_thm", module_path="Test.Module", is_external=False)
+    return Location(name="my_thm", module_path="Test.Module")
 
 
 class TestProposalMessage:

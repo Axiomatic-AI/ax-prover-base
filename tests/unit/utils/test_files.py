@@ -106,7 +106,7 @@ class TestEditFunctionPreservesComments:
             "theorem my_theorem : True := by\n"
             "  sorry\n"
         )
-        location = Location(module_path="Test", name="my_theorem", is_external=False)
+        location = Location(module_path="Test", name="my_theorem")
         new_code = "theorem my_theorem : True := by\n  trivial"
 
         result = edit_function(str(tmp_path), location, new_code)
@@ -129,7 +129,7 @@ class TestEditFunctionPreservesComments:
             "theorem target : True := by\n"
             "  sorry\n"
         )
-        location = Location(module_path="Test", name="target", is_external=False)
+        location = Location(module_path="Test", name="target")
         new_code = "theorem target : True := by\n  trivial"
 
         result = edit_function(str(tmp_path), location, new_code)
@@ -151,7 +151,7 @@ class TestEditFunctionPreservesComments:
             "theorem my_theorem : True := by\n"
             "  sorry\n"
         )
-        location = Location(module_path="Test", name="my_theorem", is_external=False)
+        location = Location(module_path="Test", name="my_theorem")
         new_code = "theorem my_theorem : True := by\n  trivial"
 
         result = edit_function(str(tmp_path), location, new_code)
@@ -171,7 +171,7 @@ class TestEditFunctionPreservesComments:
             "theorem my_theorem : True := by\n"
             "  sorry\n"
         )
-        location = Location(module_path="Test", name="my_theorem", is_external=False)
+        location = Location(module_path="Test", name="my_theorem")
         # LLM proposal typically omits the doc comment
         new_code = "theorem my_theorem : True := by\n  trivial"
 
@@ -187,7 +187,7 @@ class TestEditFunctionPreservesComments:
         """Doc comment is replaced if the new code provides a new doc comment."""
         lean_file = tmp_path / "Test.lean"
         lean_file.write_text("/-- Old doc comment. -/\ntheorem my_theorem : True := by\n  sorry\n")
-        location = Location(module_path="Test", name="my_theorem", is_external=False)
+        location = Location(module_path="Test", name="my_theorem")
         new_code = "/-- New doc comment. -/\ntheorem my_theorem : True := by\n  trivial"
 
         result = edit_function(str(tmp_path), location, new_code)
@@ -208,7 +208,7 @@ class TestEditFunctionPreservesComments:
             "theorem my_theorem : True := by\n"
             "  sorry\n"
         )
-        location = Location(module_path="Test", name="my_theorem", is_external=False)
+        location = Location(module_path="Test", name="my_theorem")
         # New code omits the doc comment — both line comments and doc comment should survive
         new_code = "theorem my_theorem : True := by\n  trivial"
 

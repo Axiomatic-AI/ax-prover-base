@@ -181,7 +181,7 @@ def get_function_from_location(base_folder: str, location: Location) -> str | No
 
     Args:
         base_folder: Base folder path
-        location: Location object with import path (dot notation), name, and is_external flag
+        location: Location object with import path (dot notation) and name
 
     Returns:
         The complete definition block, or None if not found
@@ -230,7 +230,7 @@ async def get_unproven(server: LeanInteractServer, base_folder: str, file_path: 
         if not func_name:
             continue
 
-        location = Location(module_path=module_path, name=func_name, is_external=False)
+        location = Location(module_path=module_path, name=func_name)
         func_body = get_function_from_location(base_folder, location)
         if func_body and re.search(r"\bsorry\b", func_body):
             unproven_functions.append(func_name)
