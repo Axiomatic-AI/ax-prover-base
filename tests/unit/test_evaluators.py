@@ -21,8 +21,8 @@ class TestIsProven:
     @pytest.mark.parametrize(
         "outputs, expected",
         [
-            ({"item": {"proven": True}}, True),
-            ({"item": {"proven": False}}, False),
+            ({"item": {"is_proven": True}}, True),
+            ({"item": {"is_proven": False}}, False),
             ({"error": "some error"}, False),
             ({}, False),
             ({"item": {}}, False),
