@@ -31,7 +31,6 @@ from ..utils import (
     attach_builder_files,
     attach_prover_logs_if_enabled,
     count_pattern,
-    get_function_from_location,
     get_git_hash,
     get_logger,
     is_git_dirty,

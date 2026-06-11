@@ -16,7 +16,7 @@ from ..evaluators import (
     reviewer_rejections,
     tool_usage,
 )
-from ..models import ProverOutput, TargetItem
+from ..models import ProverOutput
 from ..models.proving import ProverAgentState
 from ..prover.agent import ProverAgent
 from ..runtime import Runtime
