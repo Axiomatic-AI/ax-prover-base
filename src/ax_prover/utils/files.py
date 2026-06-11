@@ -63,10 +63,10 @@ def replace_in_file(
         logger.warning(f"Original text '{original_text}' not found in file {file_path}")
         return False
 
-    # Preserve docstring in case they were removed by the new text
+    # Preserve docstring in case it was removed by the new text
     doc_match = re.match(r"/--[\s\S]*?-/\s*", original_text)
     if doc_match and not re.match(r"/--", new_text):
-        replacement = doc_match.group() + new_text
+        new_text = doc_match.group() + new_text
 
     new_content = content.replace(original_text, new_text, 1)
     file_path.write_text(new_content, encoding="utf-8")
