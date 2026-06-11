@@ -176,30 +176,6 @@ def extract_function_from_content(content: str, function_name: str) -> str | Non
     return content[start_pos:end_pos].strip()
 
 
-def get_function_from_location(base_folder: str, location: Location) -> str | None:
-    """Get a function/theorem/lemma definition using a Location object.
-
-    Args:
-        base_folder: Base folder path
-        location: Location object with import path (dot notation) and name
-
-    Returns:
-        The complete definition block, or None if not found
-    """
-    full_path = location.absolute_path(base_folder)
-
-    if not full_path or not full_path.exists():
-        logger.warning(f"This path does not exist: {location.module_path}.")
-        return None
-
-    try:
-        content = full_path.read_text(encoding="utf-8")
-        return extract_function_from_content(content, location.name)
-    except Exception as e:
-        logger.error(f"Error in get_function_from_location: {e}")
-        return None
-
-
 def find_declaration_by_name(declarations: list[Declaration], name: str) -> Declaration | None:
     """Find a declaration by name.
 
