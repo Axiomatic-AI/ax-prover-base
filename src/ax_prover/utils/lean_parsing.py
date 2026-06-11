@@ -7,7 +7,7 @@ from enum import Enum
 from pathlib import Path
 
 from lean_interact import Command
-from lean_interact.interface import DeclarationInfo, Sorry
+from lean_interact.interface import DeclarationInfo, Sorry, Tactic
 
 from ..models.declaration import Declaration, DeclarationType
 from ..models.files import Location
@@ -408,8 +408,8 @@ async def list_declarations_from_code(
     server: LeanInteractServer, code: str
 ) -> list[DeclarationInfo]:
     """List all declarations from a code snippet."""
-    response = await server.run(Command(cmd=code, declarations=True))
-    return _get_declarations_with_sorries(response.declarations, response.sorries)
+    response = await server.run(Command(cmd=code, declarations=True, all_tactics=True))
+    return _bundle_declarations(response.declarations, response.sorries, response.tactics)
 
 
 async def list_declarations_from_file(
@@ -420,20 +420,34 @@ async def list_declarations_from_file(
     return await list_declarations_from_code(server, code)
 
 
-def _get_declarations_with_sorries(
-    declaration_infos: list[DeclarationInfo], sorries: list[Sorry]
+def _bundle_declarations(
+    declaration_infos: list[DeclarationInfo], sorries: list[Sorry], tactics: list[Tactic]
 ) -> list[Declaration]:
     """Match the sorries with the declaration information from the lean interact response,
     and combine them into a single Declaration object."""
     declarations = []
     for declaration_info in declaration_infos:
-        sorries_in_declaration = []
-        for sorry in sorries:
-            if (
-                sorry.start_pos > declaration_info.range.start
-                and sorry.start_pos < declaration_info.range.finish
-            ):
-                sorries_in_declaration.append(sorry)
-        declarations.append(Declaration(info=declaration_info, sorries=sorries_in_declaration))
+        sorries_in_declaration = [
+            sorry for sorry in sorries if _within_declaration_range(declaration_info, sorry)
+        ]
+
+        tactics_in_declaration = [
+            tactic for tactic in tactics if _within_declaration_range(declaration_info, tactic)
+        ]
+
+        declarations.append(
+            Declaration(
+                info=declaration_info,
+                sorries=sorries_in_declaration,
+                tactics=tactics_in_declaration,
+            )
+        )
 
     return declarations
+
+
+def _within_declaration_range(declaration_info: DeclarationInfo, object: Sorry | Tactic) -> bool:
+    return (
+        object.start_pos > declaration_info.range.start
+        and object.start_pos < declaration_info.range.finish
+    )
