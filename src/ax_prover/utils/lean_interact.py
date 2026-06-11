@@ -48,9 +48,19 @@ class LeanInteractServer:
                 repl_config = LeanREPLConfig(
                     project=project,
                     verbose=self._config.verbose,
+                    memory_hard_limit_mb=self._config.memory_hard_limit_mb,
+                    enable_parallel_elaboration=self._config.enable_parallel_elaboration,
                 )
-                self._server = AutoLeanServer(repl_config)
-                logger.debug(f"Created LeanInteract server for {self._base_folder}")
+                self._server = AutoLeanServer(
+                    repl_config,
+                    max_total_memory=self._config.max_total_memory,
+                    max_restart_attempts=self._config.max_restart_attempts,
+                )
+                logger.debug(
+                    f"Created LeanInteract server for {self._base_folder} "
+                    f"(max_total_memory={self._config.max_total_memory}, "
+                    f"max_restart_attempts={self._config.max_restart_attempts})"
+                )
 
         return self._server
 

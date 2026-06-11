@@ -84,6 +84,33 @@ class SearchQueryInput(BaseModel):
     query: str = Field(..., description="Search query string")
 
 
+def summarize_for_log(result: str, top_k: int = 3) -> str:
+    """Compact rendering of LeanSearch output for the cross-iteration tool log.
+
+    Keeps the first ``top_k`` `•` bullets and their signature lines; drops
+    docstrings and the result-count header. Falls back to a truncation if the
+    output does not match the expected shape (e.g. error or no-results message).
+    """
+    if not result or "•" not in result:
+        return result.strip().splitlines()[0] if result else ""
+
+    out: list[str] = []
+    kept = 0
+    in_bullet = False
+    for line in result.splitlines():
+        if line.startswith("• "):
+            if kept >= top_k:
+                break
+            out.append(line)
+            kept += 1
+            in_bullet = True
+        elif in_bullet and line.startswith("  ") and not line.lstrip().startswith("Doc:"):
+            out.append(line)
+        elif in_bullet and (line.lstrip().startswith("Doc:") or not line.strip()):
+            in_bullet = False
+    return "\n".join(out)
+
+
 @register_tool(LEAN_SEARCH_TOOL_TYPE, SearchLeanSearchConfig, _lean_search_lifespan)
 async def create_search_lean_search_tool(
     config: SearchLeanSearchConfig, runtime: Runtime
@@ -116,6 +143,7 @@ Examples of natural language:
 """,
         coroutine=_search,
         args_schema=SearchQueryInput,
+        metadata={"summarize_for_log": summarize_for_log},
     )
 
 

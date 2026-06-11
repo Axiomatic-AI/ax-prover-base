@@ -7,12 +7,52 @@ import os
 import sys
 from pathlib import Path
 
+from omegaconf import OmegaConf
+
 from .commands import experiment, prove
 from .config import Config
-from .utils import get_logger, load_env_secrets, merge_configs, reconfigure_log_level, save_config
+from .utils import (
+    get_logger,
+    load_env_secrets,
+    merge_configs,
+    reconfigure_log_level,
+    resolve_config_path,
+    save_config,
+)
 from .utils.build import build_lean_repo
 
 logger = get_logger(__name__)
+
+
+def _apply_tools_preset(config: Config, preset: str, folder: str | None) -> None:
+    """Override config.prover.proposer_tools based on the --tools ablation preset."""
+    if preset == "default":
+        return
+
+    tools_yaml = resolve_config_path("tools.yaml", folder)
+    tool_configs = OmegaConf.to_container(OmegaConf.load(tools_yaml), resolve=True)["tool_configs"]
+
+    web = tool_configs["search_web"]
+    lean_search = tool_configs["search_lean_search"]
+    lean_explore = tool_configs["search_lean_explore"]
+    loogle = tool_configs["search_loogle"]
+
+    if preset == "lean_explore":
+        proposer_tools = {"search_lean": lean_explore, "search_web": web}
+    elif preset == "loogle":
+        proposer_tools = {"search_lean": loogle, "search_web": web}
+    elif preset == "all":
+        proposer_tools = {
+            "search_lean_search": lean_search,
+            "search_lean_explore": lean_explore,
+            "search_loogle": loogle,
+            "search_web": web,
+        }
+    else:
+        raise ValueError(f"Unknown tools preset: {preset}")
+
+    logger.info(f"Applying --tools={preset} preset (tools: {sorted(proposer_tools)})")
+    config.prover.proposer_tools = proposer_tools
 
 
 def main() -> None:
@@ -120,6 +160,18 @@ Examples:
         metavar="FILE",
         help="Write JSON output to file",
     )
+    prove_parser.add_argument(
+        "--tools",
+        choices=["default", "lean_explore", "loogle", "all"],
+        default="default",
+        help=(
+            "Tool preset for ablation studies (overrides prover.proposer_tools):\n"
+            "  default      - LeanSearch + Tavily (paper baseline, no override)\n"
+            "  lean_explore - LeanExplore + Tavily\n"
+            "  loogle       - Loogle + Tavily\n"
+            "  all          - LeanSearch + LeanExplore + Loogle + Tavily"
+        ),
+    )
 
     experiment_parser = subparsers.add_parser(
         "experiment", help="Run prover experiments on a LangSmith dataset"
@@ -157,6 +209,18 @@ Examples:
         default=None,
         metavar="FILE",
         help="Write JSON output to file",
+    )
+    experiment_parser.add_argument(
+        "--tools",
+        choices=["default", "lean_explore", "loogle", "all"],
+        default="default",
+        help=(
+            "Tool preset for ablation studies (overrides prover.proposer_tools):\n"
+            "  default      - LeanSearch + Tavily (paper baseline, no override)\n"
+            "  lean_explore - LeanExplore + Tavily\n"
+            "  loogle       - Loogle + Tavily\n"
+            "  all          - LeanSearch + LeanExplore + Loogle + Tavily"
+        ),
     )
 
     # Parse known args to allow dot-notation overrides as unknown args
@@ -201,6 +265,7 @@ Examples:
         target = args.target
         overwrite = args.overwrite
         output_file = args.output
+        _apply_tools_preset(config, args.tools, folder)
         exit_code = asyncio.run(
             prove(
                 folder,
@@ -218,6 +283,7 @@ Examples:
         experiment_prefix = args.experiment_prefix
 
         output_file = args.output
+        _apply_tools_preset(config, args.tools, folder)
 
         exit_code = asyncio.run(
             experiment(

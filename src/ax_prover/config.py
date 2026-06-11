@@ -77,6 +77,19 @@ class SummarizeOutputConfig:
 
 
 @dataclass
+class ToolLogConfig:
+    """Configuration for the cross-iteration proposer tool log.
+
+    Disabled by default; when disabled the agent leaves all tool calls
+    unwrapped and never adds the `<prior-tool-calls>` block to the prompt,
+    so behavior is identical to the original code path.
+    """
+
+    enabled: bool = False
+    max_total: int = 50
+
+
+@dataclass
 class ProverConfig:
     """Configuration for ProverAgent."""
 
@@ -87,6 +100,7 @@ class ProverConfig:
         default_factory=lambda: MemoryConfig(class_name="ExperienceProcessor")
     )
     summarize_output: SummarizeOutputConfig = field(default_factory=SummarizeOutputConfig)
+    tool_log: ToolLogConfig = field(default_factory=ToolLogConfig)
     user_comments: str | None = None
 
 
@@ -105,10 +119,30 @@ class LeanInteractConfig:
     """Configuration for LeanInteract server (goal state extraction).
 
     Used for extracting goal states at sorry locations in Lean code.
-    Uses lean_interact's default configuration values.
+
+    `max_total_memory` is a fraction of *system-wide* RAM at which lean_interact
+    triggers a Lean REPL restart. Its upstream default is 0.8, which on a
+    workstation that the agent itself fills with several GB of torch / message
+    history pushes the threshold past 80% spuriously and then can't recover —
+    every restart attempt sees the same high memory and lean_interact gives up
+    after `max_restart_attempts`, surfacing as "Memory usage is too high"
+    exceptions on heavy-Mathlib problems. Default raised here so the heuristic
+    triggers only when the box is actually under pressure.
+
+    `memory_hard_limit_mb` and `enable_parallel_elaboration` are forwarded to
+    LeanREPLConfig. Disabling parallel elaboration mitigates the per-pass
+    memory leak documented in lean4#6753 (server consumes more memory as it
+    reprocesses large definitions; LEAN_NUM_THREADS=1 partially caps growth).
+    The hard memory limit gives a per-server RSS cap so individual heavy
+    compiles fail their own command rather than dragging system memory above
+    the system-wide threshold.
     """
 
     verbose: bool = False
+    max_total_memory: float = 0.95
+    max_restart_attempts: int = 5
+    memory_hard_limit_mb: int | None = 32000
+    enable_parallel_elaboration: bool = False
 
 
 @dataclass

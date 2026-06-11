@@ -13,6 +13,7 @@ from .messages import (
     ProposalMessage,
     ReviewApprovedFeedback,
 )
+from .tool_log import ToolLog
 
 
 class TargetItem(BaseModel):
@@ -73,6 +74,15 @@ class ProverAgentState(BaseModel):
     )
 
     summary: str = Field(default="", description="LLM-generated summary of the prover run")
+
+    tool_log: ToolLog | None = Field(
+        default=None,
+        description=(
+            "Cross-iteration record of proposer tool calls and their summarized "
+            "results. None when the tool log feature is disabled, leaving the "
+            "agent's behavior identical to the original code path."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod

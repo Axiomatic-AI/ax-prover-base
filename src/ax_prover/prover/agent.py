@@ -26,8 +26,10 @@ from ..models.messages import (
     StructuredOutputParsingFailedFeedback,
 )
 from ..models.proving import ProverResult, ReviewDecision
+from ..models.tool_log import ToolLog
 from ..runtime import Runtime
 from ..tools import create_tool
+from .tool_log import wrap_tools
 from ..utils import (
     attach_builder_files,
     attach_prover_logs_if_enabled,
@@ -89,6 +91,16 @@ class ProverAgent:
 
         self.proposer_tools = []
 
+        # When tool_log is disabled (default) self.tool_log stays None and the
+        # downstream wrap / prompt-injection sites become no-ops, leaving the
+        # original code path untouched.
+        self.tool_log: ToolLog | None = (
+            ToolLog(max_total=self.config.tool_log.max_total)
+            if self.config.tool_log.enabled
+            else None
+        )
+        self._current_iter = 0
+
         self.llm_client = LLMClient(self.config.prover_llm)
 
         memory_class = getattr(memory_module, self.config.memory_config.class_name)
@@ -135,6 +147,8 @@ class ProverAgent:
             tool = await create_tool(tool_config, self.runtime)
             if tool is not None:
                 tools.append(tool)
+        if self.tool_log is not None:
+            tools = wrap_tools(tools, self.tool_log, lambda: self._current_iter)
         return tools
 
     def _build_graph(self) -> CompiledStateGraph:
@@ -269,6 +283,12 @@ class ProverAgent:
         if state.experience:
             query = "\n\n".join([query, state.experience])
 
+        if self.tool_log is not None:
+            self._current_iter = state.iteration_count + 1
+            rendered_log = self.tool_log.render()
+            if rendered_log:
+                query = "\n\n".join([query, rendered_log])
+
         context_messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=query),
@@ -301,7 +321,10 @@ class ProverAgent:
             opens=result.opens,
             code=result.updated_theorem,
         )
-        return {"messages": [proposal]}
+        update: dict = {"messages": [proposal]}
+        if self.tool_log is not None:
+            update["tool_log"] = self.tool_log
+        return update
 
     async def _builder_node(self, state: ProverAgentState) -> dict:
         self.logger.info(
