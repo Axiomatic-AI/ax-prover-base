@@ -30,7 +30,6 @@ from ..tools import create_tool
 from ..utils import (
     attach_builder_files,
     attach_prover_logs_if_enabled,
-    count_pattern,
     get_function_from_location,
     get_git_hash,
     get_logger,
@@ -49,7 +48,6 @@ from ..utils.lean_parsing import (
     format_goal_state_at_sorries,
     list_declarations_from_code,
     list_declarations_from_file,
-    strip_comments,
 )
 from ..utils.llm import LLMClient, agentic_loop, get_reasoning
 from . import memory as memory_module
