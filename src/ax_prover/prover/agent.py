@@ -1,7 +1,6 @@
 """Prover agent for creating and completing proofs in Lean 4."""
 
 from collections.abc import Sequence
-from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -349,7 +348,7 @@ class ProverAgent:
 
                 declarations = await list_declarations_from_file(
                     self.runtime.lean_interact_server,
-                    Path(self.runtime.base_folder) / applier.location.path,
+                    applier.location.absolute_path(self.runtime.base_folder),
                 )
 
                 proposed_proof = find_declaration_by_name(declarations, state.item.location.name)

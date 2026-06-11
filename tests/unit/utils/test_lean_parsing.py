@@ -21,7 +21,6 @@ from ax_prover.utils.lean_parsing import (
     find_declaration_by_name,
     format_goal_state_at_sorries,
     list_declarations_from_code,
-    normalize_location,
     strip_comments,
 )
 
@@ -377,23 +376,6 @@ class TestFormatGoalStateAtSorries:
         assert result == (
             "Sorry #1 at line 5, column 10:\n⊢ x + 0 = x\n\nSorry #2 at line 7, column 2:\n⊢ True\n"
         )
-
-
-class TestNormalizeLocation:
-    """Tests for normalize_location function."""
-
-    @pytest.mark.parametrize(
-        "input_str, expected",
-        [
-            ("Module.Path:func", "Module.Path:func"),
-            ("path/to/file.lean:func", "path.to.file:func"),
-            ("no_colon_at_all", "no_colon_at_all"),
-            ("A/B.lean:foo", "A.B:foo"),
-        ],
-    )
-    def test_normalize_location(self, input_str, expected):
-        """Normalizes file paths to module paths."""
-        assert normalize_location(input_str) == expected
 
 
 class TestFindDeclarationByName:

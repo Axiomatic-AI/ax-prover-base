@@ -23,7 +23,7 @@ from ax_prover.prover.agent import ProverAgent
 
 @pytest.fixture
 def sample_item():
-    loc = Location(name="thm", module_path="Test.Module", is_external=False)
+    loc = Location(name="thm", module_path="Test.Module")
     return TargetItem(title="Test", location=loc)
 
 
@@ -38,7 +38,7 @@ def agent():
 
 @pytest.fixture
 def proposal():
-    loc = Location(name="thm", module_path="Test.Module", is_external=False)
+    loc = Location(name="thm", module_path="Test.Module")
     return ProposalMessage(reasoning="r", code="sorry", location=loc)
 
 

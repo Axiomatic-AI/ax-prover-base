@@ -383,14 +383,7 @@ class TemporaryProposal:
                 self.error = "No location set"
                 return self
 
-            if self.original_location.is_external and self.proposal.has_changes:
-                self.error = (
-                    f"Cannot modify external library location: "
-                    f"{self.original_location.formatted_context}"
-                )
-                return self
-
-            original_path = Path(self.base_folder) / self.original_location.path
+            original_path = self.original_location.absolute_path(self.base_folder)
 
             self._temp_file = tempfile.NamedTemporaryFile(
                 mode="w",
@@ -455,8 +448,8 @@ class TemporaryProposal:
             return False
 
         try:
-            temp_path = Path(self.base_folder) / self.location.path
-            original_path = Path(self.base_folder) / self.original_location.path
+            temp_path = self.location.absolute_path(self.base_folder)
+            original_path = self.original_location.absolute_path(self.base_folder)
 
             original_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(temp_path, original_path)
@@ -472,7 +465,7 @@ class TemporaryProposal:
         if self._temp_file and self.location:
             try:
                 self._temp_file.close()
-                temp_path = Path(self.base_folder) / self.location.path
+                temp_path = self.location.absolute_path(self.base_folder)
                 if temp_path.exists():
                     temp_path.unlink()
             except Exception as e:

@@ -24,7 +24,7 @@ from ax_prover.models.proving import (
 
 @pytest.fixture
 def sample_location():
-    return Location(name="thm", module_path="Test.Module", is_external=False)
+    return Location(name="thm", module_path="Test.Module")
 
 
 @pytest.fixture

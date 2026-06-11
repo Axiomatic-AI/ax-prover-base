@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from enum import Enum
 from pathlib import Path
@@ -182,22 +181,15 @@ def get_function_from_location(base_folder: str, location: Location) -> str | No
 
     Args:
         base_folder: Base folder path
-        location: Location object with import path (dot notation), name, and is_external flag
+        location: Location object with import path (dot notation) and name
 
     Returns:
         The complete definition block, or None if not found
     """
-    if location.is_external:
-        # Resolve external library path (already in dot notation)
-        full_path = _resolve_external_path(base_folder, location.module_path)
-        if not full_path:
-            logger.warning(f"This path does not exist: {location.module_path}.")
-            return None
-    else:
-        # Local project file - use the path property which converts to file path
-        full_path = Path(base_folder) / location.path
+    full_path = location.absolute_path(base_folder)
 
-    if not full_path.exists():
+    if not full_path or not full_path.exists():
+        logger.warning(f"This path does not exist: {location.module_path}.")
         return None
 
     try:
@@ -206,18 +198,6 @@ def get_function_from_location(base_folder: str, location: Location) -> str | No
     except Exception as e:
         logger.error(f"Error in get_function_from_location: {e}")
         return None
-
-
-def normalize_location(location_str: str) -> str:
-    """Normalize location string to module path format.
-
-    Converts file paths to module paths: "path/to/file.lean:func" -> "path.to.file:func"
-    """
-    if ".lean:" in location_str:
-        file_part, func_part = location_str.rsplit(":", 1)
-        module_part = file_part.replace("/", ".").removesuffix(".lean")
-        return f"{module_part}:{func_part}"
-    return location_str
 
 
 async def get_unproven(server: LeanInteractServer, base_folder: str, file_path: str) -> list[str]:
@@ -250,50 +230,12 @@ async def get_unproven(server: LeanInteractServer, base_folder: str, file_path: 
         if not func_name:
             continue
 
-        location = Location(module_path=module_path, name=func_name, is_external=False)
+        location = Location(module_path=module_path, name=func_name)
         func_body = get_function_from_location(base_folder, location)
         if func_body and re.search(r"\bsorry\b", func_body):
             unproven_functions.append(func_name)
 
     return unproven_functions
-
-
-def _resolve_external_path(base_folder: str, import_path: str) -> Path | None:
-    """Resolve an external library import path to a file path.
-
-    Args:
-        base_folder: Base folder path
-        import_path: Import path like "Mathlib.Algebra.Group.Defs"
-
-    Returns:
-        Full path to the file, or None if not found
-    """
-    packages_dir = Path(base_folder) / ".lake" / "packages"
-
-    # Build case-insensitive package directory map
-    package_dir_map = {
-        d.lower(): d for d in os.listdir(packages_dir) if (packages_dir / d).is_dir()
-    }
-
-    # Split import path
-    # E.g., "Mathlib.Algebra.Group.Defs" -> ["Mathlib", "Algebra", "Group", "Defs"]
-    parts = import_path.split(".")
-    if not parts:
-        return None
-
-    package_name = parts[0]
-    dir_name = package_dir_map.get(package_name.lower())
-    if not dir_name:
-        return None
-
-    # Build file path: package_dir/part1/part2/.../partN
-    # For "Mathlib.Algebra.Group.Defs" -> ".lake/packages/mathlib/Mathlib/Algebra/Group/Defs.lean"
-    file_path = packages_dir / dir_name / "/".join(parts)
-
-    if not str(file_path).endswith(".lean"):
-        file_path = Path(str(file_path) + ".lean")
-
-    return file_path if file_path.exists() else None
 
 
 def extract_theorem_name(theorem_statement: str) -> str | None:
