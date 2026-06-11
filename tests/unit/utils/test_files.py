@@ -1,7 +1,5 @@
 """Tests for file utilities: find_declaration_at_line and edit_function."""
 
-
-
 from ax_prover.models.files import Location
 from ax_prover.utils.files import edit_function
 
