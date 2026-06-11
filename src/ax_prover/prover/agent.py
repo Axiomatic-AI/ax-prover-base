@@ -367,13 +367,18 @@ class ProverAgent:
                     )
                     return {"messages": [feedback]}
 
-                stripped_code = strip_comments(state.last_proposal.code)
-
-                axiom_count, axiom_locations = count_pattern(stripped_code, pattern=r"\baxiom\b")
-                if axiom_count:
+                declarations_in_new_code = await list_declarations_from_code(
+                    self.runtime.lean_interact_server, state.last_proposal.code
+                )
+                axioms = [
+                    declaration
+                    for declaration in declarations_in_new_code
+                    if declaration.kind == "axiom"
+                ]
+                if axioms:
                     self.logger.info("The proposed code introduces axiom declarations.")
-                    formatted = "\n".join(ctx for _, ctx in axiom_locations)
-                    feedback = AxiomDetectedFeedback(count=axiom_count, locations=formatted)
+                    formatted = "\n".join(axiom.info.pp for axiom in axioms)
+                    feedback = AxiomDetectedFeedback(count=len(axioms), locations=formatted)
                     return {"messages": [feedback]}
 
                 tactic_count, tactic_locations = count_pattern(
