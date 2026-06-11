@@ -10,7 +10,6 @@ from lean_interact import Command
 from lean_interact.interface import DeclarationInfo, Sorry
 
 from ..models.declaration import Declaration, DeclarationType
-from ..models.files import Location
 from .lean_interact import LeanInteractServer
 from .logging import get_logger
 
