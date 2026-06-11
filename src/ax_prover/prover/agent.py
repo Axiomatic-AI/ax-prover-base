@@ -367,6 +367,14 @@ class ProverAgent:
                     )
                     return {"messages": [feedback]}
 
+                if proposed_proof.search_tactics:
+                    self.logger.info("The proposed code contains search tactics.")
+                    formatted = "\n".join(tactic.tactic for tactic in proposed_proof.search_tactics)
+                    feedback = SearchTacticsDetectedFeedback(
+                        count=len(proposed_proof.search_tactics), locations=formatted
+                    )
+                    return {"messages": [feedback]}
+
                 declarations_in_new_code = await list_declarations_from_code(
                     self.runtime.lean_interact_server, state.last_proposal.code
                 )
@@ -379,14 +387,6 @@ class ProverAgent:
                     self.logger.info("The proposed code introduces axiom declarations.")
                     formatted = "\n".join(axiom.info.pp for axiom in axioms)
                     feedback = AxiomDetectedFeedback(count=len(axioms), locations=formatted)
-                    return {"messages": [feedback]}
-
-                if proposed_proof.search_tactics:
-                    self.logger.info("The proposed code contains search tactics.")
-                    formatted = "\n".join(tactic.tactic for tactic in proposed_proof.search_tactics)
-                    feedback = SearchTacticsDetectedFeedback(
-                        count=len(proposed_proof.search_tactics), locations=formatted
-                    )
                     return {"messages": [feedback]}
 
                 feedback = BuildSuccessFeedback()
