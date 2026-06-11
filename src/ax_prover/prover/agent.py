@@ -381,7 +381,7 @@ class ProverAgent:
                 axioms = [
                     declaration
                     for declaration in declarations_in_new_code
-                    if declaration.kind == "axiom"
+                    if declaration.info.kind == "axiom"
                 ]
                 if axioms:
                     self.logger.info("The proposed code introduces axiom declarations.")
