@@ -181,7 +181,7 @@ def get_function_from_location(base_folder: str, location: Location) -> str | No
 
     Args:
         base_folder: Base folder path
-        location: Location object with import path (dot notation), name, and is_external flag
+        location: Location object with import path (dot notation) and name
 
     Returns:
         The complete definition block, or None if not found

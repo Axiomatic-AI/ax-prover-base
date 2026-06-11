@@ -16,9 +16,6 @@ class Location(BaseModel):
         description="Import path in dot notation "
         "(e.g., Mathlib.Topology.Basic or MyProject.Algebra.Ring)"
     )
-    is_external: bool = Field(
-        description="Whether this references an external library (e.g., Mathlib) or project code",
-    )  # default field kills the LLMs structured output
 
     @field_validator("module_path")
     @classmethod
@@ -40,8 +37,6 @@ class Location(BaseModel):
     def formatted_context(self) -> str:
         """Get formatted string representation of location."""
         location_str = f"{self.module_path}:{self.name}"
-        if self.is_external:
-            location_str += " (external)"
         return location_str
 
     def absolute_path(self, base_folder: str) -> Path | None:
@@ -52,13 +47,10 @@ class Location(BaseModel):
         """
         base_path = Path(base_folder)
 
-        if self.is_external:
-            return _resolve_lake_package_path(base_path, self.module_path)
-        else:
-            return base_path / self.path
+        return base_path / self.path
 
     @classmethod
-    def parse(cls, target: str, is_external: bool = False) -> "Location":
+    def parse(cls, target: str) -> "Location":
         """Parse a target string into a Location object.
         Accepts dotted and slash notation:
 
@@ -76,39 +68,4 @@ class Location(BaseModel):
         module_path, name = target.rsplit(":", 1)
         module_path = module_path.replace("/", ".").removesuffix(".lean")
 
-        return cls(name=name, module_path=module_path, is_external=is_external)
-
-
-def _resolve_lake_package_path(base: Path, module_path: str) -> Path | None:
-    """Resolve a dotted module path under .lake/packages/ to its .lean file.
-
-    The first component of `module_path` is matched case-insensitively against
-    Lake package directory names; the remaining components are joined as a
-    filesystem path with a .lean suffix appended.
-
-    Example::
-
-        _resolve_lake_package_path(
-            Path("/proj"), "Mathlib.Algebra.Group.Defs"
-        )
-        # -> Path("/proj/.lake/packages/mathlib/Mathlib/Algebra/Group/Defs.lean")
-
-    Returns None if the .lake/packages directory or the package itself cannot
-    be located. (Existence of the .lean file is the caller's concern.)
-    """
-    packages_dir = base / ".lake" / "packages"
-    if not packages_dir.is_dir():
-        return None
-
-    parts = module_path.split(".")
-    if not parts:
-        return None
-
-    package_dirs = {
-        entry.name.lower(): entry.name for entry in packages_dir.iterdir() if entry.is_dir()
-    }
-    pkg_dir = package_dirs.get(parts[0].lower())
-    if pkg_dir is None:
-        return None
-
-    return packages_dir / pkg_dir / Path(*parts).with_suffix(".lean")
+        return cls(name=name, module_path=module_path)

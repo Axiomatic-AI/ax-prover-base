@@ -87,14 +87,13 @@ class TestFormatLeanErrors:
 
 
 class TestTemporaryProposalTempLocation:
-    """The temp Location created by TemporaryProposal must always resolve to the
-    real on-disk temp file.
+    """The temp Location created by TemporaryProposal must always resolve to the real on-disk temp
+    file.
 
-    The temp file is physically created under the project tree and addressed
-    elsewhere via ``location.path`` (which ignores ``is_external``). Therefore
-    ``location.absolute_path`` must agree with ``location.path`` and point at the
-    actual temp file, so that cleanup, permanent apply, and post-build
-    declaration listing operate on the right file (and never on ``None``).
+    The temp file is physically created under the project tree and addressed elsewhere via
+    ``location.path``. Therefore ``location.absolute_path`` must agree with ``location.path`` and
+    point at the actual temp file, so that cleanup, permanent apply, and post-build declaration
+    listing operate on the right file (and never on ``None``).
     """
 
     @staticmethod
@@ -109,7 +108,7 @@ class TestTemporaryProposalTempLocation:
         src.parent.mkdir(parents=True)
         src.write_text("theorem t : True := trivial\n", encoding="utf-8")
 
-        original = Location(name="t", module_path="MyProj.Thing", is_external=False)
+        original = Location(name="t", module_path="MyProj.Thing")
 
         with TemporaryProposal(str(tmp_path), original, self._empty_proposal()) as applier:
             assert applier.success, applier.error
@@ -118,28 +117,3 @@ class TestTemporaryProposalTempLocation:
             assert applier.location.absolute_path(str(tmp_path)) == on_disk
 
         assert not on_disk.exists(), "temp file should be cleaned up on exit"
-
-    def test_external_original_is_rejected(self, tmp_path):
-        """External library locations cannot be turned into temp proposals.
-
-        A temp file for an external library is meaningless and (because the temp would live under
-        .lake/packages) would round-trip into a corrupt module path. The context manager must fail
-        fast without creating any temp file.
-        """
-        pkg_dir = tmp_path / ".lake" / "packages" / "mathlib" / "Mathlib" / "Algebra" / "Group"
-        pkg_dir.mkdir(parents=True)
-        (pkg_dir / "Defs.lean").write_text("theorem add_comm : True := trivial\n", encoding="utf-8")
-
-        original = Location(
-            name="add_comm",
-            module_path="Mathlib.Algebra.Group.Defs",
-            is_external=True,
-        )
-
-        with TemporaryProposal(str(tmp_path), original, self._empty_proposal()) as applier:
-            assert applier.success is False
-            assert "external" in applier.error.lower()
-            assert applier.location is None
-
-        # No temp file was leaked inside the Lake package directory.
-        assert list(pkg_dir.glob("tmp_*")) == []

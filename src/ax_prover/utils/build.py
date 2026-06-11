@@ -383,13 +383,6 @@ class TemporaryProposal:
                 self.error = "No location set"
                 return self
 
-            if self.original_location.is_external:
-                self.error = (
-                    f"Cannot create a temporary proposal for an external library location: "
-                    f"{self.original_location.formatted_context}"
-                )
-                return self
-
             original_path = self.original_location.absolute_path(self.base_folder)
 
             self._temp_file = tempfile.NamedTemporaryFile(

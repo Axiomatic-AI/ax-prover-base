@@ -81,10 +81,6 @@ def edit_function(
     Returns:
         True if successful, False otherwise
     """
-    if location.is_external:
-        logger.error("Cannot edit external library functions")
-        return False
-
     full_path = location.absolute_path(base_folder)
 
     if not full_path.exists():
@@ -107,9 +103,7 @@ def edit_function(
         else:
             insert_pos = None
             if before:
-                before_loc = Location(
-                    module_path=location.module_path, name=before, is_external=False
-                )
+                before_loc = Location(module_path=location.module_path, name=before)
                 before_func = get_function_from_location(base_folder, before_loc)
                 if before_func:
                     insert_pos = content.find(before_func)
@@ -117,9 +111,7 @@ def edit_function(
                     logger.warning(f"Function '{before}' not found, inserting at end instead")
 
             elif after:
-                after_loc = Location(
-                    module_path=location.module_path, name=after, is_external=False
-                )
+                after_loc = Location(module_path=location.module_path, name=after)
                 after_func = get_function_from_location(base_folder, after_loc)
                 if after_func:
                     insert_pos = content.find(after_func) + len(after_func)
