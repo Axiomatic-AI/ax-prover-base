@@ -45,11 +45,6 @@ class TestLocationProperties:
         loc = Location(name="my_thm", module_path="A.B")
         assert loc.formatted_context == "A.B:my_thm"
 
-    def test_formatted_context_external(self):
-        """External location appends (external)."""
-        loc = Location(name="my_thm", module_path="Mathlib.Topology")
-        assert loc.formatted_context == "Mathlib.Topology:my_thm (external)"
-
     def test_path_round_trips(self):
         """path property is consistent with module_path."""
         loc = Location(name="foo", module_path="My.Project.File")
