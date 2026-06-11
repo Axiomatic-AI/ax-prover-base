@@ -3,7 +3,7 @@
 import logging
 from enum import StrEnum
 
-from lean_interact.interface import DeclarationInfo, Sorry
+from lean_interact.interface import DeclarationInfo, Sorry, Tactic
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ class DeclarationType(StrEnum):
 class Declaration(BaseModel):
     info: DeclarationInfo
     sorries: list[Sorry] = Field(default_factory=list)
+    tactics: list[Tactic] = Field(default_factory=list)
 
     def __str__(self):
         return self.info.pp
