@@ -18,8 +18,7 @@ from .messages import (
 class TargetItem(BaseModel):
     """A single item to be proven (definition, theorem, lemma, etc.)."""
 
-    location: Location | None = Field(
-        default=None,
+    location: Location = Field(
         description="Location where the formalization is stored (includes path and Lean name)",
     )
     original_source: str | None = Field(
