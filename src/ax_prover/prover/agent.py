@@ -43,6 +43,7 @@ from ..utils.build import (
 )
 from ..utils.files import read_file
 from ..utils.git import get_repo_metadata
+from ..utils.lean_interact import LeanInteractServer
 from ..utils.lean_parsing import (
     find_declaration_by_name,
     format_goal_state_at_sorries,
@@ -365,26 +366,9 @@ class ProverAgent:
                     )
                     return {"messages": [feedback]}
 
-                if proposed_proof.search_tactics:
-                    self.logger.info("The proposed code contains search tactics.")
-                    formatted = "\n".join(tactic.tactic for tactic in proposed_proof.search_tactics)
-                    feedback = SearchTacticsDetectedFeedback(
-                        count=len(proposed_proof.search_tactics), locations=formatted
-                    )
-                    return {"messages": [feedback]}
-
-                declarations_in_new_code = await list_declarations_from_code(
+                if feedback := await _detect_cheats_in_code(
                     self.runtime.lean_interact_server, state.last_proposal.code
-                )
-                axioms = [
-                    declaration
-                    for declaration in declarations_in_new_code
-                    if declaration.info.kind == "axiom"
-                ]
-                if axioms:
-                    self.logger.info("The proposed code introduces axiom declarations.")
-                    formatted = "\n".join(axiom.info.pp for axiom in axioms)
-                    feedback = AxiomDetectedFeedback(count=len(axioms), locations=formatted)
+                ):
                     return {"messages": [feedback]}
 
                 feedback = BuildSuccessFeedback()
@@ -574,3 +558,24 @@ class ProverAgent:
         except Exception as e:
             self.logger.error(f"Error: {e}")
             raise
+
+
+async def _detect_cheats_in_code(
+    lean_interact_server: LeanInteractServer, code: str
+) -> FeedbackMessage | None:
+    declarations = await list_declarations_from_code(lean_interact_server, code)
+
+    axioms = [declaration for declaration in declarations if declaration.info.kind == "axiom"]
+    if axioms:
+        return AxiomDetectedFeedback(
+            count=len(axioms), locations="\n".join(axiom.info.pp for axiom in axioms)
+        )
+
+    search_tactics = [
+        tactic for declaration in declarations for tactic in declaration.search_tactics
+    ]
+    if search_tactics:
+        formatted = "\n".join(tactic.tactic for tactic in search_tactics)
+        return SearchTacticsDetectedFeedback(count=len(search_tactics), locations=formatted)
+
+    return None
