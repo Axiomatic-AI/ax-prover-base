@@ -156,9 +156,7 @@ async def _run_experiment_sample(inputs: dict[str, str], config: Config, runtime
         items = await parse_prove_target(runtime.lean_interact_server, runtime.base_folder, target)
 
         if not items:
-            logger.warning(f"No unproven functions found in: {target}")
-            item = TargetItem(is_proven=True)
-            return ProverAgentState(item=item).model_dump()
+            raise ValueError(f"No unproven functions found in: {target}")
 
         if len(items) > 1:
             logger.warning(
