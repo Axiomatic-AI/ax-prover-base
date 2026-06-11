@@ -11,6 +11,7 @@ from lean_interact.interface import (
     Range,
     ScopeInfo,
     Sorry,
+    Tactic,
 )
 
 from ax_prover.models.declaration import Declaration
@@ -270,6 +271,15 @@ def _make_sorry(line: int, column: int, goal: str = "⊢ False") -> Sorry:
     )
 
 
+def _make_tactic(line: int, column: int, tactic: str, goals: str = "⊢ True") -> Tactic:
+    return Tactic(
+        pos=Pos(line=line, column=column),
+        endPos=Pos(line=line, column=column + len(tactic)),
+        goals=goals,
+        tactic=tactic,
+    )
+
+
 class TestListDeclarationsFromCode:
     """Tests for list_declarations_from_code.
 
@@ -294,6 +304,7 @@ class TestListDeclarationsFromCode:
                     pp="noncomputable def add (a b : Nat) : Nat := a + b",
                 ),
                 [],
+                [],
             ),
             (
                 _make_decl_info(
@@ -304,6 +315,7 @@ class TestListDeclarationsFromCode:
                     pp="theorem add_zero_proven (a : Nat) : add a 0 = a := rfl",
                 ),
                 [],
+                [],
             ),
             (
                 _make_decl_info(
@@ -313,7 +325,15 @@ class TestListDeclarationsFromCode:
                     kind="theorem",
                     pp="theorem with_sorry (a : Nat) : add a 0 = a := by sorry",
                 ),
-                [_make_sorry(line=5, column=45, goal="⊢ add a 0 = a")],
+                [_make_sorry(line=5, column=49, goal="⊢ add a 0 = a")],
+                [
+                    _make_tactic(
+                        line=5,
+                        column=49,
+                        tactic="sorry",
+                        goals="⊢ add a 0 = a",
+                    )
+                ],
             ),
             (
                 _make_decl_info(
@@ -324,6 +344,7 @@ class TestListDeclarationsFromCode:
                     pp="def Κατ.Μοδ.αβ_γ'δε₀₁₂_ℕtoℤ_φψ''ωΩ_über_café_Δ?! := 42",
                 ),
                 [],
+                [],
             ),
             (
                 _make_decl_info(
@@ -331,20 +352,35 @@ class TestListDeclarationsFromCode:
                     start=(25, 0),
                     finish=(28, 7),
                     kind="theorem",
-                    pp="theorem double_sorry{n : Nat} : n + 0 = n := by\n  have h : n + 0 = n := by\n    sorry\n sorry",
+                    pp="theorem double_sorry{n : Nat} : n + 0 = n := by\n have h : n + 0 = n := by\n    sorry\n apply?",
                 ),
                 [
-                    _make_sorry(line=27, column=6, goal="n : ℕ\n⊢ n + 0 = n"),
-                    _make_sorry(line=28, column=2, goal="n : ℕ\nh : n + 0 = n\n⊢ n + 0 = n"),
+                    _make_sorry(line=27, column=6, goal="n : Nat\n⊢ n + 0 = n"),
+                ],
+                [
+                    _make_tactic(
+                        line=26,
+                        column=2,
+                        tactic="have h : n + 0 = n := by sorry",
+                        goals="n : Nat\n⊢ n + 0 = n",
+                    ),
+                    _make_tactic(line=27, column=4, tactic="sorry", goals="n : Nat\n⊢ n + 0 = n"),
+                    _make_tactic(
+                        line=28,
+                        column=2,
+                        tactic="apply?",
+                        goals=" n : Nat\nh : n + 0 = n\n⊢ n + 0 = n",
+                    ),
                 ],
             ),
         ]
 
     @pytest.fixture
     def fake_server(self, scenarios):
-        declarations = [info for info, _ in scenarios]
-        sorries = [s for _, decl_sorries in scenarios for s in decl_sorries]
-        response = MagicMock(declarations=declarations, sorries=sorries)
+        declarations = [info for info, _, _ in scenarios]
+        sorries = [s for _, decl_sorries, _ in scenarios for s in decl_sorries]
+        tactics = [t for _, _, decl_tactics in scenarios for t in decl_tactics]
+        response = MagicMock(declarations=declarations, sorries=sorries, tactics=tactics)
         return MagicMock(run=AsyncMock(return_value=response))
 
     async def test_builds_one_declaration_per_response_entry_with_its_sorries(
@@ -354,7 +390,10 @@ class TestListDeclarationsFromCode:
         with each sorry attached to the declaration whose range contains it."""
         result = await list_declarations_from_code(fake_server, "...")
 
-        expected = [Declaration(info=info, sorries=sorries) for info, sorries in scenarios]
+        expected = [
+            Declaration(info=info, sorries=sorries, tactics=tactics)
+            for info, sorries, tactics in scenarios
+        ]
         assert result == expected
 
 
