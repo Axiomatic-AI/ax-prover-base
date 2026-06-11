@@ -129,53 +129,6 @@ def strip_comments(src: str) -> str:
     return "".join(out)
 
 
-def extract_function_from_content(content: str, function_name: str) -> str | None:
-    """Extract a function/theorem/lemma definition from Lean code.
-
-    Args:
-        content: Lean code content as string
-        function_name: Name of the function/theorem/lemma to extract
-
-    Returns:
-        The complete definition block including doc comments, or None
-    """
-    keywords_pattern = "|".join(LEAN_KEYWORDS)
-    pattern = rf"^(\s*)({keywords_pattern})\s+{re.escape(function_name)}\b"
-
-    match = re.search(pattern, content, re.MULTILINE)
-    if not match:
-        return None
-
-    start_pos = match.start()
-    start_indent = len(match.group(1))
-
-    # Look backwards for Lean4 doc comment (/-- ... -/)
-    before_def = content[:start_pos]
-    all_doc_comments = list(re.finditer(r"/--[\s\S]*?-/", before_def))
-
-    # Check doc comments in reverse order to find the closest one
-    for doc_match in reversed(all_doc_comments):
-        between = content[doc_match.end() : start_pos]
-        # If no definition keyword between comment and target, use it
-        if not re.search(rf"\b(?:{keywords_pattern})\s+\w+", between):
-            start_pos = doc_match.start()
-            break
-
-    # Find next definition, doc comment, structural keyword, or top-level comment
-    # at same or lower indentation
-    end_pattern = rf"^[ \t]{{0,{start_indent}}}(/--|--|{keywords_pattern}(?:\s+|\b))"
-
-    remaining_content = content[match.end() :]
-    end_match = re.search(end_pattern, remaining_content, re.MULTILINE)
-
-    if end_match:
-        end_pos = match.end() + end_match.start()
-    else:
-        end_pos = len(content)
-
-    return content[start_pos:end_pos].strip()
-
-
 def find_declaration_by_name(declarations: list[Declaration], name: str) -> Declaration | None:
     """Find a declaration by name.
 

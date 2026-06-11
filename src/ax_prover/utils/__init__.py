@@ -8,7 +8,6 @@ from .git import get_git_hash, get_repo_metadata, is_git_dirty
 from .lean_parsing import (
     LEAN_KEYWORDS,
     count_pattern,
-    extract_function_from_content,
     list_declarations_from_code,
     list_declarations_from_file,
     strip_comments,
@@ -50,7 +49,6 @@ __all__ = [
     # Lean
     "LEAN_KEYWORDS",
     "count_pattern",
-    "extract_function_from_content",
     "list_declarations_from_code",
     "list_declarations_from_file",
     "strip_comments",

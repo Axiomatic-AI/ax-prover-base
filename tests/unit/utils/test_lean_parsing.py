@@ -16,45 +16,12 @@ from lean_interact.interface import (
 from ax_prover.models.declaration import Declaration
 from ax_prover.utils.lean_parsing import (
     count_pattern,
-    extract_function_from_content,
     find_declaration_at_line,
     find_declaration_by_name,
     format_goal_state_at_sorries,
     list_declarations_from_code,
     strip_comments,
 )
-
-SAMPLE_LEAN_CODE = r"""
-/-- Addition of naturals. -/
-def add (a b : Nat) : Nat :=
-  a + b
-
-/-- Commutativity of addition. -/
-theorem add_comm (a b : Nat) : add a b = add b a := by
-  simp [add]
-  omega
-
-lemma helper_lemma{n : Nat} : n + 0 = n := by
-  sorry
-
-def Κατ.Μοδ.αβ_γ'δε₀₁₂³_ℕtoℤ_φψ''ωΩ_über_café_∂Δ?! := 42
-
-theorem Some.Very.«Nested.Theorem»?: P :=
-    sorry
-"""
-
-EXPECTED_FUNCTION_EXTRACTIONS: list[tuple[str, str | None]] = [
-    ("add", "/-- Addition of naturals. -/\ndef add (a b : Nat) : Nat :=\n  a + b"),
-    (
-        "add_comm",
-        "/-- Commutativity of addition. -/\n"
-        "theorem add_comm (a b : Nat) : add a b = add b a := by\n"
-        "  simp [add]\n"
-        "  omega",
-    ),
-    ("helper_lemma", "lemma helper_lemma{n : Nat} : n + 0 = n := by" + "\n  sorry"),
-    ("nonexistent", None),
-]
 
 NESTED_COMMENT_CODE = """\
 /- outer /- inner -/ still outer -/
@@ -191,24 +158,6 @@ class TestCountPattern:
         code = "axiom myAxiom : Nat → Nat"
         count, _ = count_pattern(code, pattern=self.SORRY_PATTERN)
         assert count == 0
-
-
-class TestExtractFunctionFromContent:
-    """Tests for extract_function_from_content function."""
-
-    @pytest.mark.parametrize(
-        "name, expected",
-        EXPECTED_FUNCTION_EXTRACTIONS,
-        ids=[name for name, _ in EXPECTED_FUNCTION_EXTRACTIONS],
-    )
-    def test_extract_function(self, name, expected):
-        """Extracts the exact expected text for each declaration."""
-        assert extract_function_from_content(SAMPLE_LEAN_CODE, name) == expected
-
-    def test_namespaced_function(self):
-        """Functions with dots in names can be extracted."""
-        code = "theorem Poly.not_principal : P := by sorry"
-        assert extract_function_from_content(code, "Poly.not_principal") == code
 
 
 def _make_decl_info(
