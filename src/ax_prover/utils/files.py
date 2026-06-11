@@ -35,31 +35,6 @@ def read_file(base_folder: str, file_path: str) -> str:
         return f"Error reading file: {e}"
 
 
-def list_lean_files(base_folder: str, directory: str = "") -> list[str]:
-    """List all Lean files in a directory.
-
-    Args:
-        base_folder: Base folder path
-        directory: Directory to search (relative to base_folder)
-
-    Returns:
-        List of Lean file paths relative to base_folder
-    """
-    search_path = Path(base_folder) / directory
-    if not search_path.exists():
-        return []
-
-    lean_files = []
-    for path in search_path.rglob("*.lean"):
-        # Skip lake packages and hidden directories
-        rel_path = path.relative_to(base_folder)
-        if not any(part.startswith(".") for part in rel_path.parts):
-            if not str(rel_path).startswith(("lake-packages/", ".lake/")):
-                lean_files.append(str(rel_path))
-
-    return sorted(lean_files)
-
-
 def replace_in_file(
     file_path: Path,
     original: str,
