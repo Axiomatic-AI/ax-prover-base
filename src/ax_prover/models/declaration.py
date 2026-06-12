@@ -1,7 +1,6 @@
 """Models for Lean4 declarations."""
 
 import logging
-from enum import StrEnum
 
 from lean_interact.interface import DeclarationInfo, Sorry
 from pydantic import BaseModel, Field
