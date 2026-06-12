@@ -314,6 +314,11 @@ class ProverAgent:
         if not state.last_proposal:
             raise Exception("Builder expects proposal")
 
+        if not state.last_proposal.code:
+            self.logger.warning(f"Theorem '{state.item.location.name}' not found in proposed code")
+            feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
+            return {"messages": [feedback]}
+
         with TemporaryProposal(
             self.runtime.base_folder, state.item, state.last_proposal
         ) as applier:
@@ -356,13 +361,6 @@ class ProverAgent:
                 )
 
                 proposed_proof = find_declaration_by_name(declarations, state.item.location.name)
-                if not proposed_proof:
-                    self.logger.warning(
-                        f"Theorem '{state.item.location.name}' not found in proposed code"
-                    )
-                    feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
-                    return {"messages": [feedback]}
-
                 if proposed_proof.sorries:
                     self.logger.info("The proposed code contains sorries.")
                     feedback = SorriesGoalStateFeedback(
@@ -579,4 +577,4 @@ async def _filter_updated_theorem(
     """Filter the updated theorem to only include the code that is actually being proven."""
     declarations = await list_declarations_from_code(server, updated_theorem)
     declaration = find_declaration_by_name(declarations, item.name)
-    return declaration.code
+    return declaration.code if declaration else ""
