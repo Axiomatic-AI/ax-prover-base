@@ -361,7 +361,15 @@ class ProverAgent:
                 )
 
                 proposed_proof = find_declaration_by_name(declarations, state.item.location.name)
-                if proposed_proof.sorries:
+                if not proposed_proof:
+                    # Should never happen, but just in case
+                    self.logger.error(
+                        f"Theorem '{state.item.location.name}' not found in the proposedfile"
+                    )
+                    feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
+                    return {"messages": [feedback]}
+
+                if proposed_proof and proposed_proof.sorries:
                     self.logger.info("The proposed code contains sorries.")
                     feedback = SorriesGoalStateFeedback(
                         sorry_count=len(proposed_proof.sorries),
