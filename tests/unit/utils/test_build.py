@@ -114,9 +114,7 @@ class TestTemporaryProposalTempLocation:
             original_source="theorem t : True := trivial",
         )
 
-        with TemporaryProposal(
-            str(tmp_path), target_item, self._empty_proposal(), proposed_code=""
-        ) as applier:
+        with TemporaryProposal(str(tmp_path), target_item, self._empty_proposal()) as applier:
             assert applier.success, applier.error
             on_disk = Path(tmp_path) / applier.location.path
             assert on_disk.exists()
