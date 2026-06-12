@@ -360,7 +360,6 @@ class TemporaryProposal:
         base_folder: str,
         target_item: TargetItem | None,
         proposal: "ProposalMessage",
-        proposed_code: str,
     ):
         """Initialize the temporary proposal applier.
 
@@ -368,12 +367,10 @@ class TemporaryProposal:
             base_folder: Base folder path
             target_item: TargetItem object in the original file (None means no target item set)
             proposal: ProposalMessage with imports, opens, and code to apply
-            proposed_code: The target declaration's code, extracted from the proposal
         """
         self.base_folder = base_folder
         self.target_item = target_item
         self.proposal = proposal
-        self.proposed_code = proposed_code
         self.location: Location | None = None  # Temp location, set in __enter__
         self.error: str = ""
         self.success: bool = False
@@ -428,7 +425,7 @@ class TemporaryProposal:
                 file_path = self.location.absolute_path(self.base_folder)
 
                 success = replace_in_file(
-                    file_path, self.target_item.original_source, self.proposed_code
+                    file_path, self.target_item.original_source, self.proposal.code
                 )
                 if not success:
                     self.error = "Failed to apply code to temp file"
