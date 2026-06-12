@@ -440,7 +440,7 @@ class ProverAgent:
         if actual_approved:
             output = ReviewApprovedFeedback(comments=reasoning)
             with TemporaryProposal(
-                self.runtime.base_folder, state.item.location, state.last_proposal
+                self.runtime.base_folder, state.item, state.last_proposal
             ) as applier:
                 applier.apply_permanently()
         else:
