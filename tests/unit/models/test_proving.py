@@ -29,7 +29,7 @@ def sample_location():
 
 @pytest.fixture
 def sample_item(sample_location):
-    return TargetItem(title="Test Theorem", location=sample_location)
+    return TargetItem(location=sample_location)
 
 
 @pytest.fixture

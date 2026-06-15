@@ -31,7 +31,6 @@ from ..utils import (
     attach_builder_files,
     attach_prover_logs_if_enabled,
     count_pattern,
-    get_function_from_location,
     get_git_hash,
     get_logger,
     is_git_dirty,
@@ -408,9 +407,7 @@ class ProverAgent:
         proposed_proof = str(find_declaration_by_name(declarations, state.item.location.name))
 
         query = REVIEWER_USER_PROMPT.format(
-            original_theorem=get_function_from_location(
-                self.runtime.base_folder, state.item.location
-            ),
+            original_theorem=state.item.original_source,
             proposed_proof=proposed_proof,
         )
 
@@ -501,7 +498,7 @@ class ProverAgent:
         last_feedback_str = state.last_feedback.content if state.last_feedback else "No feedback"
 
         query = SUMMARIZE_OUTPUT_USER_PROMPT.format(
-            theorem_name=state.item.title,
+            theorem_name=state.item.name,
             location=location_str,
             proven=state.approved,
             iterations=state.metrics.number_of_iterations,
@@ -562,7 +559,7 @@ class ProverAgent:
             final_state = ProverAgentState(**result)
 
             if final_state.approved:
-                final_state.item.proven = True
+                final_state.item.is_proven = True
                 self.logger.info(
                     f"Successfully proved {final_state.item.location.formatted_context}"
                 )

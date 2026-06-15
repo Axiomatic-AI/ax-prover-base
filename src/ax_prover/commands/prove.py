@@ -34,15 +34,6 @@ async def prove(
     return await _prove_all_items(base_path, target, config, overwrite, output_file)
 
 
-async def _get_target_items(rt: Runtime, base_path: str, target: str) -> list[TargetItem]:
-    """Get all the items to prove in the path given the target specification."""
-    try:
-        return await parse_prove_target(rt.lean_interact_server, base_path, target)
-    except ValueError as e:
-        logger.error(str(e))
-        return []
-
-
 async def _prove_all_items(
     folder: str,
     target: str,
@@ -53,7 +44,12 @@ async def _prove_all_items(
     """Prove all items in the list."""
     tool_lifespans = await create_tool_lifespans(config.prover.proposer_tools)
     async with Runtime.open(config.runtime, folder, tool_lifespans) as rt:
-        items = await _get_target_items(rt, folder, target)
+        try:
+            items = await parse_prove_target(rt.lean_interact_server, folder, target)
+        except ValueError as e:
+            logger.error(str(e))
+            return 1
+
         if not items:
             logger.warning(f"No items to prove in {target}")
             return 1
@@ -62,7 +58,7 @@ async def _prove_all_items(
         outputs: dict[str, ProverOutput] = {}
 
         for item in items:
-            if item.proven and not overwrite:
+            if item.is_proven and not overwrite:
                 logger.info(f"Already proven: {item.location.formatted_context}")
                 continue
 
@@ -71,7 +67,7 @@ async def _prove_all_items(
             try:
                 result_state = await _prove_item(config, rt, item)
 
-                if not result_state.item.proven:
+                if not result_state.item.is_proven:
                     failed = True
 
                 outputs[key] = ProverOutput.from_prover_state(result_state)
@@ -106,7 +102,7 @@ async def _prove_item(
 
     result = await prove_single_item(prover, item, thread_id=thread_id)
 
-    if result.item.proven:
+    if result.item.is_proven:
         logger.info(f"✓ Proven: {result.item.location.formatted_context}")
     else:
         logger.warning(f"✗ Not proven: {result.item.location.formatted_context}")
