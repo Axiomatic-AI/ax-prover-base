@@ -6,7 +6,6 @@ from .git import get_git_hash, get_repo_metadata, is_git_dirty
 
 # Export Lean parsing utilities
 from .lean_parsing import (
-    LEAN_KEYWORDS,
     count_pattern,
     list_declarations_from_code,
     list_declarations_from_file,
@@ -47,7 +46,6 @@ __all__ = [
     "get_repo_metadata",
     "is_git_dirty",
     # Lean
-    "LEAN_KEYWORDS",
     "count_pattern",
     "list_declarations_from_code",
     "list_declarations_from_file",
