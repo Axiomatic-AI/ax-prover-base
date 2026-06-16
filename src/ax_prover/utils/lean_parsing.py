@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-from enum import Enum
 from pathlib import Path
 
 from lean_interact import Command, FileCommand
