@@ -21,73 +21,7 @@ from ax_prover.utils.lean_parsing import (
     format_goal_state_at_sorries,
     list_declarations_from_code,
     read_declaration_source_code,
-    strip_comments,
 )
-
-NESTED_COMMENT_CODE = """\
-/- outer /- inner -/ still outer -/
-def foo := 1
-"""
-
-
-class TestStripComments:
-    """Tests for strip_comments function."""
-
-    def test_no_comments(self):
-        """Code without comments is unchanged."""
-        src = "def foo := 1\ndef bar := 2"
-        assert strip_comments(src) == src
-
-    def test_line_comment_removed(self):
-        """Line comments (--) are replaced with spaces."""
-        src = "def foo := 1 -- this is a comment"
-        result = strip_comments(src)
-        assert "comment" not in result
-        assert result.startswith("def foo := 1")
-
-    def test_block_comment_removed(self):
-        """Block comments (/- ... -/) are removed."""
-        src = "/- hello -/ def foo := 1"
-        result = strip_comments(src)
-        assert "hello" not in result
-        assert "def foo := 1" in result
-
-    def test_nested_block_comments(self):
-        """Nested block comments are handled correctly."""
-        result = strip_comments(NESTED_COMMENT_CODE)
-        assert "outer" not in result
-        assert "inner" not in result
-        assert "def foo := 1" in result
-
-    def test_string_literal_preserved(self):
-        """String literals are not treated as comments."""
-        src = 'def s := "not -- a comment"'
-        result = strip_comments(src)
-        assert '"not -- a comment"' in result
-
-    def test_preserves_line_count(self):
-        """Output has same number of lines as input."""
-        src = "/- multi\nline\ncomment -/\ndef foo := 1"
-        result = strip_comments(src)
-        assert result.count("\n") == src.count("\n")
-
-    def test_preserves_byte_count_per_line(self):
-        """Each line in output has same length as corresponding input line."""
-        src = "def foo := 1 -- comment here"
-        result = strip_comments(src)
-        for orig_line, stripped_line in zip(src.splitlines(), result.splitlines(), strict=True):
-            assert len(stripped_line) == len(orig_line)
-
-    def test_empty_input(self):
-        """Empty string returns empty string."""
-        assert strip_comments("") == ""
-
-    def test_doc_comment_stripped(self):
-        """Lean4 doc comments (/-- ... -/) are also stripped."""
-        src = "/-- My doc comment. -/\ndef foo := 1"
-        result = strip_comments(src)
-        assert "My doc comment" not in result
-        assert "def foo := 1" in result
 
 
 def _make_decl_info(

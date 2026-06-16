@@ -8,7 +8,6 @@ from .git import get_git_hash, get_repo_metadata, is_git_dirty
 from .lean_parsing import (
     list_declarations_from_code,
     list_declarations_from_file,
-    strip_comments,
 )
 
 # Export logging utilities
@@ -47,7 +46,6 @@ __all__ = [
     # Lean
     "list_declarations_from_code",
     "list_declarations_from_file",
-    "strip_comments",
     # Proving
     "parse_prove_target",
     "prove_single_item",
