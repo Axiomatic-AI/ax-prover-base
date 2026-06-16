@@ -354,6 +354,7 @@ class ProverAgent:
             if build_success:
                 self.logger.info("Build successful")
 
+                # Need to process the full file to properly compute the goal states at sorries
                 declarations = await list_declarations_from_file(
                     self.runtime.lean_interact_server,
                     applier.location.absolute_path(self.runtime.base_folder),
@@ -370,7 +371,7 @@ class ProverAgent:
                     feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
                     return {"messages": [feedback]}
 
-                if proposed_proof and proposed_proof.sorries:
+                if proposed_proof.sorries:
                     self.logger.info("The proposed code contains sorries.")
                     feedback = SorriesGoalStateFeedback(
                         sorry_count=len(proposed_proof.sorries),
