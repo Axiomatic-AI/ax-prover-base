@@ -93,10 +93,10 @@ def format_goal_state_at_sorries(sorries: list[Sorry]) -> str:
 
 
 async def list_declarations_from_code(
-    server: LeanInteractServer, code: str
+    server: LeanInteractServer, code: str, all_tactics: bool = False
 ) -> list[DeclarationInfo]:
     """List all declarations from a code snippet."""
-    response = await server.run(Command(cmd=code, declarations=True, all_tactics=True))
+    response = await server.run(Command(cmd=code, declarations=True, all_tactics=all_tactics))
     return _bundle_declarations(response.declarations, response.sorries, response.tactics)
 
 

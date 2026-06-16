@@ -172,12 +172,12 @@ class TestListDeclarationsFromCode:
         response = MagicMock(declarations=declarations, sorries=sorries, tactics=tactics)
         return MagicMock(run=AsyncMock(return_value=response))
 
-    async def test_builds_one_declaration_per_response_entry_with_its_sorries(
+    async def test_builds_one_declaration_per_response_entry_with_its_sorries_and_tactics(
         self, fake_server, scenarios
     ):
         """Output mirrors the response: one Declaration per entry (statement preserved),
         with each sorry attached to the declaration whose range contains it."""
-        result = await list_declarations_from_code(fake_server, "...")
+        result = await list_declarations_from_code(fake_server, "...", all_tactics=True)
 
         expected = [
             Declaration(info=info, sorries=sorries, tactics=tactics)
