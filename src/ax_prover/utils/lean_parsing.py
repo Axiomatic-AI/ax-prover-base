@@ -203,7 +203,7 @@ async def list_declarations_from_file(
 ) -> list[DeclarationInfo]:
     """List all declarations from a file."""
     response = await server.run(FileCommand(path=str(file_path), declarations=True))
-    return _get_declarations_with_sorries(response.declarations, response.sorries)
+    return _bundle_declarations(response.declarations, response.sorries, response.tactics)
 
 
 def _bundle_declarations(
