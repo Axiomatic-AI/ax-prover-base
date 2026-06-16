@@ -358,11 +358,10 @@ class ProverAgent:
                 declarations = await list_declarations_from_file(
                     self.runtime.lean_interact_server,
                     applier.location.absolute_path(self.runtime.base_folder),
+                    all_tactics=True,
                 )
 
-                proposed_proof = find_declaration_by_name(
-                    declarations, state.item.location.name, all_tactics=True
-                )
+                proposed_proof = find_declaration_by_name(declarations, state.item.location.name)
                 if not proposed_proof:
                     # Should never happen, but just in case
                     self.logger.error(
