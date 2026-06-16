@@ -101,10 +101,17 @@ async def list_declarations_from_code(
 
 
 async def list_declarations_from_file(
-    server: LeanInteractServer, file_path: Path
+    server: LeanInteractServer, file_path: Path, all_tactics: bool = False
 ) -> list[DeclarationInfo]:
-    """List all declarations from a file."""
-    response = await server.run(FileCommand(path=str(file_path), declarations=True))
+    """List all declarations from a file.
+
+    Set `all_tactics=True` to also collect the tactics used in each declaration (needed for
+    detecting search tactics). It makes the REPL response heavier, so leave it off when only
+    declaration/sorry information is required.
+    """
+    response = await server.run(
+        FileCommand(path=str(file_path), declarations=True, all_tactics=all_tactics)
+    )
     return _bundle_declarations(response.declarations, response.sorries, response.tactics)
 
 
