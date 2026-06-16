@@ -16,44 +16,6 @@ from .logging import get_logger
 logger = get_logger(__name__)
 
 
-def count_pattern(
-    content: str,
-    pattern: str,
-    context_lines: int = 1,
-) -> tuple[int, list[tuple[int, str]]]:
-    """Count pattern matches in Lean code with context.
-
-    Args:
-        content: The Lean file content
-        context_lines: Number of lines to show before and after
-        pattern: Regex pattern to search for (default: sorry/admit)
-
-    Returns:
-        Tuple of (count, locations) where locations is a list of (line_num, formatted_context)
-    """
-    sorry_locations = []
-    lines = content.splitlines()
-
-    for i, line in enumerate(lines):
-        for match in re.finditer(pattern, line):
-            line_num = i + 1
-            col = match.start()
-
-            start = max(0, i - context_lines)
-            end = min(len(lines), i + context_lines + 1)
-
-            context = []
-            for j in range(start, end):
-                context.append(f"  {lines[j]}")
-
-                if j == i:
-                    context.append("  " + " " * col + "^^^^^")
-
-            sorry_locations.append((line_num, "\n".join(context)))
-
-    return len(sorry_locations), sorry_locations
-
-
 def strip_comments(src: str) -> str:
     """
     Remove Lean comments from src.
@@ -123,6 +85,17 @@ def strip_comments(src: str) -> str:
             i += 1
 
     return "".join(out)
+
+
+def read_declaration_source_code(declaration: Declaration, file_path: Path) -> str:
+    """Read the source code of a declaration from a file."""
+    with open(file_path) as file:
+        lines = file.readlines()
+    # Lines in code are 1-indexed, so it's important to enumerate from 1. Each line read from the
+    # file already has its trailing newline.
+    return "".join(
+        line for line_number, line in enumerate(lines, 1) if declaration.contains_line(line_number)
+    )
 
 
 def find_declaration_by_name(declarations: list[Declaration], name: str) -> Declaration | None:
@@ -236,15 +209,4 @@ def _within_declaration_range(declaration_info: DeclarationInfo, object: Sorry |
     return (
         object.start_pos > declaration_info.range.start
         and object.start_pos < declaration_info.range.finish
-    )
-
-
-def read_declaration_source_code(declaration: Declaration, file_path: Path) -> str:
-    """Read the source code of a declaration from a file."""
-    with open(file_path) as file:
-        lines = file.readlines()
-    # Lines in code are 1-indexed, so it's important to enumerate from 1. Each line read from the
-    # file already has its trailing newline.
-    return "".join(
-        line for line_number, line in enumerate(lines, 1) if declaration.contains_line(line_number)
     )
