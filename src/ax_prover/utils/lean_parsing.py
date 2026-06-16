@@ -6,7 +6,7 @@ import re
 from enum import Enum
 from pathlib import Path
 
-from lean_interact import Command
+from lean_interact import Command, FileCommand
 from lean_interact.interface import DeclarationInfo, Sorry
 
 from ..models.declaration import Declaration
@@ -202,8 +202,8 @@ async def list_declarations_from_file(
     server: LeanInteractServer, file_path: Path
 ) -> list[DeclarationInfo]:
     """List all declarations from a file."""
-    code = file_path.read_text()
-    return await list_declarations_from_code(server, code)
+    response = await server.run(FileCommand(path=str(file_path), declarations=True))
+    return _get_declarations_with_sorries(response.declarations, response.sorries)
 
 
 def _get_declarations_with_sorries(
