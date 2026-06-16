@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ax_prover.models.files import Location
 from ax_prover.models.messages import ProposalMessage
+from ax_prover.models.proving import TargetItem
 from ax_prover.utils.build import TemporaryProposal, _format_lean_errors, _trim_warnings
 
 
@@ -98,8 +99,8 @@ class TestTemporaryProposalTempLocation:
 
     @staticmethod
     def _empty_proposal() -> ProposalMessage:
-        # No imports/opens/code -> has_changes is False, so the external guard
-        # in __enter__ does not short-circuit and we exercise the temp logic.
+        # No imports/opens/code -> the replace step in __enter__ is skipped, so we
+        # exercise only the temp-file creation and location logic.
         return ProposalMessage(reasoning="noop", code="")
 
     def test_local_original_temp_resolves_to_disk(self, tmp_path):
@@ -108,9 +109,12 @@ class TestTemporaryProposalTempLocation:
         src.parent.mkdir(parents=True)
         src.write_text("theorem t : True := trivial\n", encoding="utf-8")
 
-        original = Location(name="t", module_path="MyProj.Thing")
+        target_item = TargetItem(
+            location=Location(name="t", module_path="MyProj.Thing"),
+            original_source="theorem t : True := trivial",
+        )
 
-        with TemporaryProposal(str(tmp_path), original, self._empty_proposal()) as applier:
+        with TemporaryProposal(str(tmp_path), target_item, self._empty_proposal()) as applier:
             assert applier.success, applier.error
             on_disk = Path(tmp_path) / applier.location.path
             assert on_disk.exists()
