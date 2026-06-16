@@ -9,6 +9,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from ..config import ProverConfig
 from ..models import ProverAgentState
+from ..models.declaration import Declaration
 from ..models.messages import (
     AxiomDetectedFeedback,
     BuildFailedFeedback,
@@ -291,7 +292,7 @@ class ProverAgent:
         self.logger.debug(f"Proposer reasoning: \n{reasoning}")
         self.logger.debug(f"Code: \n{result.updated_theorem}")
 
-        proposed_code = await _filter_updated_theorem(
+        proposed_code, self.last_declarations = await _filter_updated_theorem(
             self.runtime.lean_interact_server, state.item, result.updated_theorem
         )
 
@@ -375,9 +376,7 @@ class ProverAgent:
                     )
                     return {"messages": [feedback]}
 
-                if feedback := await _detect_cheats_in_code(
-                    self.runtime.lean_interact_server, state.last_proposal.code
-                ):
+                if feedback := await _detect_cheats_in_code(self.last_declarations):
                     return {"messages": [feedback]}
 
                 feedback = BuildSuccessFeedback()
@@ -566,20 +565,16 @@ async def _filter_updated_theorem(
     server: LeanInteractServer, item: TargetItem, updated_theorem: str
 ) -> str:
     """Filter the updated theorem to only include the code that is actually being proven."""
-    declarations = await list_declarations_from_code(server, updated_theorem)
+    declarations = await list_declarations_from_code(server, updated_theorem, all_tactics=True)
     declaration = find_declaration_by_name(declarations, item.name)
-    return declaration.code if declaration else ""
+    return declaration.code if declaration else "", declarations
 
 
-async def _detect_cheats_in_code(
-    lean_interact_server: LeanInteractServer, code: str
-) -> FeedbackMessage | None:
-    declarations = await list_declarations_from_code(lean_interact_server, code)
-
+async def _detect_cheats_in_code(declarations: list[Declaration]) -> FeedbackMessage | None:
     axioms = [declaration for declaration in declarations if declaration.info.kind == "axiom"]
     if axioms:
         return AxiomDetectedFeedback(
-            count=len(axioms), locations="\n".join(axiom.info.pp for axiom in axioms)
+            count=len(axioms), locations="\n".join(axiom.code for axiom in axioms)
         )
 
     search_tactics = [
