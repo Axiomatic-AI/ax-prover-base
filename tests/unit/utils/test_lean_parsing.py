@@ -20,6 +20,7 @@ from ax_prover.utils.lean_parsing import (
     find_declaration_by_name,
     format_goal_state_at_sorries,
     list_declarations_from_code,
+    read_declaration_source_code,
     strip_comments,
 )
 
@@ -360,3 +361,107 @@ class TestFindDeclarationAtLine:
     def test_find_declaration_at_line(self, declarations, line, expected):
         """Returns the smallest-range declaration containing the line, or None."""
         assert find_declaration_at_line(declarations, line) is expected
+
+
+class TestReadDeclarationSourceCode:
+    """Tests for read_declaration_source_code.
+
+    The contract: the returned text must be exactly the slice of the file occupied by the
+    declaration's line range (start.line..finish.line, both 1-indexed and inclusive), with no
+    characters added, dropped, or duplicated. The expected source for every case is written out
+    by hand (never computed from the content) so a shared off-by-one in both the helper and the
+    function under test cannot make a broken implementation look correct.
+    """
+
+    @staticmethod
+    def _decl(start_line: int, finish_line: int) -> Declaration:
+        # Only the line numbers of the range matter here; columns are irrelevant because the
+        # function works line-by-line. Use distinctive columns to make that explicit.
+        return Declaration(
+            info=_make_decl_info("d", start=(start_line, 0), finish=(finish_line, 5))
+        )
+
+    # (content, start_line, finish_line, expected_source) — content always uses '\n' line endings,
+    # and expected_source is spelled out literally rather than sliced from content.
+    CASES = {
+        "single_line_at_top": (
+            "theorem foo : True := trivial\ndef bar := 1\n",
+            1,
+            1,
+            "theorem foo : True := trivial\n",
+        ),
+        "single_line_in_middle": (
+            "def a := 1\ntheorem t : True := trivial\ndef b := 2\n",
+            2,
+            2,
+            "theorem t : True := trivial\n",
+        ),
+        "single_line_at_eof_no_trailing_newline": (
+            "def a := 1\ndef b := 2",
+            2,
+            2,
+            "def b := 2",
+        ),
+        "multi_line_in_middle": (
+            "import Mathlib\n\ntheorem foo : True := by\n  trivial\n\ndef after := 0\n",
+            3,
+            4,
+            "theorem foo : True := by\n  trivial\n",
+        ),
+        "multi_line_with_internal_blank_line": (
+            "def before := 0\ntheorem foo : True := by\n\n  trivial\ndef after := 1\n",
+            2,
+            4,
+            "theorem foo : True := by\n\n  trivial\n",
+        ),
+        "indentation_and_tabs_preserved": (
+            "namespace N\ntheorem foo : True := by\n\t\thave h := trivial\n        exact h\nend N\n",
+            2,
+            4,
+            "theorem foo : True := by\n\t\thave h := trivial\n        exact h\n",
+        ),
+        "spans_whole_file": (
+            "theorem foo : True := by\n  trivial\n",
+            1,
+            2,
+            "theorem foo : True := by\n  trivial\n",
+        ),
+        "multi_line_at_eof_no_trailing_newline": (
+            "def a := 1\ntheorem foo : True := by\n  trivial",
+            2,
+            3,
+            "theorem foo : True := by\n  trivial",
+        ),
+        "blank_lines_inside_range_are_kept": (
+            "a\n\n\nb\n",
+            1,
+            4,
+            "a\n\n\nb\n",
+        ),
+    }
+
+    @pytest.mark.parametrize(
+        "content, start_line, finish_line, expected_source", list(CASES.values()), ids=list(CASES)
+    )
+    def test_returns_exact_original_source(
+        self, tmp_path, content, start_line, finish_line, expected_source
+    ):
+        """The returned text equals the exact original source of the declaration's lines."""
+        file_path = tmp_path / "Thing.lean"
+        file_path.write_text(content, encoding="utf-8")
+
+        result = read_declaration_source_code(self._decl(start_line, finish_line), file_path)
+
+        assert result in content  # The result is a substring of the original content
+        assert result == expected_source
+
+    def test_does_not_insert_blank_lines_between_lines(self, tmp_path):
+        """Regression: adjacent declaration lines stay adjacent (no doubled separators)."""
+        content = "theorem foo : True := by\n  have h := trivial\n  exact h\n"
+        file_path = tmp_path / "Thing.lean"
+        file_path.write_text(content, encoding="utf-8")
+
+        result = read_declaration_source_code(self._decl(1, 3), file_path)
+
+        assert "\n\n" not in result
+        assert result.splitlines() == content.splitlines()
