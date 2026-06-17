@@ -19,6 +19,13 @@ logger = get_logger(__name__)
 # Lean keywords for declarations
 LEAN_KEYWORDS = [d.value for d in DeclarationType]
 
+# Search/suggestion tactics that emit "Try this" and must not appear in a final proof.
+# These names are tactic-only — none are API methods ending in "?", so real code like
+# List.find?, xs.head?, Array.get?, m.lookup? is NOT matched. Extend as needed.
+SEARCH_TACTICS = ("apply", "exact", "rw", "simp", "simp_all", "aesop", "observe")
+# Longer names first so "simp_all?" isn't shadowed by "simp".
+SEARCH_TACTIC_PATTERN = rf"\b({'|'.join(sorted(SEARCH_TACTICS, key=len, reverse=True))})\?"
+
 
 def count_pattern(
     content: str,
@@ -124,6 +131,81 @@ def strip_comments(src: str) -> str:
             if c == '"':
                 state = ParsingState.Out
             out.append(c)
+            i += 1
+
+    return "".join(out)
+
+
+def blank_string_literals(src: str) -> str:
+    """Replace the CONTENTS of string literals with spaces, preserving the quotes.
+
+    Same state machine as `strip_comments` but inverted: comments are left intact while
+    the inside of `"..."` string literals is blanked (length and positions preserved,
+    surrounding quotes kept). Used before pattern checks (e.g. search-tactic or `axiom`
+    detection) so a tactic-like substring inside a string literal does not falsely match.
+    """
+
+    class ParsingState(Enum):
+        Out = 1
+        LineComment = 2
+        BlockComment = 3
+        StringLiteral = 4
+
+    state = ParsingState.Out
+    i = 0
+    depth = 0
+    out = []
+    n = len(src)
+
+    while i < n:
+        c = src[i]
+        c2 = src[i : i + 2]
+
+        if state == ParsingState.Out:
+            if c == '"':
+                state = ParsingState.StringLiteral
+                out.append(c)
+                i += 1
+            elif c2 == "--":
+                state = ParsingState.LineComment
+                out.append(c2)
+                i += 2
+            elif c2 == "/-":
+                state = ParsingState.BlockComment
+                depth = 1
+                out.append(c2)
+                i += 2
+            else:
+                out.append(c)
+                i += 1
+
+        elif state == ParsingState.LineComment:
+            if c == "\n":
+                state = ParsingState.Out
+            out.append(c)
+            i += 1
+
+        elif state == ParsingState.BlockComment:
+            if c2 == "/-":
+                depth += 1
+                out.append(c2)
+                i += 2
+            elif c2 == "-/":
+                depth -= 1
+                out.append(c2)
+                i += 2
+                if depth == 0:
+                    state = ParsingState.Out
+            else:
+                out.append(c)
+                i += 1
+
+        elif state == ParsingState.StringLiteral:
+            if c == '"':
+                state = ParsingState.Out
+                out.append(c)
+            else:
+                out.append(" " if c != "\n" else "\n")
             i += 1
 
     return "".join(out)

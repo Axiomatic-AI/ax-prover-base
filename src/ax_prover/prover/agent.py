@@ -44,6 +44,8 @@ from ..utils.build import (
 from ..utils.files import read_file
 from ..utils.git import get_repo_metadata
 from ..utils.lean_parsing import (
+    SEARCH_TACTIC_PATTERN,
+    blank_string_literals,
     find_declaration_by_name,
     format_goal_state_at_sorries,
     list_declarations_from_code,
@@ -366,7 +368,9 @@ class ProverAgent:
                     )
                     return {"messages": [feedback]}
 
-                stripped_code = strip_comments(state.last_proposal.code)
+                # Blank string-literal contents so a tactic-like substring or the word
+                # "axiom" inside a string/docstring cannot falsely trigger the checks below.
+                stripped_code = blank_string_literals(strip_comments(state.last_proposal.code))
 
                 axiom_count, axiom_locations = count_pattern(stripped_code, pattern=r"\baxiom\b")
                 if axiom_count:
@@ -376,7 +380,7 @@ class ProverAgent:
                     return {"messages": [feedback]}
 
                 tactic_count, tactic_locations = count_pattern(
-                    stripped_code, pattern=r"\b(apply|exact)\?"
+                    stripped_code, pattern=SEARCH_TACTIC_PATTERN
                 )
                 if tactic_count:
                     self.logger.info("The proposed code contains search tactics.")
