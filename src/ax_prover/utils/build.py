@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING
 
 from ..config import LeanConfig
 from ..models.files import Location
+from ..models.proving import TargetItem
 from ..utils import get_logger
-from ..utils.files import edit_function, edit_imports, edit_opens, read_file
-from ..utils.lean_parsing import extract_function_from_content
+from ..utils.files import edit_imports, edit_opens, read_file, replace_in_file
 
 if TYPE_CHECKING:
     from ax_prover.models.messages import ProposalMessage
@@ -358,18 +358,18 @@ class TemporaryProposal:
     def __init__(
         self,
         base_folder: str,
-        original_location: Location | None,
+        target_item: TargetItem | None,
         proposal: "ProposalMessage",
     ):
         """Initialize the temporary proposal applier.
 
         Args:
             base_folder: Base folder path
-            original_location: Location object for the original file (None means no location set)
+            target_item: TargetItem object in the original file (None means no target item set)
             proposal: ProposalMessage with imports, opens, and code to apply
         """
         self.base_folder = base_folder
-        self.original_location = original_location
+        self.target_item = target_item
         self.proposal = proposal
         self.location: Location | None = None  # Temp location, set in __enter__
         self.error: str = ""
@@ -379,11 +379,11 @@ class TemporaryProposal:
     def __enter__(self) -> "TemporaryProposal":
         """Create temp file and apply proposal. Returns self for method access."""
         try:
-            if not self.original_location:
+            if not self.target_item:
                 self.error = "No location set"
                 return self
 
-            original_path = self.original_location.absolute_path(self.base_folder)
+            original_path = self.target_item.location.absolute_path(self.base_folder)
 
             self._temp_file = tempfile.NamedTemporaryFile(
                 mode="w",
@@ -403,7 +403,7 @@ class TemporaryProposal:
             temp_path_rel = str(temp_path_abs.relative_to(self.base_folder))
 
             temp_module_path = temp_path_rel.replace("/", ".").removesuffix(".lean")
-            self.location = self.original_location.model_copy(
+            self.location = self.target_item.location.model_copy(
                 update={"module_path": temp_module_path}
             )
 
@@ -420,11 +420,13 @@ class TemporaryProposal:
                     return self
 
             if self.proposal.code:
-                # Only allow edits within the function definition
-                filtered_code = extract_function_from_content(
-                    self.proposal.code, self.location.name
+                # Only allow edits within the declaration
+                # Also disregard any additional helper declarations in the proposal
+                file_path = self.location.absolute_path(self.base_folder)
+
+                success = replace_in_file(
+                    file_path, self.target_item.original_source, self.proposal.code
                 )
-                success = edit_function(self.base_folder, self.location, filtered_code)
                 if not success:
                     self.error = "Failed to apply code to temp file"
                     return self
@@ -449,7 +451,7 @@ class TemporaryProposal:
 
         try:
             temp_path = self.location.absolute_path(self.base_folder)
-            original_path = self.original_location.absolute_path(self.base_folder)
+            original_path = self.target_item.location.absolute_path(self.base_folder)
 
             original_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(temp_path, original_path)

@@ -6,18 +6,14 @@ import re
 from enum import Enum
 from pathlib import Path
 
-from lean_interact import Command
+from lean_interact import Command, FileCommand
 from lean_interact.interface import DeclarationInfo, Sorry
 
-from ..models.declaration import Declaration, DeclarationType
-from ..models.files import Location
+from ..models.declaration import Declaration
 from .lean_interact import LeanInteractServer
 from .logging import get_logger
 
 logger = get_logger(__name__)
-
-# Lean keywords for declarations
-LEAN_KEYWORDS = [d.value for d in DeclarationType]
 
 
 def count_pattern(
@@ -129,77 +125,6 @@ def strip_comments(src: str) -> str:
     return "".join(out)
 
 
-def extract_function_from_content(content: str, function_name: str) -> str | None:
-    """Extract a function/theorem/lemma definition from Lean code.
-
-    Args:
-        content: Lean code content as string
-        function_name: Name of the function/theorem/lemma to extract
-
-    Returns:
-        The complete definition block including doc comments, or None
-    """
-    keywords_pattern = "|".join(LEAN_KEYWORDS)
-    pattern = rf"^(\s*)({keywords_pattern})\s+{re.escape(function_name)}\b"
-
-    match = re.search(pattern, content, re.MULTILINE)
-    if not match:
-        return None
-
-    start_pos = match.start()
-    start_indent = len(match.group(1))
-
-    # Look backwards for Lean4 doc comment (/-- ... -/)
-    before_def = content[:start_pos]
-    all_doc_comments = list(re.finditer(r"/--[\s\S]*?-/", before_def))
-
-    # Check doc comments in reverse order to find the closest one
-    for doc_match in reversed(all_doc_comments):
-        between = content[doc_match.end() : start_pos]
-        # If no definition keyword between comment and target, use it
-        if not re.search(rf"\b(?:{keywords_pattern})\s+\w+", between):
-            start_pos = doc_match.start()
-            break
-
-    # Find next definition, doc comment, structural keyword, or top-level comment
-    # at same or lower indentation
-    end_pattern = rf"^[ \t]{{0,{start_indent}}}(/--|--|{keywords_pattern}(?:\s+|\b))"
-
-    remaining_content = content[match.end() :]
-    end_match = re.search(end_pattern, remaining_content, re.MULTILINE)
-
-    if end_match:
-        end_pos = match.end() + end_match.start()
-    else:
-        end_pos = len(content)
-
-    return content[start_pos:end_pos].strip()
-
-
-def get_function_from_location(base_folder: str, location: Location) -> str | None:
-    """Get a function/theorem/lemma definition using a Location object.
-
-    Args:
-        base_folder: Base folder path
-        location: Location object with import path (dot notation) and name
-
-    Returns:
-        The complete definition block, or None if not found
-    """
-    full_path = location.absolute_path(base_folder)
-
-    if not full_path or not full_path.exists():
-        logger.warning(f"This path does not exist: {location.module_path}.")
-        return None
-
-    try:
-        content = full_path.read_text(encoding="utf-8")
-        return extract_function_from_content(content, location.name)
-    except Exception as e:
-        logger.error(f"Error in get_function_from_location: {e}")
-        return None
-
-
 def find_declaration_by_name(declarations: list[Declaration], name: str) -> Declaration | None:
     """Find a declaration by name.
 
@@ -277,8 +202,8 @@ async def list_declarations_from_file(
     server: LeanInteractServer, file_path: Path
 ) -> list[DeclarationInfo]:
     """List all declarations from a file."""
-    code = file_path.read_text()
-    return await list_declarations_from_code(server, code)
+    response = await server.run(FileCommand(path=str(file_path), declarations=True))
+    return _get_declarations_with_sorries(response.declarations, response.sorries)
 
 
 def _get_declarations_with_sorries(
@@ -298,3 +223,14 @@ def _get_declarations_with_sorries(
         declarations.append(Declaration(info=declaration_info, sorries=sorries_in_declaration))
 
     return declarations
+
+
+def read_declaration_source_code(declaration: Declaration, file_path: Path) -> str:
+    """Read the source code of a declaration from a file."""
+    with open(file_path) as file:
+        lines = file.readlines()
+    # Lines in code are 1-indexed, so it's important to enumerate from 1. Each line read from the
+    # file already has its trailing newline.
+    return "".join(
+        line for line_number, line in enumerate(lines, 1) if declaration.contains_line(line_number)
+    )

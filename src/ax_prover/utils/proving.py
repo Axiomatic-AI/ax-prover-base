@@ -13,6 +13,7 @@ from .lean_parsing import (
     find_declaration_at_line,
     find_declaration_by_name,
     list_declarations_from_file,
+    read_declaration_source_code,
 )
 from .logging import get_logger
 
@@ -53,13 +54,13 @@ async def parse_prove_target(
         declaration = find_declaration_at_line(declarations, line)
         if declaration is None:
             raise ValueError(f"No declaration found at line {line} in {file_path}")
-        return [_make_target_item(location_str, declaration)]
+        return [_make_target_item(file_path, location_str, declaration)]
 
     if name is not None:
         declaration = find_declaration_by_name(declarations, name)
         if declaration is None:
             raise ValueError(f"No declaration found with name {name} in {file_path}")
-        return [_make_target_item(location_str, declaration)]
+        return [_make_target_item(file_path, location_str, declaration)]
 
     # No line or name specified, so prove all unproven declarations in the file
     unproven = [declaration for declaration in declarations if declaration.sorries]
@@ -72,7 +73,7 @@ async def parse_prove_target(
         f"{', '.join(declaration.name for declaration in unproven)}"
     )
 
-    return [_make_target_item(location_str, declaration) for declaration in unproven]
+    return [_make_target_item(file_path, location_str, declaration) for declaration in unproven]
 
 
 def _parse_target_components(target: str) -> tuple[str, str | None, int | None]:
@@ -110,11 +111,12 @@ def _resolve_file_path(folder: str, location: str) -> Path:
     return full_path
 
 
-def _make_target_item(location_str: str, declaration: Declaration) -> TargetItem:
+def _make_target_item(file_path: Path, location_str: str, declaration: Declaration) -> TargetItem:
     """Make a target item from a location string and a declaration."""
     location = Location.parse(f"{location_str}:{declaration.name}")
+    source_code = read_declaration_source_code(declaration, file_path)
     return TargetItem(
-        location=location, original_source=declaration.code, is_proven=not declaration.sorries
+        location=location, original_source=source_code, is_proven=not declaration.sorries
     )
 
 

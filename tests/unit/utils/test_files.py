@@ -1,14 +1,69 @@
-"""Tests for file utilities: find_declaration_at_line and edit_function."""
+"""Tests for file utilities: replace_in_file."""
 
-from ax_prover.models.files import Location
-from ax_prover.utils.files import edit_function
+from ax_prover.utils.files import replace_in_file
 
 
-class TestEditFunctionPreservesComments:
-    """Tests that edit_function preserves comments above function definitions."""
+class TestReplaceInFile:
+    """Tests for replace_in_file."""
+
+    def test_replaces_declaration(self, tmp_path):
+        """The matched declaration is replaced by the new text."""
+        lean_file = tmp_path / "Test.lean"
+        lean_file.write_text("theorem my_theorem : True := by\n  sorry\n")
+        original = "theorem my_theorem : True := by\n  sorry"
+        new_code = "theorem my_theorem : True := by\n  trivial"
+
+        result = replace_in_file(lean_file, original, new_code)
+
+        assert result is True
+        content = lean_file.read_text()
+        assert "trivial" in content
+        assert "sorry" not in content
+
+    def test_returns_false_when_file_missing(self, tmp_path):
+        """A non-existent file is reported as a failure without raising."""
+        missing = tmp_path / "Missing.lean"
+        result = replace_in_file(missing, "theorem foo : True := trivial", "anything")
+        assert result is False
+
+    def test_returns_false_when_original_not_found(self, tmp_path):
+        """When the original text is absent, the file is left untouched."""
+        lean_file = tmp_path / "Test.lean"
+        lean_file.write_text("theorem foo : True := by\n  sorry\n")
+        result = replace_in_file(
+            lean_file, "theorem bar : False := by\n  sorry", "theorem bar := by trivial"
+        )
+        assert result is False
+        assert lean_file.read_text() == "theorem foo : True := by\n  sorry\n"
+
+    def test_matches_despite_leading_and_trailing_whitespace(self, tmp_path):
+        """DeclarationInfo.pp can carry a leading space / extra newlines; matching is stripped."""
+        lean_file = tmp_path / "Test.lean"
+        lean_file.write_text("theorem my_theorem : True := by\n  sorry\n")
+        # Simulate the leading-space artifact seen on synthetic-range pp output.
+        original = " theorem my_theorem : True := by\n  sorry\n"
+        new_code = "theorem my_theorem : True := by\n  trivial\n"
+
+        result = replace_in_file(lean_file, original, new_code)
+
+        assert result is True
+        content = lean_file.read_text()
+        assert "trivial" in content
+        assert "sorry" not in content
+
+    def test_only_first_occurrence_replaced(self, tmp_path):
+        """Only the first match is replaced when the text appears more than once."""
+        lean_file = tmp_path / "Test.lean"
+        lean_file.write_text("axiom foo : Nat\naxiom foo : Nat\n")
+
+        result = replace_in_file(lean_file, "axiom foo : Nat", "axiom bar : Nat")
+
+        assert result is True
+        content = lean_file.read_text()
+        assert content == "axiom bar : Nat\naxiom foo : Nat\n"
 
     def test_line_comments_above_theorem_preserved(self, tmp_path):
-        """Line comments (--) above a theorem are not removed when replacing it."""
+        """Line comments (--) above a theorem are not part of the original, so they survive."""
         lean_file = tmp_path / "Test.lean"
         lean_file.write_text(
             "-- This comment explains the theorem\n"
@@ -16,10 +71,10 @@ class TestEditFunctionPreservesComments:
             "theorem my_theorem : True := by\n"
             "  sorry\n"
         )
-        location = Location(module_path="Test", name="my_theorem")
+        original = "theorem my_theorem : True := by\n  sorry"
         new_code = "theorem my_theorem : True := by\n  trivial"
 
-        result = edit_function(str(tmp_path), location, new_code)
+        result = replace_in_file(lean_file, original, new_code)
 
         assert result is True
         content = lean_file.read_text()
@@ -39,37 +94,16 @@ class TestEditFunctionPreservesComments:
             "theorem target : True := by\n"
             "  sorry\n"
         )
-        location = Location(module_path="Test", name="target")
+        original = "theorem target : True := by\n  sorry"
         new_code = "theorem target : True := by\n  trivial"
 
-        result = edit_function(str(tmp_path), location, new_code)
+        result = replace_in_file(lean_file, original, new_code)
 
         assert result is True
         content = lean_file.read_text()
         assert "def helper := 42" in content
         assert "-- Important context for the next theorem" in content
         assert "-- Do not remove this" in content
-        assert "trivial" in content
-        assert "sorry" not in content
-
-    def test_block_comments_above_theorem_preserved(self, tmp_path):
-        """Block comments (/- ... -/) above a theorem are preserved."""
-        lean_file = tmp_path / "Test.lean"
-        lean_file.write_text(
-            "/- This is a block comment\n"
-            "   explaining the theorem below -/\n"
-            "theorem my_theorem : True := by\n"
-            "  sorry\n"
-        )
-        location = Location(module_path="Test", name="my_theorem")
-        new_code = "theorem my_theorem : True := by\n  trivial"
-
-        result = edit_function(str(tmp_path), location, new_code)
-
-        assert result is True
-        content = lean_file.read_text()
-        assert "This is a block comment" in content
-        assert "explaining the theorem below" in content
         assert "trivial" in content
         assert "sorry" not in content
 
@@ -81,11 +115,16 @@ class TestEditFunctionPreservesComments:
             "theorem my_theorem : True := by\n"
             "  sorry\n"
         )
-        location = Location(module_path="Test", name="my_theorem")
-        # LLM proposal typically omits the doc comment
+        # pp includes the doc comment as part of the declaration source.
+        original = (
+            "/-- Important documentation about the theorem. -/\n"
+            "theorem my_theorem : True := by\n"
+            "  sorry"
+        )
+        # LLM proposal typically omits the doc comment.
         new_code = "theorem my_theorem : True := by\n  trivial"
 
-        result = edit_function(str(tmp_path), location, new_code)
+        result = replace_in_file(lean_file, original, new_code)
 
         assert result is True
         content = lean_file.read_text()
@@ -97,37 +136,13 @@ class TestEditFunctionPreservesComments:
         """Doc comment is replaced if the new code provides a new doc comment."""
         lean_file = tmp_path / "Test.lean"
         lean_file.write_text("/-- Old doc comment. -/\ntheorem my_theorem : True := by\n  sorry\n")
-        location = Location(module_path="Test", name="my_theorem")
+        original = "/-- Old doc comment. -/\ntheorem my_theorem : True := by\n  sorry"
         new_code = "/-- New doc comment. -/\ntheorem my_theorem : True := by\n  trivial"
 
-        result = edit_function(str(tmp_path), location, new_code)
+        result = replace_in_file(lean_file, original, new_code)
 
         assert result is True
         content = lean_file.read_text()
         assert "New doc comment" in content
         assert "Old doc comment" not in content
         assert "trivial" in content
-
-    def test_line_comments_above_with_doc_comment_preserved(self, tmp_path):
-        """Line comments above a doc comment + theorem are preserved."""
-        lean_file = tmp_path / "Test.lean"
-        lean_file.write_text(
-            "-- Section: basic theorems\n"
-            "-- These are foundational results\n"
-            "/-- A trivial theorem. -/\n"
-            "theorem my_theorem : True := by\n"
-            "  sorry\n"
-        )
-        location = Location(module_path="Test", name="my_theorem")
-        # New code omits the doc comment — both line comments and doc comment should survive
-        new_code = "theorem my_theorem : True := by\n  trivial"
-
-        result = edit_function(str(tmp_path), location, new_code)
-
-        assert result is True
-        content = lean_file.read_text()
-        assert "-- Section: basic theorems" in content
-        assert "-- These are foundational results" in content
-        assert "/-- A trivial theorem. -/" in content
-        assert "trivial" in content
-        assert "sorry" not in content

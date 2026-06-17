@@ -24,7 +24,7 @@ from ..models.messages import (
     SorriesGoalStateFeedback,
     StructuredOutputParsingFailedFeedback,
 )
-from ..models.proving import ProverResult, ReviewDecision
+from ..models.proving import ProverResult, ReviewDecision, TargetItem
 from ..runtime import Runtime
 from ..tools import create_tool
 from ..utils import (
@@ -43,6 +43,7 @@ from ..utils.build import (
 )
 from ..utils.files import read_file
 from ..utils.git import get_repo_metadata
+from ..utils.lean_interact import LeanInteractServer
 from ..utils.lean_parsing import (
     find_declaration_by_name,
     format_goal_state_at_sorries,
@@ -292,12 +293,16 @@ class ProverAgent:
         self.logger.debug(f"Proposer reasoning: \n{reasoning}")
         self.logger.debug(f"Code: \n{result.updated_theorem}")
 
+        proposed_code = await _filter_updated_theorem(
+            self.runtime.lean_interact_server, state.item, result.updated_theorem
+        )
+
         proposal = ProposalMessage(
             reasoning=reasoning,
             location=state.item.location,
             imports=result.imports,
             opens=result.opens,
-            code=result.updated_theorem,
+            code=proposed_code,
         )
         return {"messages": [proposal]}
 
@@ -309,8 +314,13 @@ class ProverAgent:
         if not state.last_proposal:
             raise Exception("Builder expects proposal")
 
+        if not state.last_proposal.code:
+            self.logger.warning(f"Theorem '{state.item.location.name}' not found in proposed code")
+            feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
+            return {"messages": [feedback]}
+
         with TemporaryProposal(
-            self.runtime.base_folder, state.item.location, state.last_proposal
+            self.runtime.base_folder, state.item, state.last_proposal
         ) as applier:
             if not applier.success:
                 feedback = BuildFailedFeedback(error_output=applier.error)
@@ -352,13 +362,14 @@ class ProverAgent:
 
                 proposed_proof = find_declaration_by_name(declarations, state.item.location.name)
                 if not proposed_proof:
-                    self.logger.warning(
-                        f"Theorem '{state.item.location.name}' not found in proposed code"
+                    # Should never happen, but just in case
+                    self.logger.error(
+                        f"Theorem '{state.item.location.name}' not found in the proposedfile"
                     )
                     feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
                     return {"messages": [feedback]}
 
-                if proposed_proof.sorries:
+                if proposed_proof and proposed_proof.sorries:
                     self.logger.info("The proposed code contains sorries.")
                     feedback = SorriesGoalStateFeedback(
                         sorry_count=len(proposed_proof.sorries),
@@ -401,14 +412,9 @@ class ProverAgent:
     async def _reviewer_node(self, state: ProverAgentState, config: RunnableConfig) -> dict:
         self.logger.info("Reviewing proof")
 
-        declarations = await list_declarations_from_code(
-            self.runtime.lean_interact_server, state.last_proposal.code
-        )
-        proposed_proof = str(find_declaration_by_name(declarations, state.item.location.name))
-
         query = REVIEWER_USER_PROMPT.format(
             original_theorem=state.item.original_source,
-            proposed_proof=proposed_proof,
+            proposed_proof=state.last_proposal.code,
         )
 
         reviewer_system_prompt = REVIEWER_SYSTEM_PROMPT
@@ -440,7 +446,7 @@ class ProverAgent:
         if actual_approved:
             output = ReviewApprovedFeedback(comments=reasoning)
             with TemporaryProposal(
-                self.runtime.base_folder, state.item.location, state.last_proposal
+                self.runtime.base_folder, state.item, state.last_proposal
             ) as applier:
                 applier.apply_permanently()
         else:
@@ -571,3 +577,12 @@ class ProverAgent:
         except Exception as e:
             self.logger.error(f"Error: {e}")
             raise
+
+
+async def _filter_updated_theorem(
+    server: LeanInteractServer, item: TargetItem, updated_theorem: str
+) -> str:
+    """Filter the updated theorem to only include the code that is actually being proven."""
+    declarations = await list_declarations_from_code(server, updated_theorem)
+    declaration = find_declaration_by_name(declarations, item.name)
+    return declaration.code if declaration else ""
