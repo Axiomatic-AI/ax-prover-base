@@ -11,154 +11,17 @@ from lean_interact.interface import (
     Range,
     ScopeInfo,
     Sorry,
+    Tactic,
 )
 
 from ax_prover.models.declaration import Declaration
 from ax_prover.utils.lean_parsing import (
-    count_pattern,
     find_declaration_at_line,
     find_declaration_by_name,
     format_goal_state_at_sorries,
     list_declarations_from_code,
     read_declaration_source_code,
-    strip_comments,
 )
-
-NESTED_COMMENT_CODE = """\
-/- outer /- inner -/ still outer -/
-def foo := 1
-"""
-
-
-class TestStripComments:
-    """Tests for strip_comments function."""
-
-    def test_no_comments(self):
-        """Code without comments is unchanged."""
-        src = "def foo := 1\ndef bar := 2"
-        assert strip_comments(src) == src
-
-    def test_line_comment_removed(self):
-        """Line comments (--) are replaced with spaces."""
-        src = "def foo := 1 -- this is a comment"
-        result = strip_comments(src)
-        assert "comment" not in result
-        assert result.startswith("def foo := 1")
-
-    def test_block_comment_removed(self):
-        """Block comments (/- ... -/) are removed."""
-        src = "/- hello -/ def foo := 1"
-        result = strip_comments(src)
-        assert "hello" not in result
-        assert "def foo := 1" in result
-
-    def test_nested_block_comments(self):
-        """Nested block comments are handled correctly."""
-        result = strip_comments(NESTED_COMMENT_CODE)
-        assert "outer" not in result
-        assert "inner" not in result
-        assert "def foo := 1" in result
-
-    def test_string_literal_preserved(self):
-        """String literals are not treated as comments."""
-        src = 'def s := "not -- a comment"'
-        result = strip_comments(src)
-        assert '"not -- a comment"' in result
-
-    def test_preserves_line_count(self):
-        """Output has same number of lines as input."""
-        src = "/- multi\nline\ncomment -/\ndef foo := 1"
-        result = strip_comments(src)
-        assert result.count("\n") == src.count("\n")
-
-    def test_preserves_byte_count_per_line(self):
-        """Each line in output has same length as corresponding input line."""
-        src = "def foo := 1 -- comment here"
-        result = strip_comments(src)
-        for orig_line, stripped_line in zip(src.splitlines(), result.splitlines(), strict=True):
-            assert len(stripped_line) == len(orig_line)
-
-    def test_empty_input(self):
-        """Empty string returns empty string."""
-        assert strip_comments("") == ""
-
-    def test_doc_comment_stripped(self):
-        """Lean4 doc comments (/-- ... -/) are also stripped."""
-        src = "/-- My doc comment. -/\ndef foo := 1"
-        result = strip_comments(src)
-        assert "My doc comment" not in result
-        assert "def foo := 1" in result
-
-
-class TestCountPattern:
-    """Tests for count_pattern function."""
-
-    SORRY_PATTERN = r"\b(sorry|admit)\b"
-
-    def test_no_sorries(self):
-        """Clean code returns count 0."""
-        code = "def foo := 42\ndef bar := 1 + 2"
-        count, locations = count_pattern(code, pattern=self.SORRY_PATTERN)
-        assert count == 0
-        assert locations == []
-
-    def test_single_sorry(self):
-        """One sorry is detected with correct line number."""
-        code = "def foo := by\n  sorry"
-        count, locations = count_pattern(code, pattern=self.SORRY_PATTERN)
-        assert count == 1
-        assert locations[0][0] == 2  # line number
-
-    def test_multiple_sorries(self):
-        """Multiple sorries on different lines are all found."""
-        code = "def foo := by\n  sorry\ndef bar := by\n  sorry"
-        count, _ = count_pattern(code, pattern=self.SORRY_PATTERN)
-        assert count == 2
-
-    def test_sorry_and_admit(self):
-        """Both 'sorry' and 'admit' are detected."""
-        code = "def foo := by\n  sorry\ndef bar := by\n  admit"
-        count, locations = count_pattern(code, pattern=self.SORRY_PATTERN)
-        assert count == 2
-
-    def test_context_lines(self):
-        """Context lines around sorry are included."""
-        code = "-- before\ndef foo := by\n  sorry\n-- after"
-        _, locations = count_pattern(code, pattern=self.SORRY_PATTERN, context_lines=1)
-        context_text = locations[0][1]
-        assert "def foo" in context_text
-        assert "sorry" in context_text
-
-    def test_sorry_in_word_not_counted(self):
-        """Words containing 'sorry' (e.g., 'sorry_lemma') are not counted."""
-        code = "def sorry_lemma := 42"
-        count, _ = count_pattern(code, pattern=self.SORRY_PATTERN)
-        assert count == 0
-
-    def test_custom_pattern_detects_axiom(self):
-        """Custom pattern detects axiom declarations."""
-        code = "axiom myAxiom : Nat → Nat\ntheorem foo : True := trivial"
-        count, locations = count_pattern(code, pattern=r"\baxiom\b")
-        assert count == 1
-        assert locations[0][0] == 1
-
-    def test_custom_pattern_detects_search_tactics(self):
-        """Custom pattern detects apply? and exact?."""
-        code = "theorem foo : P := by\n  apply?\n  exact?"
-        count, _ = count_pattern(code, pattern=r"\b(apply|exact)\?")
-        assert count == 2
-
-    def test_custom_pattern_does_not_flag_apply_without_question_mark(self):
-        """apply (without ?) is not flagged by the search tactics pattern."""
-        code = "theorem foo : P := by\n  apply some_lemma"
-        count, _ = count_pattern(code, pattern=r"\b(apply|exact)\?")
-        assert count == 0
-
-    def test_sorry_pattern_does_not_match_axiom(self):
-        """Sorry/admit pattern does not match axiom."""
-        code = "axiom myAxiom : Nat → Nat"
-        count, _ = count_pattern(code, pattern=self.SORRY_PATTERN)
-        assert count == 0
 
 
 def _make_decl_info(
@@ -197,6 +60,15 @@ def _make_sorry(line: int, column: int, goal: str = "⊢ False") -> Sorry:
     )
 
 
+def _make_tactic(line: int, column: int, tactic: str, goals: str = "⊢ True") -> Tactic:
+    return Tactic(
+        pos=Pos(line=line, column=column),
+        endPos=Pos(line=line, column=column + len(tactic)),
+        goals=goals,
+        tactic=tactic,
+    )
+
+
 class TestListDeclarationsFromCode:
     """Tests for list_declarations_from_code.
 
@@ -221,6 +93,7 @@ class TestListDeclarationsFromCode:
                     pp="noncomputable def add (a b : Nat) : Nat := a + b",
                 ),
                 [],
+                [],
             ),
             (
                 _make_decl_info(
@@ -231,6 +104,7 @@ class TestListDeclarationsFromCode:
                     pp="theorem add_zero_proven (a : Nat) : add a 0 = a := rfl",
                 ),
                 [],
+                [],
             ),
             (
                 _make_decl_info(
@@ -240,7 +114,15 @@ class TestListDeclarationsFromCode:
                     kind="theorem",
                     pp="theorem with_sorry (a : Nat) : add a 0 = a := by sorry",
                 ),
-                [_make_sorry(line=5, column=45, goal="⊢ add a 0 = a")],
+                [_make_sorry(line=5, column=49, goal="⊢ add a 0 = a")],
+                [
+                    _make_tactic(
+                        line=5,
+                        column=49,
+                        tactic="sorry",
+                        goals="⊢ add a 0 = a",
+                    )
+                ],
             ),
             (
                 _make_decl_info(
@@ -251,6 +133,7 @@ class TestListDeclarationsFromCode:
                     pp="def Κατ.Μοδ.αβ_γ'δε₀₁₂_ℕtoℤ_φψ''ωΩ_über_café_Δ?! := 42",
                 ),
                 [],
+                [],
             ),
             (
                 _make_decl_info(
@@ -258,30 +141,48 @@ class TestListDeclarationsFromCode:
                     start=(25, 0),
                     finish=(28, 7),
                     kind="theorem",
-                    pp="theorem double_sorry{n : Nat} : n + 0 = n := by\n  have h : n + 0 = n := by\n    sorry\n sorry",
+                    pp="theorem double_sorry{n : Nat} : n + 0 = n := by\n have h : n + 0 = n := by\n    sorry\n apply?",
                 ),
                 [
-                    _make_sorry(line=27, column=6, goal="n : ℕ\n⊢ n + 0 = n"),
-                    _make_sorry(line=28, column=2, goal="n : ℕ\nh : n + 0 = n\n⊢ n + 0 = n"),
+                    _make_sorry(line=27, column=6, goal="n : Nat\n⊢ n + 0 = n"),
+                ],
+                [
+                    _make_tactic(
+                        line=26,
+                        column=2,
+                        tactic="have h : n + 0 = n := by sorry",
+                        goals="n : Nat\n⊢ n + 0 = n",
+                    ),
+                    _make_tactic(line=27, column=4, tactic="sorry", goals="n : Nat\n⊢ n + 0 = n"),
+                    _make_tactic(
+                        line=28,
+                        column=2,
+                        tactic="apply?",
+                        goals=" n : Nat\nh : n + 0 = n\n⊢ n + 0 = n",
+                    ),
                 ],
             ),
         ]
 
     @pytest.fixture
     def fake_server(self, scenarios):
-        declarations = [info for info, _ in scenarios]
-        sorries = [s for _, decl_sorries in scenarios for s in decl_sorries]
-        response = MagicMock(declarations=declarations, sorries=sorries)
+        declarations = [info for info, _, _ in scenarios]
+        sorries = [s for _, decl_sorries, _ in scenarios for s in decl_sorries]
+        tactics = [t for _, _, decl_tactics in scenarios for t in decl_tactics]
+        response = MagicMock(declarations=declarations, sorries=sorries, tactics=tactics)
         return MagicMock(run=AsyncMock(return_value=response))
 
-    async def test_builds_one_declaration_per_response_entry_with_its_sorries(
+    async def test_builds_one_declaration_per_response_entry_with_its_sorries_and_tactics(
         self, fake_server, scenarios
     ):
         """Output mirrors the response: one Declaration per entry (statement preserved),
         with each sorry attached to the declaration whose range contains it."""
-        result = await list_declarations_from_code(fake_server, "...")
+        result = await list_declarations_from_code(fake_server, "...", all_tactics=True)
 
-        expected = [Declaration(info=info, sorries=sorries) for info, sorries in scenarios]
+        expected = [
+            Declaration(info=info, sorries=sorries, tactics=tactics)
+            for info, sorries, tactics in scenarios
+        ]
         assert result == expected
 
 

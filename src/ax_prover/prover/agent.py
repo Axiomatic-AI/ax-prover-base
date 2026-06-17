@@ -9,6 +9,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from ..config import ProverConfig
 from ..models import ProverAgentState
+from ..models.declaration import Declaration
 from ..models.messages import (
     AxiomDetectedFeedback,
     BuildFailedFeedback,
@@ -30,7 +31,6 @@ from ..tools import create_tool
 from ..utils import (
     attach_builder_files,
     attach_prover_logs_if_enabled,
-    count_pattern,
     get_git_hash,
     get_logger,
     is_git_dirty,
@@ -49,7 +49,6 @@ from ..utils.lean_parsing import (
     format_goal_state_at_sorries,
     list_declarations_from_code,
     list_declarations_from_file,
-    strip_comments,
 )
 from ..utils.llm import LLMClient, agentic_loop, get_reasoning
 from . import memory as memory_module
@@ -355,9 +354,11 @@ class ProverAgent:
             if build_success:
                 self.logger.info("Build successful")
 
+                # Need to process the full file to properly compute the goal states at sorries
                 declarations = await list_declarations_from_file(
                     self.runtime.lean_interact_server,
                     applier.location.absolute_path(self.runtime.base_folder),
+                    all_tactics=True,
                 )
 
                 proposed_proof = find_declaration_by_name(declarations, state.item.location.name)
@@ -377,24 +378,7 @@ class ProverAgent:
                     )
                     return {"messages": [feedback]}
 
-                stripped_code = strip_comments(state.last_proposal.code)
-
-                axiom_count, axiom_locations = count_pattern(stripped_code, pattern=r"\baxiom\b")
-                if axiom_count:
-                    self.logger.info("The proposed code introduces axiom declarations.")
-                    formatted = "\n".join(ctx for _, ctx in axiom_locations)
-                    feedback = AxiomDetectedFeedback(count=axiom_count, locations=formatted)
-                    return {"messages": [feedback]}
-
-                tactic_count, tactic_locations = count_pattern(
-                    stripped_code, pattern=r"\b(apply|exact)\?"
-                )
-                if tactic_count:
-                    self.logger.info("The proposed code contains search tactics.")
-                    formatted = "\n".join(ctx for _, ctx in tactic_locations)
-                    feedback = SearchTacticsDetectedFeedback(
-                        count=tactic_count, locations=formatted
-                    )
+                if feedback := await _detect_cheats_in_code(proposed_proof):
                     return {"messages": [feedback]}
 
                 feedback = BuildSuccessFeedback()
@@ -586,3 +570,14 @@ async def _filter_updated_theorem(
     declarations = await list_declarations_from_code(server, updated_theorem)
     declaration = find_declaration_by_name(declarations, item.name)
     return declaration.code if declaration else ""
+
+
+async def _detect_cheats_in_code(declaration: Declaration) -> FeedbackMessage | None:
+    if declaration.kind == "axiom":
+        return AxiomDetectedFeedback(count=1, locations=declaration.code)
+
+    if declaration.search_tactics:
+        return SearchTacticsDetectedFeedback(
+            count=len(declaration.search_tactics), locations=declaration.code
+        )
+    return None
