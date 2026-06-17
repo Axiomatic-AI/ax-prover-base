@@ -26,6 +26,7 @@ from ..models.messages import (
     StructuredOutputParsingFailedFeedback,
 )
 from ..models.proving import ProverResult, ReviewDecision, TargetItem
+from ..models.proving import ProverResult, ReviewDecision, TargetItem
 from ..runtime import Runtime
 from ..tools import create_tool
 from ..utils import (
@@ -370,7 +371,7 @@ class ProverAgent:
                     feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
                     return {"messages": [feedback]}
 
-                if proposed_proof.sorries:
+                if proposed_proof and proposed_proof.sorries:
                     self.logger.info("The proposed code contains sorries.")
                     feedback = SorriesGoalStateFeedback(
                         sorry_count=len(proposed_proof.sorries),

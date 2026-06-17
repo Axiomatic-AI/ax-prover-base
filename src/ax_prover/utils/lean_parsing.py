@@ -144,3 +144,14 @@ def _within_declaration_range(declaration_info: DeclarationInfo, object: Sorry |
         object.start_pos > declaration_info.range.start
         and object.start_pos < declaration_info.range.finish
     )
+
+
+def read_declaration_source_code(declaration: Declaration, file_path: Path) -> str:
+    """Read the source code of a declaration from a file."""
+    with open(file_path) as file:
+        lines = file.readlines()
+    # Lines in code are 1-indexed, so it's important to enumerate from 1. Each line read from the
+    # file already has its trailing newline.
+    return "".join(
+        line for line_number, line in enumerate(lines, 1) if declaration.contains_line(line_number)
+    )
