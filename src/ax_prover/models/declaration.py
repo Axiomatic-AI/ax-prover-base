@@ -1,11 +1,28 @@
 """Models for Lean4 declarations."""
 
 import logging
+import re
 
 from lean_interact.interface import DeclarationInfo, Sorry, Tactic
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+_SEARCH_TACTICS = [
+    r"exact\?",
+    r"apply\?",
+    r"rw\?\??",
+    r"simp\?!?",
+    r"simp_all\?!?",
+    r"dsimp\?!?",
+    r"decide\?!?",
+    r"gcongr\?!?",
+    r"observe\?!?",
+    r"observe",
+    r"hint",
+]
+
+_SEARCH_TACTICS_PATTERN = re.compile(r"(?<![\w?!])(?:" + "|".join(_SEARCH_TACTICS) + r")(?![\w?!])")
 
 
 class Declaration(BaseModel):
@@ -37,4 +54,4 @@ class Declaration(BaseModel):
 
     @property
     def search_tactics(self) -> list[Tactic]:
-        return [tactic for tactic in self.tactics if tactic.tactic.endswith("?")]
+        return [tactic for tactic in self.tactics if _SEARCH_TACTICS_PATTERN.search(tactic.tactic)]
