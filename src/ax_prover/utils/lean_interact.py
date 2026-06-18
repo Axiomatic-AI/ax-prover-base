@@ -49,7 +49,7 @@ class LeanInteractServer:
                     project=project,
                     verbose=self._config.verbose,
                 )
-                self._server = AutoLeanServer(repl_config)
+                self._server = AutoLeanServer(repl_config, max_total_memory=1.0)
                 logger.debug(f"Created LeanInteract server for {self._base_folder}")
 
         return self._server
