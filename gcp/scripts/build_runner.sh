@@ -24,7 +24,7 @@ BASE_IMAGE="${AR_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/${BASE_IMAG
 # Build wheel locally (setuptools-scm uses git to determine version)
 echo "==> Building wheel"
 rm -rf dist/
-python3 -m build --wheel
+uv build --wheel
 echo "==> Built: $(ls dist/*.whl)"
 
 gcloud config set project "${GCP_PROJECT_ID}" >/dev/null
