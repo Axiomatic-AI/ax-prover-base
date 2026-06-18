@@ -108,6 +108,7 @@ class LeanInteractConfig:
     Uses lean_interact's default configuration values.
     """
 
+    max_total_memory: float = 1.0
     verbose: bool = False
 
 
