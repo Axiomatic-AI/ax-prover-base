@@ -191,10 +191,8 @@ class NewDeclarationsDetectedFeedback(FeedbackMessage):
         """Initialize with formatted new declarations detection message."""
         kwargs.pop("content", None)
         content = (
-            "DECLARATIONS CHANGED: The proposed code "
-            + ("introduces" if count > 0 else "removes")
-            + f" {abs(count)} declaration(s).\n\n"
-            + f"Declarations changed: {locations}"
+            f"DECLARATIONS CHANGED: The proposed code added or removed {count} declaration(s).\n"
+            + f"The modified declarations are: {locations}"
         )
         super().__init__(content=content, count=count, locations=locations, **kwargs)
 
