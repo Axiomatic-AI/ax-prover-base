@@ -25,7 +25,7 @@ from ..models.messages import (
     SorriesGoalStateFeedback,
     StructuredOutputParsingFailedFeedback,
 )
-from ..models.proving import ProverResult, ReviewDecision, TargetItem
+from ..models.proving import ProverResult, ReviewDecision
 from ..runtime import Runtime
 from ..tools import create_tool
 from ..utils import (
@@ -43,11 +43,9 @@ from ..utils.build import (
 )
 from ..utils.files import read_file
 from ..utils.git import get_repo_metadata
-from ..utils.lean_interact import LeanInteractServer
 from ..utils.lean_parsing import (
     find_declaration_by_name,
     format_goal_state_at_sorries,
-    list_declarations_from_code,
     list_declarations_from_file,
 )
 from ..utils.llm import LLMClient, agentic_loop, get_reasoning
@@ -292,16 +290,12 @@ class ProverAgent:
         self.logger.debug(f"Proposer reasoning: \n{reasoning}")
         self.logger.debug(f"Code: \n{result.updated_theorem}")
 
-        proposed_code = await _filter_updated_theorem(
-            self.runtime.lean_interact_server, state.item, result.updated_theorem
-        )
-
         proposal = ProposalMessage(
             reasoning=reasoning,
             location=state.item.location,
             imports=result.imports,
             opens=result.opens,
-            code=proposed_code,
+            code=result.updated_theorem,
         )
         return {"messages": [proposal]}
 
@@ -561,15 +555,6 @@ class ProverAgent:
         except Exception as e:
             self.logger.error(f"Error: {e}")
             raise
-
-
-async def _filter_updated_theorem(
-    server: LeanInteractServer, item: TargetItem, updated_theorem: str
-) -> str:
-    """Filter the updated theorem to only include the code that is actually being proven."""
-    declarations = await list_declarations_from_code(server, updated_theorem)
-    declaration = find_declaration_by_name(declarations, item.name)
-    return declaration.code if declaration else ""
 
 
 async def _detect_cheats_in_code(declaration: Declaration) -> FeedbackMessage | None:
