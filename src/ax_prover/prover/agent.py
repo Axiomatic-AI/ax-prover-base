@@ -307,11 +307,6 @@ class ProverAgent:
         if not state.last_proposal:
             raise Exception("Builder expects proposal")
 
-        if not state.last_proposal.code:
-            self.logger.warning(f"Theorem '{state.item.location.name}' not found in proposed code")
-            feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
-            return {"messages": [feedback]}
-
         with TemporaryProposal(
             self.runtime.base_folder, state.item, state.last_proposal
         ) as applier:
