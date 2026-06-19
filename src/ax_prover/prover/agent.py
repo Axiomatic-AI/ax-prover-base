@@ -18,6 +18,7 @@ from ..models.messages import (
     FormalizationMessage,
     MaxIterationsFeedback,
     MissingTargetTheoremFeedback,
+    NewDeclarationsDetectedFeedback,
     ProposalMessage,
     ReviewApprovedFeedback,
     ReviewRejectedFeedback,
@@ -367,7 +368,9 @@ class ProverAgent:
                     )
                     return {"messages": [feedback]}
 
-                if feedback := await _detect_cheats_in_code(proposed_proof):
+                if feedback := await _detect_cheats_in_code(
+                    proposed_proof, declarations, state.item.original_declarations
+                ):
                     return {"messages": [feedback]}
 
                 feedback = BuildSuccessFeedback()
@@ -552,12 +555,42 @@ class ProverAgent:
             raise
 
 
-async def _detect_cheats_in_code(declaration: Declaration) -> FeedbackMessage | None:
-    if declaration.kind == "axiom":
-        return AxiomDetectedFeedback(count=1, locations=declaration.code)
+async def _detect_cheats_in_code(
+    proposed_declaration: Declaration,
+    new_declarations: list[Declaration],
+    original_declarations: list[Declaration],
+) -> FeedbackMessage | None:
+    """Detect cheats in the new code, such as adding new axioms, using search tactics in the final
+    proof, etc."""
+    if feedback := _detect_changes_in_declarations(new_declarations, original_declarations):
+        return feedback
 
-    if declaration.search_tactics:
+    if proposed_declaration.kind == "axiom":
+        return AxiomDetectedFeedback(count=1, locations=proposed_declaration.code)
+
+    if proposed_declaration.search_tactics:
         return SearchTacticsDetectedFeedback(
-            count=len(declaration.search_tactics), locations=declaration.code
+            count=len(proposed_declaration.search_tactics), locations=proposed_declaration.code
         )
     return None
+
+
+def _detect_changes_in_declarations(
+    new_declarations: list[Declaration], original_declarations: list[Declaration]
+) -> NewDeclarationsDetectedFeedback | None:
+    if len(new_declarations) == len(original_declarations):
+        return None
+
+    original_names = {declaration.name for declaration in original_declarations}
+    new_names = {declaration.name for declaration in new_declarations}
+    changed_names = original_names ^ new_names  # Difference between sets
+
+    modified_declarations = [
+        declaration
+        for declaration in (*new_declarations, *original_declarations)
+        if declaration.name in changed_names
+    ]
+    return NewDeclarationsDetectedFeedback(
+        count=len(new_declarations) - len(original_declarations),
+        locations=",".join(declaration.name for declaration in modified_declarations),
+    )
