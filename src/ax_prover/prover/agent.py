@@ -578,12 +578,12 @@ async def _detect_cheats_in_code(
 def _detect_changes_in_declarations(
     new_declarations: list[Declaration], original_declarations: list[Declaration]
 ) -> NewDeclarationsDetectedFeedback | None:
-    if len(new_declarations) == len(original_declarations):
-        return None
-
     original_names = {declaration.name for declaration in original_declarations}
     new_names = {declaration.name for declaration in new_declarations}
-    changed_names = original_names ^ new_names  # Difference between sets
+    changed_names = original_names ^ new_names
+
+    if not changed_names:
+        return None
 
     modified_declarations = [
         declaration
@@ -591,6 +591,6 @@ def _detect_changes_in_declarations(
         if declaration.name in changed_names
     ]
     return NewDeclarationsDetectedFeedback(
-        count=len(new_declarations) - len(original_declarations),
+        count=len(changed_names),
         locations=",".join(declaration.name for declaration in modified_declarations),
     )
