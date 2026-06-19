@@ -562,7 +562,7 @@ async def _detect_cheats_in_code(
 ) -> FeedbackMessage | None:
     """Detect cheats in the new code, such as adding new axioms, using search tactics in the final
     proof, etc."""
-    if feedback := _detect_changes_in_declarations(new_declarations, original_declarations):
+    if feedback := _detect_added_and_removed_declarations(new_declarations, original_declarations):
         return feedback
 
     if proposed_declaration.kind == "axiom":
@@ -575,7 +575,7 @@ async def _detect_cheats_in_code(
     return None
 
 
-def _detect_changes_in_declarations(
+def _detect_added_and_removed_declarations(
     new_declarations: list[Declaration], original_declarations: list[Declaration]
 ) -> NewDeclarationsDetectedFeedback | None:
     original_names = {declaration.name for declaration in original_declarations}
