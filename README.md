@@ -151,20 +151,6 @@ ax-prover experiment dataset_name --tools all
 
 Tool configurations live in `src/ax_prover/configs/tools.yaml`.
 
-<details>
-<summary><strong>Cross-iteration tool log</strong></summary>
-
-The proposer can keep an append-only record of every search it has issued (tool,
-query, summarized result) and re-inject it on later iterations so it avoids
-repeating identical queries. It is disabled by default; enable it with a config
-override:
-
-```bash
-ax-prover prove MyModule:theorem_name prover.tool_log.enabled=true
-```
-
-</details>
-
 ### Running experiments
 
 Run batch evaluations on [LangSmith](https://smith.langchain.com) datasets:

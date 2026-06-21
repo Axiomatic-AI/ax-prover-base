@@ -77,19 +77,6 @@ class SummarizeOutputConfig:
 
 
 @dataclass
-class ToolLogConfig:
-    """Configuration for the cross-iteration proposer tool log.
-
-    Disabled by default; when disabled the agent leaves all tool calls
-    unwrapped and never adds the `<prior-tool-calls>` block to the prompt,
-    so behavior is identical to the original code path.
-    """
-
-    enabled: bool = False
-    max_total: int = 50
-
-
-@dataclass
 class ProverConfig:
     """Configuration for ProverAgent."""
 
@@ -100,7 +87,6 @@ class ProverConfig:
         default_factory=lambda: MemoryConfig(class_name="ExperienceProcessor")
     )
     summarize_output: SummarizeOutputConfig = field(default_factory=SummarizeOutputConfig)
-    tool_log: ToolLogConfig = field(default_factory=ToolLogConfig)
     user_comments: str | None = None
 
 

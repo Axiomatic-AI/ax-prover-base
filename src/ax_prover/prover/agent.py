@@ -1,7 +1,6 @@
 """Prover agent for creating and completing proofs in Lean 4."""
 
 from collections.abc import Sequence
-from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -10,6 +9,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from ..config import ProverConfig
 from ..models import ProverAgentState
+from ..models.declaration import Declaration
 from ..models.messages import (
     AxiomDetectedFeedback,
     BuildFailedFeedback,
@@ -25,16 +25,12 @@ from ..models.messages import (
     SorriesGoalStateFeedback,
     StructuredOutputParsingFailedFeedback,
 )
-from ..models.proving import ProverResult, ReviewDecision
-from ..models.tool_log import ToolLog
+from ..models.proving import ProverResult, ReviewDecision, TargetItem
 from ..runtime import Runtime
 from ..tools import create_tool
-from .tool_log import wrap_tools
 from ..utils import (
     attach_builder_files,
     attach_prover_logs_if_enabled,
-    count_pattern,
-    get_function_from_location,
     get_git_hash,
     get_logger,
     is_git_dirty,
@@ -47,12 +43,12 @@ from ..utils.build import (
 )
 from ..utils.files import read_file
 from ..utils.git import get_repo_metadata
+from ..utils.lean_interact import LeanInteractServer
 from ..utils.lean_parsing import (
     find_declaration_by_name,
     format_goal_state_at_sorries,
     list_declarations_from_code,
     list_declarations_from_file,
-    strip_comments,
 )
 from ..utils.llm import LLMClient, agentic_loop, get_reasoning
 from . import memory as memory_module
@@ -90,16 +86,6 @@ class ProverAgent:
         self.logger = get_logger(__name__)
 
         self.proposer_tools = []
-
-        # When tool_log is disabled (default) self.tool_log stays None and the
-        # downstream wrap / prompt-injection sites become no-ops, leaving the
-        # original code path untouched.
-        self.tool_log: ToolLog | None = (
-            ToolLog(max_total=self.config.tool_log.max_total)
-            if self.config.tool_log.enabled
-            else None
-        )
-        self._current_iter = 0
 
         self.llm_client = LLMClient(self.config.prover_llm)
 
@@ -147,8 +133,6 @@ class ProverAgent:
             tool = await create_tool(tool_config, self.runtime)
             if tool is not None:
                 tools.append(tool)
-        if self.tool_log is not None:
-            tools = wrap_tools(tools, self.tool_log, lambda: self._current_iter)
         return tools
 
     def _build_graph(self) -> CompiledStateGraph:
@@ -283,12 +267,6 @@ class ProverAgent:
         if state.experience:
             query = "\n\n".join([query, state.experience])
 
-        if self.tool_log is not None:
-            self._current_iter = state.iteration_count + 1
-            rendered_log = self.tool_log.render()
-            if rendered_log:
-                query = "\n\n".join([query, rendered_log])
-
         context_messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=query),
@@ -314,17 +292,18 @@ class ProverAgent:
         self.logger.debug(f"Proposer reasoning: \n{reasoning}")
         self.logger.debug(f"Code: \n{result.updated_theorem}")
 
+        proposed_code = await _filter_updated_theorem(
+            self.runtime.lean_interact_server, state.item, result.updated_theorem
+        )
+
         proposal = ProposalMessage(
             reasoning=reasoning,
             location=state.item.location,
             imports=result.imports,
             opens=result.opens,
-            code=result.updated_theorem,
+            code=proposed_code,
         )
-        update: dict = {"messages": [proposal]}
-        if self.tool_log is not None:
-            update["tool_log"] = self.tool_log
-        return update
+        return {"messages": [proposal]}
 
     async def _builder_node(self, state: ProverAgentState) -> dict:
         self.logger.info(
@@ -334,8 +313,13 @@ class ProverAgent:
         if not state.last_proposal:
             raise Exception("Builder expects proposal")
 
+        if not state.last_proposal.code:
+            self.logger.warning(f"Theorem '{state.item.location.name}' not found in proposed code")
+            feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
+            return {"messages": [feedback]}
+
         with TemporaryProposal(
-            self.runtime.base_folder, state.item.location, state.last_proposal
+            self.runtime.base_folder, state.item, state.last_proposal
         ) as applier:
             if not applier.success:
                 feedback = BuildFailedFeedback(error_output=applier.error)
@@ -370,20 +354,23 @@ class ProverAgent:
             if build_success:
                 self.logger.info("Build successful")
 
+                # Need to process the full file to properly compute the goal states at sorries
                 declarations = await list_declarations_from_file(
                     self.runtime.lean_interact_server,
-                    Path(self.runtime.base_folder) / applier.location.path,
+                    applier.location.absolute_path(self.runtime.base_folder),
+                    all_tactics=True,
                 )
 
                 proposed_proof = find_declaration_by_name(declarations, state.item.location.name)
                 if not proposed_proof:
-                    self.logger.warning(
-                        f"Theorem '{state.item.location.name}' not found in proposed code"
+                    # Should never happen, but just in case
+                    self.logger.error(
+                        f"Theorem '{state.item.location.name}' not found in the proposedfile"
                     )
                     feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
                     return {"messages": [feedback]}
 
-                if proposed_proof.sorries:
+                if proposed_proof and proposed_proof.sorries:
                     self.logger.info("The proposed code contains sorries.")
                     feedback = SorriesGoalStateFeedback(
                         sorry_count=len(proposed_proof.sorries),
@@ -391,24 +378,7 @@ class ProverAgent:
                     )
                     return {"messages": [feedback]}
 
-                stripped_code = strip_comments(state.last_proposal.code)
-
-                axiom_count, axiom_locations = count_pattern(stripped_code, pattern=r"\baxiom\b")
-                if axiom_count:
-                    self.logger.info("The proposed code introduces axiom declarations.")
-                    formatted = "\n".join(ctx for _, ctx in axiom_locations)
-                    feedback = AxiomDetectedFeedback(count=axiom_count, locations=formatted)
-                    return {"messages": [feedback]}
-
-                tactic_count, tactic_locations = count_pattern(
-                    stripped_code, pattern=r"\b(apply|exact)\?"
-                )
-                if tactic_count:
-                    self.logger.info("The proposed code contains search tactics.")
-                    formatted = "\n".join(ctx for _, ctx in tactic_locations)
-                    feedback = SearchTacticsDetectedFeedback(
-                        count=tactic_count, locations=formatted
-                    )
+                if feedback := await _detect_cheats_in_code(proposed_proof):
                     return {"messages": [feedback]}
 
                 feedback = BuildSuccessFeedback()
@@ -426,16 +396,9 @@ class ProverAgent:
     async def _reviewer_node(self, state: ProverAgentState, config: RunnableConfig) -> dict:
         self.logger.info("Reviewing proof")
 
-        declarations = await list_declarations_from_code(
-            self.runtime.lean_interact_server, state.last_proposal.code
-        )
-        proposed_proof = str(find_declaration_by_name(declarations, state.item.location.name))
-
         query = REVIEWER_USER_PROMPT.format(
-            original_theorem=get_function_from_location(
-                self.runtime.base_folder, state.item.location
-            ),
-            proposed_proof=proposed_proof,
+            original_theorem=state.item.original_source,
+            proposed_proof=state.last_proposal.code,
         )
 
         reviewer_system_prompt = REVIEWER_SYSTEM_PROMPT
@@ -467,7 +430,7 @@ class ProverAgent:
         if actual_approved:
             output = ReviewApprovedFeedback(comments=reasoning)
             with TemporaryProposal(
-                self.runtime.base_folder, state.item.location, state.last_proposal
+                self.runtime.base_folder, state.item, state.last_proposal
             ) as applier:
                 applier.apply_permanently()
         else:
@@ -525,7 +488,7 @@ class ProverAgent:
         last_feedback_str = state.last_feedback.content if state.last_feedback else "No feedback"
 
         query = SUMMARIZE_OUTPUT_USER_PROMPT.format(
-            theorem_name=state.item.title,
+            theorem_name=state.item.name,
             location=location_str,
             proven=state.approved,
             iterations=state.metrics.number_of_iterations,
@@ -586,7 +549,7 @@ class ProverAgent:
             final_state = ProverAgentState(**result)
 
             if final_state.approved:
-                final_state.item.proven = True
+                final_state.item.is_proven = True
                 self.logger.info(
                     f"Successfully proved {final_state.item.location.formatted_context}"
                 )
@@ -598,3 +561,23 @@ class ProverAgent:
         except Exception as e:
             self.logger.error(f"Error: {e}")
             raise
+
+
+async def _filter_updated_theorem(
+    server: LeanInteractServer, item: TargetItem, updated_theorem: str
+) -> str:
+    """Filter the updated theorem to only include the code that is actually being proven."""
+    declarations = await list_declarations_from_code(server, updated_theorem)
+    declaration = find_declaration_by_name(declarations, item.name)
+    return declaration.code if declaration else ""
+
+
+async def _detect_cheats_in_code(declaration: Declaration) -> FeedbackMessage | None:
+    if declaration.kind == "axiom":
+        return AxiomDetectedFeedback(count=1, locations=declaration.code)
+
+    if declaration.search_tactics:
+        return SearchTacticsDetectedFeedback(
+            count=len(declaration.search_tactics), locations=declaration.code
+        )
+    return None

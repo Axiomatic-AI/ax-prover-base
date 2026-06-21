@@ -48,5 +48,5 @@ tool_configs:
   search_loogle:
     tool_type: search_loogle
     server_url: "http://localhost:8088"
-    max_results: 15
-    timeout: 30
+    max_results: 6
+    timeout: 60

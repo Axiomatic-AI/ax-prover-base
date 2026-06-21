@@ -13,23 +13,27 @@ from .messages import (
     ProposalMessage,
     ReviewApprovedFeedback,
 )
-from .tool_log import ToolLog
 
 
 class TargetItem(BaseModel):
     """A single item to be proven (definition, theorem, lemma, etc.)."""
 
-    title: str = Field(
-        description="Unique identifier for this item (e.g., 'group_def', 'cayley_theorem')"
-    )
-    location: Location | None = Field(
-        default=None,
+    location: Location = Field(
         description="Location where the formalization is stored (includes path and Lean name)",
     )
-    proven: bool = Field(
+    original_source: str | None = Field(
+        default=None,
+        description="Original source code for this item, including the signature and body.",
+    )
+    is_proven: bool = Field(
         default=False,
         description="Whether this item has been proven",
     )
+
+    @property
+    def name(self) -> str:
+        "Title of the item to prove."
+        return self.location.name
 
 
 class ProverMetrics(BaseModel, validate_assignment=True):
@@ -74,15 +78,6 @@ class ProverAgentState(BaseModel):
     )
 
     summary: str = Field(default="", description="LLM-generated summary of the prover run")
-
-    tool_log: ToolLog | None = Field(
-        default=None,
-        description=(
-            "Cross-iteration record of proposer tool calls and their summarized "
-            "results. None when the tool log feature is disabled, leaving the "
-            "agent's behavior identical to the original code path."
-        ),
-    )
 
     @model_validator(mode="before")
     @classmethod

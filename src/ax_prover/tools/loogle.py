@@ -25,8 +25,8 @@ class SearchLoogleConfig:
     """Configuration for Loogle tool."""
 
     server_url: str = DEFAULT_LOOGLE_URL
-    max_results: int = 15
-    timeout: int = 30
+    max_results: int = 6
+    timeout: int = 60
 
 
 _LOADING_MARKER = "starting up"
@@ -102,33 +102,6 @@ class SearchQueryInput(BaseModel):
     query: str = Field(..., description="Loogle query (see tool description for syntax)")
 
 
-def summarize_for_log(result: str, top_k: int = 3) -> str:
-    """Compact rendering of Loogle output for the cross-iteration tool log.
-
-    Keeps the first ``top_k`` `•` bullets and their type-signature lines;
-    drops docstrings. Falls back to a truncated first line for error/empty
-    responses.
-    """
-    if not result or "•" not in result:
-        return result.strip().splitlines()[0] if result else ""
-
-    out: list[str] = []
-    kept = 0
-    in_bullet = False
-    for line in result.splitlines():
-        if line.startswith("• "):
-            if kept >= top_k:
-                break
-            out.append(line)
-            kept += 1
-            in_bullet = True
-        elif in_bullet and line.startswith("  ") and not line.lstrip().startswith("Doc:"):
-            out.append(line)
-        elif in_bullet and (line.lstrip().startswith("Doc:") or not line.strip()):
-            in_bullet = False
-    return "\n".join(out)
-
-
 _DESCRIPTION = """Search Lean 4/Mathlib lemmas via Loogle. The query is NOT free text — it must follow Loogle's syntax.
 
 Five filter kinds (combine with commas; results match ALL):
@@ -166,5 +139,4 @@ def create_search_loogle_tool(config: SearchLoogleConfig, _: Runtime) -> Structu
         description=_DESCRIPTION,
         coroutine=_search,
         args_schema=SearchQueryInput,
-        metadata={"summarize_for_log": summarize_for_log},
     )

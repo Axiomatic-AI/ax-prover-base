@@ -84,38 +84,6 @@ class SearchInput(BaseModel):
     query: str = Field(..., description="Search query string")
 
 
-def summarize_for_log(result: str, top_k: int = 3) -> str:
-    """Compact rendering of Tavily web-search output for the cross-iteration log.
-
-    Keeps the Tavily Summary line (if present) plus the first ``top_k``
-    numbered result titles and URLs; drops the per-result content snippets.
-    """
-    if not result:
-        return ""
-
-    lines = result.splitlines()
-    out: list[str] = []
-    if lines and lines[0].startswith("Summary:"):
-        out.append(lines[0][:300])
-
-    kept = 0
-    i = 0
-    while i < len(lines) and kept < top_k:
-        line = lines[i]
-        stripped = line.lstrip()
-        if stripped and stripped[0].isdigit() and ". " in stripped[:5]:
-            out.append(line)
-            if i + 1 < len(lines) and lines[i + 1].lstrip().startswith("URL:"):
-                out.append(lines[i + 1])
-                i += 1
-            kept += 1
-        i += 1
-
-    if not out:
-        return lines[0][:300] if lines else ""
-    return "\n".join(out)
-
-
 @register_tool(WEB_SEARCH_TOOL_TYPE, SearchWebConfig)
 def create_search_web_tool(config: SearchWebConfig, _: Runtime) -> StructuredTool:
     """Create a web search tool with the given configuration."""
@@ -131,5 +99,4 @@ Use this when you need:
 """,
         func=lambda query: search_web(query, config),
         args_schema=SearchInput,
-        metadata={"summarize_for_log": summarize_for_log},
     )
