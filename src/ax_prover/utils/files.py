@@ -4,9 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from ..models.files import Location
 from ..models.output import ProverOutput
-from .lean_parsing import get_function_from_location
 from .logging import get_logger
 
 logger = get_logger(__name__)
@@ -37,112 +35,42 @@ def read_file(base_folder: str, file_path: str) -> str:
         return f"Error reading file: {e}"
 
 
-def list_lean_files(base_folder: str, directory: str = "") -> list[str]:
-    """List all Lean files in a directory.
-
-    Args:
-        base_folder: Base folder path
-        directory: Directory to search (relative to base_folder)
-
-    Returns:
-        List of Lean file paths relative to base_folder
-    """
-    search_path = Path(base_folder) / directory
-    if not search_path.exists():
-        return []
-
-    lean_files = []
-    for path in search_path.rglob("*.lean"):
-        # Skip lake packages and hidden directories
-        rel_path = path.relative_to(base_folder)
-        if not any(part.startswith(".") for part in rel_path.parts):
-            if not str(rel_path).startswith(("lake-packages/", ".lake/")):
-                lean_files.append(str(rel_path))
-
-    return sorted(lean_files)
-
-
-def edit_function(
-    base_folder: str,
-    location: Location,
-    new_text: str,
-    before: str | None = None,
-    after: str | None = None,
+def replace_in_file(
+    file_path: Path,
+    original: str,
+    replacement: str,
 ) -> bool:
     """Edit an existing function or add a new one.
 
     Args:
-        base_folder: Base folder path
-        location: Location object with path and function name
-        new_text: Complete function text including doc comments
-        before: Function name to insert before (only used when adding new function)
-        after: Function name to insert after (only used when adding new function)
+        file_path: Path to the file to edit
+        original_text: Original text to replace
+        new_text: New text to replace the original text
 
     Returns:
         True if successful, False otherwise
     """
-    if location.is_external:
-        logger.error("Cannot edit external library functions")
+    if not file_path.exists():
+        logger.warning(f"File {file_path} does not exist")
         return False
 
-    full_path = Path(base_folder) / location.path
+    content = file_path.read_text(encoding="utf-8")
 
-    if not full_path.exists():
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-        content = ""
-        existing = None
-    else:
-        content = full_path.read_text(encoding="utf-8")
-        existing = get_function_from_location(base_folder, location)
+    original_text = original.strip()
+    new_text = replacement.strip()
 
-    try:
-        if existing:
-            if before or after:
-                logger.warning(f"Ignoring before/after for existing function {location.name}")
-            # Preserve doc comments when the new code doesn't include one
-            doc_match = re.match(r"/--[\s\S]*?-/\s*", existing)
-            if doc_match and not re.match(r"/--", new_text.lstrip()):
-                new_text = doc_match.group() + new_text
-            new_content = content.replace(existing, new_text, 1)
-        else:
-            insert_pos = None
-            if before:
-                before_loc = Location(
-                    module_path=location.module_path, name=before, is_external=False
-                )
-                before_func = get_function_from_location(base_folder, before_loc)
-                if before_func:
-                    insert_pos = content.find(before_func)
-                else:
-                    logger.warning(f"Function '{before}' not found, inserting at end instead")
-
-            elif after:
-                after_loc = Location(
-                    module_path=location.module_path, name=after, is_external=False
-                )
-                after_func = get_function_from_location(base_folder, after_loc)
-                if after_func:
-                    insert_pos = content.find(after_func) + len(after_func)
-                    new_text = "\n\n" + new_text
-                else:
-                    logger.warning(f"Function '{after}' not found, inserting at end instead")
-
-            if insert_pos is None:
-                last_end = re.search(r"^end\s", content, re.MULTILINE)
-                if last_end:
-                    insert_pos = last_end.start()
-
-            if insert_pos is not None:
-                new_content = content[:insert_pos] + new_text + "\n\n" + content[insert_pos:]
-            else:
-                new_content = content.rstrip() + "\n\n" + new_text + "\n"
-
-        full_path.write_text(new_content, encoding="utf-8")
-        return True
-
-    except Exception as e:
-        logger.error(f"Error in edit_function: {e}")
+    if original_text not in content:
+        logger.warning(f"Original text '{original_text}' not found in file {file_path}")
         return False
+
+    # Preserve docstring in case it was removed by the new text
+    doc_match = re.match(r"/--[\s\S]*?-/\s*", original_text)
+    if doc_match and not re.match(r"/--", new_text):
+        new_text = doc_match.group() + new_text
+
+    new_content = content.replace(original_text, new_text, 1)
+    file_path.write_text(new_content, encoding="utf-8")
+    return True
 
 
 def edit_imports(base_folder: str, file_path: str, new_imports: list[str]) -> bool:

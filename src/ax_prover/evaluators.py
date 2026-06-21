@@ -21,7 +21,7 @@ def is_proven(outputs: dict) -> bool:
         logger.warning(f"Experiment failed with error: {outputs.get('error')}")
         return False
 
-    return outputs.get("item", {}).get("proven", False)
+    return outputs.get("item", {}).get("is_proven", False)
 
 
 @traceable

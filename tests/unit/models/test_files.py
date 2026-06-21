@@ -13,22 +13,22 @@ class TestLocationValidator:
 
     def test_valid_module_path_unchanged(self):
         """Dot-notation paths are not modified."""
-        loc = Location(name="foo", module_path="A.B.C", is_external=False)
+        loc = Location(name="foo", module_path="A.B.C")
         assert loc.module_path == "A.B.C"
 
     def test_auto_fixes_slash_path(self):
         """Slash paths with .lean suffix are auto-fixed to dot notation."""
-        loc = Location(name="foo", module_path="A/B/C.lean", is_external=False)
+        loc = Location(name="foo", module_path="A/B/C.lean")
         assert loc.module_path == "A.B.C"
 
     def test_auto_fixes_slash_without_lean(self):
         """Slash paths without .lean suffix are auto-fixed."""
-        loc = Location(name="foo", module_path="A/B/C", is_external=False)
+        loc = Location(name="foo", module_path="A/B/C")
         assert loc.module_path == "A.B.C"
 
     def test_single_component(self):
         """Single component paths work."""
-        loc = Location(name="foo", module_path="Module", is_external=False)
+        loc = Location(name="foo", module_path="Module")
         assert loc.module_path == "Module"
 
 
@@ -37,51 +37,56 @@ class TestLocationProperties:
 
     def test_path_property(self):
         """Converts module path to filesystem path."""
-        loc = Location(name="foo", module_path="A.B.C", is_external=False)
+        loc = Location(name="foo", module_path="A.B.C")
         assert loc.path == "A/B/C.lean"
 
     def test_formatted_context_local(self):
         """Local location formatted as ModulePath:name."""
-        loc = Location(name="my_thm", module_path="A.B", is_external=False)
+        loc = Location(name="my_thm", module_path="A.B")
         assert loc.formatted_context == "A.B:my_thm"
-
-    def test_formatted_context_external(self):
-        """External location appends (external)."""
-        loc = Location(name="my_thm", module_path="Mathlib.Topology", is_external=True)
-        assert loc.formatted_context == "Mathlib.Topology:my_thm (external)"
 
     def test_path_round_trips(self):
         """path property is consistent with module_path."""
-        loc = Location(name="foo", module_path="My.Project.File", is_external=False)
+        loc = Location(name="foo", module_path="My.Project.File")
         assert loc.path == "My/Project/File.lean"
         # And if we create from a slash path, it still round-trips
-        loc2 = Location(name="foo", module_path="My/Project/File.lean", is_external=False)
+        loc2 = Location(name="foo", module_path="My/Project/File.lean")
         assert loc2.path == loc.path
 
 
-class TestLocationFromFormattedContext:
-    """Tests for from_formatted_context class method."""
+class TestLocationParse:
+    """Tests for parse class method."""
 
-    def test_parses_valid_format(self):
+    @pytest.mark.parametrize(
+        "input_str, expected_module_path, expected_name",
+        [
+            ("Module.Path:func", "Module.Path", "func"),
+            ("path/to/file.lean:func", "path.to.file", "func"),
+            ("A/B.lean:foo", "A.B", "foo"),
+        ],
+    )
+    def test_parses_valid_format(self, input_str, expected_module_path, expected_name):
         """Parses 'Module.Path:name' correctly."""
-        loc = Location.from_formatted_context("Module.Path:theorem_name")
-        assert loc.module_path == "Module.Path"
-        assert loc.name == "theorem_name"
-        assert loc.is_external is False
+        loc = Location.parse(input_str)
+        assert loc.module_path == expected_module_path
+        assert loc.name == expected_name
 
     def test_missing_colon_raises(self):
         """Raises ValueError when no colon present."""
-        with pytest.raises(ValueError, match="Invalid location format"):
-            Location.from_formatted_context("no_colon_here")
-
-    def test_colon_in_name_uses_rsplit(self):
-        """Uses rsplit so colons in module path are preserved."""
-        loc = Location.from_formatted_context("A.B:name")
-        assert loc.module_path == "A.B"
-        assert loc.name == "name"
+        with pytest.raises(ValueError, match="Invalid target"):
+            Location.parse("no_colon_here")
 
     def test_empty_name_still_parses(self):
         """Edge case: empty name after colon still parses."""
-        loc = Location.from_formatted_context("A.B:")
+        loc = Location.parse("A.B:")
         assert loc.module_path == "A.B"
         assert loc.name == ""
+
+
+class TestLocationAbsolutePath:
+    """Tests for absolute_path method."""
+
+    def test_local_path(self, tmp_path):
+        """Local locations resolve to base_folder / module_path."""
+        loc = Location(name="foo", module_path="My.Project.File")
+        assert loc.absolute_path(str(tmp_path)) == tmp_path / "My/Project/File.lean"

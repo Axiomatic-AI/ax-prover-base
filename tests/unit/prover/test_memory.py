@@ -38,14 +38,14 @@ def _make_processor(cls, mock_llm=None, **kwargs):
 @pytest.fixture
 def sample_location():
     """Create a sample location for testing."""
-    return Location(name="sample_theorem", module_path="Test.Module", is_external=False)
+    return Location(name="sample_theorem", module_path="Test.Module")
 
 
 @pytest.fixture
 def sample_item(sample_location):
     """Create a sample formalization item for testing."""
     return TargetItem(
-        title="Sample Theorem",
+        name="Sample Theorem",
         reference="Let P be a theorem. Then P holds.",
         description="A test theorem",
         location=sample_location,

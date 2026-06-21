@@ -11,228 +11,17 @@ from lean_interact.interface import (
     Range,
     ScopeInfo,
     Sorry,
+    Tactic,
 )
 
 from ax_prover.models.declaration import Declaration
 from ax_prover.utils.lean_parsing import (
-    count_pattern,
-    extract_function_from_content,
-    extract_theorem_name,
+    find_declaration_at_line,
     find_declaration_by_name,
     format_goal_state_at_sorries,
     list_declarations_from_code,
-    normalize_location,
-    strip_comments,
+    read_declaration_source_code,
 )
-
-SAMPLE_LEAN_CODE = r"""
-/-- Addition of naturals. -/
-def add (a b : Nat) : Nat :=
-  a + b
-
-/-- Commutativity of addition. -/
-theorem add_comm (a b : Nat) : add a b = add b a := by
-  simp [add]
-  omega
-
-lemma helper_lemma{n : Nat} : n + 0 = n := by
-  sorry
-
-def Κατ.Μοδ.αβ_γ'δε₀₁₂³_ℕtoℤ_φψ''ωΩ_über_café_∂Δ?! := 42
-
-theorem Some.Very.«Nested.Theorem»?: P :=
-    sorry
-"""
-
-EXPECTED_FUNCTION_EXTRACTIONS: list[tuple[str, str | None]] = [
-    ("add", "/-- Addition of naturals. -/\ndef add (a b : Nat) : Nat :=\n  a + b"),
-    (
-        "add_comm",
-        "/-- Commutativity of addition. -/\n"
-        "theorem add_comm (a b : Nat) : add a b = add b a := by\n"
-        "  simp [add]\n"
-        "  omega",
-    ),
-    ("helper_lemma", "lemma helper_lemma{n : Nat} : n + 0 = n := by" + "\n  sorry"),
-    ("nonexistent", None),
-]
-
-NESTED_COMMENT_CODE = """\
-/- outer /- inner -/ still outer -/
-def foo := 1
-"""
-
-
-class TestStripComments:
-    """Tests for strip_comments function."""
-
-    def test_no_comments(self):
-        """Code without comments is unchanged."""
-        src = "def foo := 1\ndef bar := 2"
-        assert strip_comments(src) == src
-
-    def test_line_comment_removed(self):
-        """Line comments (--) are replaced with spaces."""
-        src = "def foo := 1 -- this is a comment"
-        result = strip_comments(src)
-        assert "comment" not in result
-        assert result.startswith("def foo := 1")
-
-    def test_block_comment_removed(self):
-        """Block comments (/- ... -/) are removed."""
-        src = "/- hello -/ def foo := 1"
-        result = strip_comments(src)
-        assert "hello" not in result
-        assert "def foo := 1" in result
-
-    def test_nested_block_comments(self):
-        """Nested block comments are handled correctly."""
-        result = strip_comments(NESTED_COMMENT_CODE)
-        assert "outer" not in result
-        assert "inner" not in result
-        assert "def foo := 1" in result
-
-    def test_string_literal_preserved(self):
-        """String literals are not treated as comments."""
-        src = 'def s := "not -- a comment"'
-        result = strip_comments(src)
-        assert '"not -- a comment"' in result
-
-    def test_preserves_line_count(self):
-        """Output has same number of lines as input."""
-        src = "/- multi\nline\ncomment -/\ndef foo := 1"
-        result = strip_comments(src)
-        assert result.count("\n") == src.count("\n")
-
-    def test_preserves_byte_count_per_line(self):
-        """Each line in output has same length as corresponding input line."""
-        src = "def foo := 1 -- comment here"
-        result = strip_comments(src)
-        for orig_line, stripped_line in zip(src.splitlines(), result.splitlines(), strict=True):
-            assert len(stripped_line) == len(orig_line)
-
-    def test_empty_input(self):
-        """Empty string returns empty string."""
-        assert strip_comments("") == ""
-
-    def test_doc_comment_stripped(self):
-        """Lean4 doc comments (/-- ... -/) are also stripped."""
-        src = "/-- My doc comment. -/\ndef foo := 1"
-        result = strip_comments(src)
-        assert "My doc comment" not in result
-        assert "def foo := 1" in result
-
-
-class TestCountPattern:
-    """Tests for count_pattern function."""
-
-    SORRY_PATTERN = r"\b(sorry|admit)\b"
-
-    def test_no_sorries(self):
-        """Clean code returns count 0."""
-        code = "def foo := 42\ndef bar := 1 + 2"
-        count, locations = count_pattern(code, pattern=self.SORRY_PATTERN)
-        assert count == 0
-        assert locations == []
-
-    def test_single_sorry(self):
-        """One sorry is detected with correct line number."""
-        code = "def foo := by\n  sorry"
-        count, locations = count_pattern(code, pattern=self.SORRY_PATTERN)
-        assert count == 1
-        assert locations[0][0] == 2  # line number
-
-    def test_multiple_sorries(self):
-        """Multiple sorries on different lines are all found."""
-        code = "def foo := by\n  sorry\ndef bar := by\n  sorry"
-        count, _ = count_pattern(code, pattern=self.SORRY_PATTERN)
-        assert count == 2
-
-    def test_sorry_and_admit(self):
-        """Both 'sorry' and 'admit' are detected."""
-        code = "def foo := by\n  sorry\ndef bar := by\n  admit"
-        count, locations = count_pattern(code, pattern=self.SORRY_PATTERN)
-        assert count == 2
-
-    def test_context_lines(self):
-        """Context lines around sorry are included."""
-        code = "-- before\ndef foo := by\n  sorry\n-- after"
-        _, locations = count_pattern(code, pattern=self.SORRY_PATTERN, context_lines=1)
-        context_text = locations[0][1]
-        assert "def foo" in context_text
-        assert "sorry" in context_text
-
-    def test_sorry_in_word_not_counted(self):
-        """Words containing 'sorry' (e.g., 'sorry_lemma') are not counted."""
-        code = "def sorry_lemma := 42"
-        count, _ = count_pattern(code, pattern=self.SORRY_PATTERN)
-        assert count == 0
-
-    def test_custom_pattern_detects_axiom(self):
-        """Custom pattern detects axiom declarations."""
-        code = "axiom myAxiom : Nat → Nat\ntheorem foo : True := trivial"
-        count, locations = count_pattern(code, pattern=r"\baxiom\b")
-        assert count == 1
-        assert locations[0][0] == 1
-
-    def test_custom_pattern_detects_search_tactics(self):
-        """Custom pattern detects apply? and exact?."""
-        code = "theorem foo : P := by\n  apply?\n  exact?"
-        count, _ = count_pattern(code, pattern=r"\b(apply|exact)\?")
-        assert count == 2
-
-    def test_custom_pattern_does_not_flag_apply_without_question_mark(self):
-        """apply (without ?) is not flagged by the search tactics pattern."""
-        code = "theorem foo : P := by\n  apply some_lemma"
-        count, _ = count_pattern(code, pattern=r"\b(apply|exact)\?")
-        assert count == 0
-
-    def test_sorry_pattern_does_not_match_axiom(self):
-        """Sorry/admit pattern does not match axiom."""
-        code = "axiom myAxiom : Nat → Nat"
-        count, _ = count_pattern(code, pattern=self.SORRY_PATTERN)
-        assert count == 0
-
-
-class TestExtractFunctionFromContent:
-    """Tests for extract_function_from_content function."""
-
-    @pytest.mark.parametrize(
-        "name, expected",
-        EXPECTED_FUNCTION_EXTRACTIONS,
-        ids=[name for name, _ in EXPECTED_FUNCTION_EXTRACTIONS],
-    )
-    def test_extract_function(self, name, expected):
-        """Extracts the exact expected text for each declaration."""
-        assert extract_function_from_content(SAMPLE_LEAN_CODE, name) == expected
-
-    def test_namespaced_function(self):
-        """Functions with dots in names can be extracted."""
-        code = "theorem Poly.not_principal : P := by sorry"
-        assert extract_function_from_content(code, "Poly.not_principal") == code
-
-
-class TestExtractTheoremName:
-    """Tests for extract_theorem_name function."""
-
-    @pytest.mark.parametrize(
-        "stmt, expected",
-        [
-            ("theorem foo : P := sorry", "foo"),
-            ("lemma bar(n : Nat) : n > 0 := by sorry", "bar"),
-            ("def baz := 42", "baz"),
-            (
-                "theorem Polynomial.not_isPrincipalIdealRing : P := sorry",
-                "Polynomial.not_isPrincipalIdealRing",
-            ),
-            ("-- just a comment", None),
-            ("", None),
-            ("instance myInstance : Foo := {}", "myInstance"),
-        ],
-    )
-    def test_extract_theorem_name(self, stmt, expected):
-        """Extracts theorem name from various declaration types."""
-        assert extract_theorem_name(stmt) == expected
 
 
 def _make_decl_info(
@@ -256,7 +45,7 @@ def _make_decl_info(
         range=decl_range,
         scope=ScopeInfo(currNamespace=""),
         name=name,
-        fullName=name,
+        full_name=name,
         kind=kind,
         modifiers=DeclModifiers(),
         signature=DeclSignature(pp="", constants=[], range=decl_range),
@@ -268,6 +57,15 @@ def _make_sorry(line: int, column: int, goal: str = "⊢ False") -> Sorry:
         pos=Pos(line=line, column=column),
         endPos=Pos(line=line, column=column + 5),
         goal=goal,
+    )
+
+
+def _make_tactic(line: int, column: int, tactic: str, goals: str = "⊢ True") -> Tactic:
+    return Tactic(
+        pos=Pos(line=line, column=column),
+        endPos=Pos(line=line, column=column + len(tactic)),
+        goals=goals,
+        tactic=tactic,
     )
 
 
@@ -295,6 +93,7 @@ class TestListDeclarationsFromCode:
                     pp="noncomputable def add (a b : Nat) : Nat := a + b",
                 ),
                 [],
+                [],
             ),
             (
                 _make_decl_info(
@@ -305,6 +104,7 @@ class TestListDeclarationsFromCode:
                     pp="theorem add_zero_proven (a : Nat) : add a 0 = a := rfl",
                 ),
                 [],
+                [],
             ),
             (
                 _make_decl_info(
@@ -314,7 +114,15 @@ class TestListDeclarationsFromCode:
                     kind="theorem",
                     pp="theorem with_sorry (a : Nat) : add a 0 = a := by sorry",
                 ),
-                [_make_sorry(line=5, column=45, goal="⊢ add a 0 = a")],
+                [_make_sorry(line=5, column=49, goal="⊢ add a 0 = a")],
+                [
+                    _make_tactic(
+                        line=5,
+                        column=49,
+                        tactic="sorry",
+                        goals="⊢ add a 0 = a",
+                    )
+                ],
             ),
             (
                 _make_decl_info(
@@ -325,6 +133,7 @@ class TestListDeclarationsFromCode:
                     pp="def Κατ.Μοδ.αβ_γ'δε₀₁₂_ℕtoℤ_φψ''ωΩ_über_café_Δ?! := 42",
                 ),
                 [],
+                [],
             ),
             (
                 _make_decl_info(
@@ -332,30 +141,48 @@ class TestListDeclarationsFromCode:
                     start=(25, 0),
                     finish=(28, 7),
                     kind="theorem",
-                    pp="theorem double_sorry{n : Nat} : n + 0 = n := by\n  have h : n + 0 = n := by\n    sorry\n sorry",
+                    pp="theorem double_sorry{n : Nat} : n + 0 = n := by\n have h : n + 0 = n := by\n    sorry\n apply?",
                 ),
                 [
-                    _make_sorry(line=27, column=6, goal="n : ℕ\n⊢ n + 0 = n"),
-                    _make_sorry(line=28, column=2, goal="n : ℕ\nh : n + 0 = n\n⊢ n + 0 = n"),
+                    _make_sorry(line=27, column=6, goal="n : Nat\n⊢ n + 0 = n"),
+                ],
+                [
+                    _make_tactic(
+                        line=26,
+                        column=2,
+                        tactic="have h : n + 0 = n := by sorry",
+                        goals="n : Nat\n⊢ n + 0 = n",
+                    ),
+                    _make_tactic(line=27, column=4, tactic="sorry", goals="n : Nat\n⊢ n + 0 = n"),
+                    _make_tactic(
+                        line=28,
+                        column=2,
+                        tactic="apply?",
+                        goals=" n : Nat\nh : n + 0 = n\n⊢ n + 0 = n",
+                    ),
                 ],
             ),
         ]
 
     @pytest.fixture
     def fake_server(self, scenarios):
-        declarations = [info for info, _ in scenarios]
-        sorries = [s for _, decl_sorries in scenarios for s in decl_sorries]
-        response = MagicMock(declarations=declarations, sorries=sorries)
+        declarations = [info for info, _, _ in scenarios]
+        sorries = [s for _, decl_sorries, _ in scenarios for s in decl_sorries]
+        tactics = [t for _, _, decl_tactics in scenarios for t in decl_tactics]
+        response = MagicMock(declarations=declarations, sorries=sorries, tactics=tactics)
         return MagicMock(run=AsyncMock(return_value=response))
 
-    async def test_builds_one_declaration_per_response_entry_with_its_sorries(
+    async def test_builds_one_declaration_per_response_entry_with_its_sorries_and_tactics(
         self, fake_server, scenarios
     ):
         """Output mirrors the response: one Declaration per entry (statement preserved),
         with each sorry attached to the declaration whose range contains it."""
-        result = await list_declarations_from_code(fake_server, "...")
+        result = await list_declarations_from_code(fake_server, "...", all_tactics=True)
 
-        expected = [Declaration(info=info, sorries=sorries) for info, sorries in scenarios]
+        expected = [
+            Declaration(info=info, sorries=sorries, tactics=tactics)
+            for info, sorries, tactics in scenarios
+        ]
         assert result == expected
 
 
@@ -377,23 +204,6 @@ class TestFormatGoalStateAtSorries:
         assert result == (
             "Sorry #1 at line 5, column 10:\n⊢ x + 0 = x\n\nSorry #2 at line 7, column 2:\n⊢ True\n"
         )
-
-
-class TestNormalizeLocation:
-    """Tests for normalize_location function."""
-
-    @pytest.mark.parametrize(
-        "input_str, expected",
-        [
-            ("Module.Path:func", "Module.Path:func"),
-            ("path/to/file.lean:func", "path.to.file:func"),
-            ("no_colon_at_all", "no_colon_at_all"),
-            ("A/B.lean:foo", "A.B:foo"),
-        ],
-    )
-    def test_normalize_location(self, input_str, expected):
-        """Normalizes file paths to module paths."""
-        assert normalize_location(input_str) == expected
 
 
 class TestFindDeclarationByName:
@@ -419,3 +229,140 @@ class TestFindDeclarationByName:
     def test_empty_list(self):
         """Returns None for empty declarations list."""
         assert find_declaration_by_name([], "foo") is None
+
+
+class TestFindDeclarationAtLine:
+    """Tests for find_declaration_at_line function.
+
+    Each case provides its own declarations and the exact declaration expected to be
+    returned (compared by identity), so there are no magic names to keep in sync and
+    new scenarios can be added by appending a row.
+    """
+
+    FIRST = Declaration(info=_make_decl_info("first", start=(1, 0), finish=(3, 5)))
+    SECOND = Declaration(info=_make_decl_info("second", start=(5, 0), finish=(8, 5)))
+    OUTER = Declaration(info=_make_decl_info("outer", start=(1, 0), finish=(10, 15)))
+    INNER = Declaration(info=_make_decl_info("inner", start=(4, 0), finish=(6, 18)))
+
+    @pytest.mark.parametrize(
+        "declarations, line, expected",
+        [
+            ([FIRST, SECOND], 1, FIRST),  # start boundary is inclusive
+            ([FIRST, SECOND], 2, FIRST),  # interior line
+            ([FIRST, SECOND], 3, FIRST),  # finish boundary is inclusive
+            ([FIRST, SECOND], 5, SECOND),  # start boundary of a later declaration
+            ([FIRST, SECOND], 8, SECOND),  # finish boundary of a later declaration
+            ([FIRST, SECOND], 4, None),  # gap between declarations
+            ([FIRST, SECOND], 9, None),  # beyond all declarations
+            ([OUTER, INNER], 5, INNER),  # nested: smallest containing range wins
+            ([OUTER, INNER], 2, OUTER),  # nested: only the outer range contains the line
+            ([], 1, None),  # empty list
+        ],
+    )
+    def test_find_declaration_at_line(self, declarations, line, expected):
+        """Returns the smallest-range declaration containing the line, or None."""
+        assert find_declaration_at_line(declarations, line) is expected
+
+
+class TestReadDeclarationSourceCode:
+    """Tests for read_declaration_source_code.
+
+    The contract: the returned text must be exactly the slice of the file occupied by the
+    declaration's line range (start.line..finish.line, both 1-indexed and inclusive), with no
+    characters added, dropped, or duplicated. The expected source for every case is written out
+    by hand (never computed from the content) so a shared off-by-one in both the helper and the
+    function under test cannot make a broken implementation look correct.
+    """
+
+    @staticmethod
+    def _decl(start_line: int, finish_line: int) -> Declaration:
+        # Only the line numbers of the range matter here; columns are irrelevant because the
+        # function works line-by-line. Use distinctive columns to make that explicit.
+        return Declaration(
+            info=_make_decl_info("d", start=(start_line, 0), finish=(finish_line, 5))
+        )
+
+    # (content, start_line, finish_line, expected_source) — content always uses '\n' line endings,
+    # and expected_source is spelled out literally rather than sliced from content.
+    CASES = {
+        "single_line_at_top": (
+            "theorem foo : True := trivial\ndef bar := 1\n",
+            1,
+            1,
+            "theorem foo : True := trivial\n",
+        ),
+        "single_line_in_middle": (
+            "def a := 1\ntheorem t : True := trivial\ndef b := 2\n",
+            2,
+            2,
+            "theorem t : True := trivial\n",
+        ),
+        "single_line_at_eof_no_trailing_newline": (
+            "def a := 1\ndef b := 2",
+            2,
+            2,
+            "def b := 2",
+        ),
+        "multi_line_in_middle": (
+            "import Mathlib\n\ntheorem foo : True := by\n  trivial\n\ndef after := 0\n",
+            3,
+            4,
+            "theorem foo : True := by\n  trivial\n",
+        ),
+        "multi_line_with_internal_blank_line": (
+            "def before := 0\ntheorem foo : True := by\n\n  trivial\ndef after := 1\n",
+            2,
+            4,
+            "theorem foo : True := by\n\n  trivial\n",
+        ),
+        "indentation_and_tabs_preserved": (
+            "namespace N\ntheorem foo : True := by\n\t\thave h := trivial\n        exact h\nend N\n",
+            2,
+            4,
+            "theorem foo : True := by\n\t\thave h := trivial\n        exact h\n",
+        ),
+        "spans_whole_file": (
+            "theorem foo : True := by\n  trivial\n",
+            1,
+            2,
+            "theorem foo : True := by\n  trivial\n",
+        ),
+        "multi_line_at_eof_no_trailing_newline": (
+            "def a := 1\ntheorem foo : True := by\n  trivial",
+            2,
+            3,
+            "theorem foo : True := by\n  trivial",
+        ),
+        "blank_lines_inside_range_are_kept": (
+            "a\n\n\nb\n",
+            1,
+            4,
+            "a\n\n\nb\n",
+        ),
+    }
+
+    @pytest.mark.parametrize(
+        "content, start_line, finish_line, expected_source", list(CASES.values()), ids=list(CASES)
+    )
+    def test_returns_exact_original_source(
+        self, tmp_path, content, start_line, finish_line, expected_source
+    ):
+        """The returned text equals the exact original source of the declaration's lines."""
+        file_path = tmp_path / "Thing.lean"
+        file_path.write_text(content, encoding="utf-8")
+
+        result = read_declaration_source_code(self._decl(start_line, finish_line), file_path)
+
+        assert result in content  # The result is a substring of the original content
+        assert result == expected_source
+
+    def test_does_not_insert_blank_lines_between_lines(self, tmp_path):
+        """Regression: adjacent declaration lines stay adjacent (no doubled separators)."""
+        content = "theorem foo : True := by\n  have h := trivial\n  exact h\n"
+        file_path = tmp_path / "Thing.lean"
+        file_path.write_text(content, encoding="utf-8")
+
+        result = read_declaration_source_code(self._decl(1, 3), file_path)
+
+        assert "\n\n" not in result
+        assert result.splitlines() == content.splitlines()
