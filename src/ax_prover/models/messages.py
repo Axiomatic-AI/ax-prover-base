@@ -185,6 +185,7 @@ class NewDeclarationsDetectedFeedback(FeedbackMessage):
 
     feedback_type: Literal["new_declarations_detected"] = "new_declarations_detected"
     count: int
+    locations: str
     is_success: bool = False
 
     def __init__(self, count: int, locations: str, **kwargs):
