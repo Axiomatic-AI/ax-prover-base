@@ -6,6 +6,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph import add_messages
 from pydantic import BaseModel, Field, SerializeAsAny, model_validator
 
+from .declaration import Declaration
 from .files import Location
 from .messages import (
     FEEDBACK_CONSTRUCTORS,
@@ -24,6 +25,10 @@ class TargetItem(BaseModel):
     original_source: str | None = Field(
         default=None,
         description="Original source code for this item, including the signature and body.",
+    )
+    original_declarations: list[Declaration] = Field(
+        default_factory=list,
+        description="Original declarations in the item's file.",
     )
     is_proven: bool = Field(
         default=False,

@@ -180,6 +180,24 @@ class SorriesGoalStateFeedback(FeedbackMessage):
         )
 
 
+class NewDeclarationsDetectedFeedback(FeedbackMessage):
+    """Proposed code introduces or removes declarations to the original file."""
+
+    feedback_type: Literal["new_declarations_detected"] = "new_declarations_detected"
+    count: int
+    locations: str
+    is_success: bool = False
+
+    def __init__(self, count: int, locations: str, **kwargs):
+        """Initialize with formatted new declarations detection message."""
+        kwargs.pop("content", None)
+        content = (
+            f"DECLARATIONS CHANGED: The proposed code added or removed {count} declaration(s).\n"
+            + f"The modified declarations are: {locations}"
+        )
+        super().__init__(content=content, count=count, locations=locations, **kwargs)
+
+
 class AxiomDetectedFeedback(FeedbackMessage):
     """Proposed code introduces new axioms."""
 

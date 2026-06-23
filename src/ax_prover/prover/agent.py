@@ -18,6 +18,7 @@ from ..models.messages import (
     FormalizationMessage,
     MaxIterationsFeedback,
     MissingTargetTheoremFeedback,
+    NewDeclarationsDetectedFeedback,
     ProposalMessage,
     ReviewApprovedFeedback,
     ReviewRejectedFeedback,
@@ -25,7 +26,7 @@ from ..models.messages import (
     SorriesGoalStateFeedback,
     StructuredOutputParsingFailedFeedback,
 )
-from ..models.proving import ProverResult, ReviewDecision, TargetItem
+from ..models.proving import ProverResult, ReviewDecision
 from ..runtime import Runtime
 from ..tools import create_tool
 from ..utils import (
@@ -43,11 +44,9 @@ from ..utils.build import (
 )
 from ..utils.files import read_file
 from ..utils.git import get_repo_metadata
-from ..utils.lean_interact import LeanInteractServer
 from ..utils.lean_parsing import (
     find_declaration_by_name,
     format_goal_state_at_sorries,
-    list_declarations_from_code,
     list_declarations_from_file,
 )
 from ..utils.llm import LLMClient, agentic_loop, get_reasoning
@@ -292,16 +291,12 @@ class ProverAgent:
         self.logger.debug(f"Proposer reasoning: \n{reasoning}")
         self.logger.debug(f"Code: \n{result.updated_theorem}")
 
-        proposed_code = await _filter_updated_theorem(
-            self.runtime.lean_interact_server, state.item, result.updated_theorem
-        )
-
         proposal = ProposalMessage(
             reasoning=reasoning,
             location=state.item.location,
             imports=result.imports,
             opens=result.opens,
-            code=proposed_code,
+            code=result.updated_theorem,
         )
         return {"messages": [proposal]}
 
@@ -312,11 +307,6 @@ class ProverAgent:
 
         if not state.last_proposal:
             raise Exception("Builder expects proposal")
-
-        if not state.last_proposal.code:
-            self.logger.warning(f"Theorem '{state.item.location.name}' not found in proposed code")
-            feedback = MissingTargetTheoremFeedback(theorem_name=state.item.location.name)
-            return {"messages": [feedback]}
 
         with TemporaryProposal(
             self.runtime.base_folder, state.item, state.last_proposal
@@ -378,7 +368,9 @@ class ProverAgent:
                     )
                     return {"messages": [feedback]}
 
-                if feedback := await _detect_cheats_in_code(proposed_proof):
+                if feedback := await _detect_cheats_in_code(
+                    proposed_proof, declarations, state.item.original_declarations
+                ):
                     return {"messages": [feedback]}
 
                 feedback = BuildSuccessFeedback()
@@ -563,21 +555,42 @@ class ProverAgent:
             raise
 
 
-async def _filter_updated_theorem(
-    server: LeanInteractServer, item: TargetItem, updated_theorem: str
-) -> str:
-    """Filter the updated theorem to only include the code that is actually being proven."""
-    declarations = await list_declarations_from_code(server, updated_theorem)
-    declaration = find_declaration_by_name(declarations, item.name)
-    return declaration.code if declaration else ""
+async def _detect_cheats_in_code(
+    proposed_declaration: Declaration,
+    new_declarations: list[Declaration],
+    original_declarations: list[Declaration],
+) -> FeedbackMessage | None:
+    """Detect cheats in the new code, such as adding new axioms, using search tactics in the final
+    proof, etc."""
+    if feedback := _detect_added_and_removed_declarations(new_declarations, original_declarations):
+        return feedback
 
+    if proposed_declaration.kind == "axiom":
+        return AxiomDetectedFeedback(count=1, locations=proposed_declaration.code)
 
-async def _detect_cheats_in_code(declaration: Declaration) -> FeedbackMessage | None:
-    if declaration.kind == "axiom":
-        return AxiomDetectedFeedback(count=1, locations=declaration.code)
-
-    if declaration.search_tactics:
+    if proposed_declaration.search_tactics:
         return SearchTacticsDetectedFeedback(
-            count=len(declaration.search_tactics), locations=declaration.code
+            count=len(proposed_declaration.search_tactics), locations=proposed_declaration.code
         )
     return None
+
+
+def _detect_added_and_removed_declarations(
+    new_declarations: list[Declaration], original_declarations: list[Declaration]
+) -> NewDeclarationsDetectedFeedback | None:
+    original_names = {declaration.name for declaration in original_declarations}
+    new_names = {declaration.name for declaration in new_declarations}
+    changed_names = original_names ^ new_names
+
+    if not changed_names:
+        return None
+
+    modified_declarations = [
+        declaration
+        for declaration in (*new_declarations, *original_declarations)
+        if declaration.name in changed_names
+    ]
+    return NewDeclarationsDetectedFeedback(
+        count=len(changed_names),
+        locations=",".join(declaration.name for declaration in modified_declarations),
+    )

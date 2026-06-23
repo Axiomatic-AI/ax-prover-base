@@ -229,7 +229,7 @@ requires-dist = [
     { name = "langchain-google-genai", specifier = ">=4.2.0" },
     { name = "langchain-openai", specifier = ">=1.1.7" },
     { name = "langgraph", specifier = ">=1.0.3" },
-    { name = "lean-interact", specifier = ">=0.1.0" },
+    { name = "lean-interact", specifier = ">=0.11.4" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "platformdirs", specifier = ">=4.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.5.0" },
@@ -1269,7 +1269,7 @@ wheels = [
 
 [[package]]
 name = "lean-interact"
-version = "0.11.0"
+version = "0.11.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
@@ -1281,9 +1281,9 @@ dependencies = [
     { name = "rich" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2a/4e/1eb9911a661633ffacaaaeacc80e11ae5d571276acf4896708fd1dc83233/lean_interact-0.11.0.tar.gz", hash = "sha256:34d0736b5ce2f68e17e9e97fc6a73b1978d7586b019bc0d485f06f6f77fd3240", size = 87549, upload-time = "2026-01-29T14:08:50.091Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bb/04/777adac93e4e4fe057cd2022abbb8f13e09d8112f38b26d08bc897817b4e/lean_interact-0.11.4.tar.gz", hash = "sha256:08dedbd7b69054a357ba95923319d27e030cdbd09066f0d97a09c12c3cec501d", size = 87633, upload-time = "2026-06-06T13:10:45.333Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6d/31/9b7e5262d9ce6d4d55e27e465b1d84ecb8884ee96b866f019413c080150c/lean_interact-0.11.0-py3-none-any.whl", hash = "sha256:3cb1de4b1f76c392813e188d659d9f747ab2f39869c498155dd5740307e4a22e", size = 44039, upload-time = "2026-01-29T14:08:49.092Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/ab/13deb05fa27774af3c3954f69c2e0b8679205543653e277374c7e1e104e7/lean_interact-0.11.4-py3-none-any.whl", hash = "sha256:afc7a0a5f11828cc9a73f36aa1bfbb7fec135b8dc572720aacd80698e1546738", size = 44038, upload-time = "2026-06-06T13:10:44.146Z" },
 ]
 
 [[package]]
