@@ -184,6 +184,11 @@ class LLMClient:
         `with_structured_output`, which prevents the use of any tools and forces the output
         to be an instance of the schema.
         """
+        # DeepSeek rejects json_schema strict mode; use json_object and inject the
+        # schema into the prompt via _maybe_inject_schema (see ainvoke).
+        if _is_deepseek_model(self._base_llm):
+            return {"response_format": {"type": "json_object"}}
+
         # LANGCHAIN PLSSS ALLOW ME TO DO STRUCTURED OUTPUT WITH TOOL BINDINGS
         # LOOK AT WHAT IT NEED TO DO C'MONNNNN
 
