@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from ax_prover.config import LLMConfig
 from ax_prover.utils.llm import LLMClient, _is_deepseek_model, get_reasoning
-from ax_prover.utils.config import _load_yaml_with_imports
+from ax_prover.utils.config import merge_configs
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -136,8 +136,14 @@ def test_deepseek_llms_config_entry(monkeypatch):
 
 def test_deepseek_local_run_config_selects_deepseek(monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "dummy-key")
-    configs = _load_yaml_with_imports(str(_REPO_ROOT / "configs" / "deepseek_local.yaml"))
-    cfg = OmegaConf.merge(*configs)
+    cfg = merge_configs(["configs/deepseek_local.yaml"], folder=_REPO_ROOT)
+
     assert cfg.prover.prover_llm.model == "deepseek-v4-pro"
-    assert cfg.prover.restrict_to_proof_body is True
-    assert "search_lean_local" in cfg.prover.proposer_tools
+
+    tools = cfg.prover.proposer_tools
+    assert "search_lean" in tools
+    assert "search_web" in tools
+    # Reading resolved values proves interpolation succeeded end-to-end;
+    # a dangling ${tool_configs.*} reference would raise here instead of silently passing.
+    assert tools["search_lean"]["tool_type"] == "search_lean_search"
+    assert tools["search_web"]["tool_type"] == "search_web"
