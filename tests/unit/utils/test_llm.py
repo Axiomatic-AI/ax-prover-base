@@ -1,5 +1,8 @@
 """Tests for LLM factory helpers and DeepSeek-specific structured-output handling."""
 
+import os
+
+import pytest
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
@@ -42,6 +45,11 @@ def _deepseek_client() -> LLMClient:
     return LLMClient(config)
 
 
+def _openai_client(monkeypatch) -> LLMClient:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    return LLMClient(LLMConfig(model="openai:gpt-4o", provider_config={"api_key": "test-key"}))
+
+
 def test_structured_kwargs_deepseek_uses_json_object():
     client = _deepseek_client()
     kwargs = client._structured_output_bind_kwargs(SamplePerson)
@@ -52,3 +60,18 @@ def test_reasoning_effort_reaches_chat_openai():
     # Confirms the config's reasoning_effort flows through init_chat_model to ChatOpenAI.
     client = _deepseek_client()
     assert getattr(client._base_llm, "reasoning_effort", None) == "high"
+
+
+def test_deepseek_does_not_use_strict_tools():
+    client = _deepseek_client()
+    assert client._use_strict_tools(SamplePerson) is False
+
+
+def test_openai_uses_strict_tools_with_schema(monkeypatch):
+    client = _openai_client(monkeypatch)
+    assert client._use_strict_tools(SamplePerson) is True
+
+
+def test_openai_no_strict_without_schema(monkeypatch):
+    client = _openai_client(monkeypatch)
+    assert client._use_strict_tools(None) is False

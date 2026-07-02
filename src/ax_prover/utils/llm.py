@@ -164,9 +164,9 @@ class LLMClient:
         model: Runnable = self._base_llm
 
         if tools:
-            # OpenAI requires strict=True when combining tools with structured output
-            # other providers default to None (omit the field)
-            strict = True if isinstance(self._base_llm, ChatOpenAI) and output_schema else None
+            # OpenAI requires strict=True when combining tools with structured output;
+            # DeepSeek and other providers omit the field.
+            strict = True if self._use_strict_tools(output_schema) else None
             model = self._base_llm.bind_tools(tools, strict=strict)
 
         if output_schema:
@@ -176,6 +176,14 @@ class LLMClient:
             model = model.with_retry(**retry_config)
 
         return model
+
+    def _use_strict_tools(self, output_schema: type[BaseModel] | None) -> bool:
+        """Strict tool schemas are OpenAI-only; DeepSeek rejects them like strict json_schema."""
+        return bool(
+            isinstance(self._base_llm, ChatOpenAI)
+            and not _is_deepseek_model(self._base_llm)
+            and output_schema
+        )
 
     def _structured_output_bind_kwargs(self, schema: type[BaseModel]) -> dict:
         """Return provider-specific kwargs that constrain the output to a JSON schema.
