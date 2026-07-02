@@ -1,14 +1,18 @@
 """Tests for LLM factory helpers and DeepSeek-specific structured-output handling."""
 
 import os
+from pathlib import Path
 
 import pytest
+from omegaconf import OmegaConf
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from ax_prover.config import LLMConfig
 from ax_prover.utils.llm import LLMClient, _is_deepseek_model, get_reasoning
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class SamplePerson(BaseModel):
@@ -115,3 +119,15 @@ def test_get_reasoning_falls_back_to_deepseek_reasoning_content():
 def test_get_reasoning_empty_when_no_reasoning():
     response = AIMessage(content="hi")
     assert get_reasoning(response) == ""
+
+
+def test_deepseek_llms_config_entry(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dummy-key")
+    cfg = OmegaConf.load(_REPO_ROOT / "configs" / "llms.yaml")
+    ds = cfg.llm_configs.deepseek_v4_pro
+    assert ds.model == "deepseek-v4-pro"
+    assert ds.provider_config.model_provider == "openai"
+    assert ds.provider_config.base_url == "https://api.deepseek.com"
+    assert ds.provider_config.reasoning_effort == "high"
+    # api_key resolves from DEEPSEEK_API_KEY via the oc.env resolver
+    assert ds.provider_config.api_key == "dummy-key"

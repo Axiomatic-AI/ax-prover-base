@@ -91,3 +91,14 @@ llm_configs:
       max_tokens: null
       base_url: "https://api.mulerouter.ai/vendors/openai/v1"
       model_provider: "openai"
+
+  # DeepSeek models (OpenAI-compatible endpoint)
+  deepseek_v4_pro:
+    model: "deepseek-v4-pro"
+    provider_config:
+      model_provider: "openai"
+      base_url: "https://api.deepseek.com"
+      api_key: ${oc.env:DEEPSEEK_API_KEY}
+      temperature: null
+      max_tokens: null
+      reasoning_effort: "high"  # low | medium | high | max | xhigh
