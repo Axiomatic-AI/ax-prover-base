@@ -3,6 +3,7 @@
 import os
 
 import pytest
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
@@ -75,3 +76,28 @@ def test_openai_uses_strict_tools_with_schema(monkeypatch):
 def test_openai_no_strict_without_schema(monkeypatch):
     client = _openai_client(monkeypatch)
     assert client._use_strict_tools(None) is False
+
+
+def test_schema_injection_appends_json_instruction_for_deepseek():
+    client = _deepseek_client()
+    messages = [SystemMessage(content="sys"), HumanMessage(content="prove it")]
+    out = client._maybe_inject_schema(messages, SamplePerson)
+
+    assert len(out) == 3
+    assert isinstance(out[-1], HumanMessage)
+    assert "JSON" in out[-1].content
+    assert "properties" in out[-1].content  # the schema itself is embedded
+    # original list is not mutated
+    assert len(messages) == 2
+
+
+def test_no_schema_injection_without_schema():
+    client = _deepseek_client()
+    messages = [HumanMessage(content="hi")]
+    assert client._maybe_inject_schema(messages, None) == messages
+
+
+def test_no_schema_injection_for_non_deepseek(monkeypatch):
+    client = _openai_client(monkeypatch)
+    messages = [HumanMessage(content="hi")]
+    assert client._maybe_inject_schema(messages, SamplePerson) == messages

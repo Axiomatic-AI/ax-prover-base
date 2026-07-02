@@ -1,5 +1,6 @@
 """LLM factory functions."""
 
+import json
 import os
 
 from anthropic import transform_schema
@@ -146,10 +147,37 @@ class LLMClient:
     ) -> AIMessage:
         """Invoke with optional tools, structured output, and retry."""
         effective_retry = retry_config or self._retry_config
+        messages = self._maybe_inject_schema(messages, output_schema)
         runnable = self._get_runnable(
             tools=tools, output_schema=output_schema, retry_config=effective_retry
         )
         return await runnable.ainvoke(messages)
+
+    def _maybe_inject_schema(
+        self,
+        messages: LanguageModelInput,
+        output_schema: type[BaseModel] | None,
+    ) -> LanguageModelInput:
+        """Append a JSON-schema instruction for DeepSeek's json_object mode.
+
+        json_object mode neither enforces nor communicates the schema and requires
+        the literal word "JSON" in the prompt, so the schema is injected explicitly.
+        The instruction permits tool use first so the proposer's search tools still work.
+        Non-DeepSeek providers pass the schema natively and are left unchanged.
+        """
+        if output_schema is None or not _is_deepseek_model(self._base_llm):
+            return messages
+        if not isinstance(messages, list):
+            return messages
+
+        schema_json = json.dumps(output_schema.model_json_schema(), indent=2)
+        instruction = (
+            "You may use the available tools as needed. When you give your final "
+            "answer, respond with a single JSON object and no other text, no markdown "
+            "code fences. The JSON object must conform to this JSON schema:\n"
+            f"{schema_json}"
+        )
+        return list(messages) + [HumanMessage(content=instruction)]
 
     def _get_runnable(
         self,
