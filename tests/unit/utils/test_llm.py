@@ -1,5 +1,6 @@
 """Tests for LLM factory helpers and DeepSeek-specific structured-output handling."""
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from pydantic import BaseModel
 
 from ax_prover.config import LLMConfig
 from ax_prover.utils.llm import LLMClient, _is_deepseek_model, get_reasoning
-from ax_prover.utils.config import merge_configs
+from ax_prover.utils.config import load_env_secrets, merge_configs
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -157,3 +158,43 @@ def test_llms_import_resolves_without_deepseek_key(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     cfg = merge_configs(["configs/default.yaml"], folder=_REPO_ROOT)
     assert cfg.prover.prover_llm.model == "anthropic:claude-opus-4-5"
+
+
+def _deepseek_key_available() -> bool:
+    load_env_secrets()  # loads .env.secrets into os.environ if present
+    return bool(os.environ.get("DEEPSEEK_API_KEY"))
+
+
+@pytest.mark.skipif(not _deepseek_key_available(), reason="DEEPSEEK_API_KEY not available")
+def test_live_deepseek_structured_output_parallel():
+    load_env_secrets()
+    config = LLMConfig(
+        model="deepseek-v4-pro",
+        provider_config={
+            "model_provider": "openai",
+            "base_url": "https://api.deepseek.com",
+            "api_key": os.environ["DEEPSEEK_API_KEY"],
+            "reasoning_effort": "high",
+        },
+        retry_config={"stop_after_attempt": 3},
+    )
+    client = LLMClient(config)
+
+    async def one(person_desc: str) -> SamplePerson:
+        response = await client.ainvoke(
+            [HumanMessage(content=f"Extract the person: {person_desc}")],
+            output_schema=SamplePerson,
+        )
+        return SamplePerson.model_validate_json(response.text)
+
+    async def run_all():
+        return await asyncio.gather(
+            one("Alice is 30 years old"),
+            one("Bob is 42 years old"),
+            one("Carol is 25 years old"),
+        )
+
+    results = asyncio.run(run_all())
+    assert len(results) == 3
+    assert all(isinstance(r, SamplePerson) for r in results)
+    assert {r.name for r in results} == {"Alice", "Bob", "Carol"}
