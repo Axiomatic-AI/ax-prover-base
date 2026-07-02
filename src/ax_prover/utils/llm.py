@@ -96,10 +96,16 @@ async def agentic_loop(
 
 
 def get_reasoning(response: AIMessage) -> str:
-    """Extract the reasoning from an LLM response."""
+    """Extract reasoning from an LLM response.
+
+    Prefers native reasoning content blocks; falls back to DeepSeek's separate
+    `reasoning_content` field, which langchain_openai surfaces in additional_kwargs.
+    """
     reasoning = "\n\n".join(
         [msg.get("reasoning", "") for msg in response.content_blocks if msg["type"] == "reasoning"]
     )
+    if not reasoning:
+        reasoning = response.additional_kwargs.get("reasoning_content", "") or ""
     return reasoning
 
 

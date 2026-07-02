@@ -3,12 +3,12 @@
 import os
 
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from ax_prover.config import LLMConfig
-from ax_prover.utils.llm import LLMClient, _is_deepseek_model
+from ax_prover.utils.llm import LLMClient, _is_deepseek_model, get_reasoning
 
 
 class SamplePerson(BaseModel):
@@ -101,3 +101,16 @@ def test_no_schema_injection_for_non_deepseek(monkeypatch):
     client = _openai_client(monkeypatch)
     messages = [HumanMessage(content="hi")]
     assert client._maybe_inject_schema(messages, SamplePerson) == messages
+
+
+def test_get_reasoning_falls_back_to_deepseek_reasoning_content():
+    response = AIMessage(
+        content="final answer",
+        additional_kwargs={"reasoning_content": "step-by-step thinking"},
+    )
+    assert get_reasoning(response) == "step-by-step thinking"
+
+
+def test_get_reasoning_empty_when_no_reasoning():
+    response = AIMessage(content="hi")
+    assert get_reasoning(response) == ""
