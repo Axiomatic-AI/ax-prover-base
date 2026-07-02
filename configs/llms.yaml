@@ -105,7 +105,10 @@ llm_configs:
     provider_config:
       model_provider: "openai"
       base_url: "https://api.deepseek.com"
-      api_key: ${oc.env:DEEPSEEK_API_KEY}
+      # Default null so configs importing this file still resolve when the key
+      # is unset (merge_configs resolves the whole tree, including this entry
+      # even when DeepSeek isn't the selected model). Set DEEPSEEK_API_KEY to run DeepSeek.
+      api_key: ${oc.env:DEEPSEEK_API_KEY,null}
       temperature: null
       max_tokens: null
       reasoning_effort: "high"  # low | medium | high | max | xhigh

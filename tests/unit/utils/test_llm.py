@@ -147,3 +147,13 @@ def test_deepseek_local_run_config_selects_deepseek(monkeypatch):
     # a dangling ${tool_configs.*} reference would raise here instead of silently passing.
     assert tools["search_lean"]["tool_type"] == "search_lean_search"
     assert tools["search_web"]["tool_type"] == "search_web"
+
+
+def test_llms_import_resolves_without_deepseek_key(monkeypatch):
+    # merge_configs eagerly resolves the whole tree, including the deepseek_v4_pro
+    # entry, even for configs that select a different model. The api_key resolver
+    # must therefore tolerate a missing DEEPSEEK_API_KEY (default null) so unrelated
+    # runs (Opus/qwen/Gemini) do not crash. Regression guard.
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    cfg = merge_configs(["configs/default.yaml"], folder=_REPO_ROOT)
+    assert cfg.prover.prover_llm.model == "anthropic:claude-opus-4-5"
