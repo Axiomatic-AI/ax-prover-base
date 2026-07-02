@@ -31,6 +31,8 @@ Probed the real endpoint with a valid key:
 | `response_format: {"type":"json_schema", strict:true}` | ❌ HTTP 400 `"This response_format type is unavailable now"` |
 | `json_object` + `tools` in one call | ✅ coexist; model still emits tool calls |
 | Assistant `reasoning_content` echoed back in message history | ✅ no error |
+| `reasoning_effort` | ✅ accepts exactly `low`, `medium`, `high`, `max`, `xhigh` (invalid → 400 listing valid set) |
+| `thinking: {"type": "disabled"}` | ✅ turns reasoning off (0 reasoning tokens) |
 
 Key structural fact about the codebase: the prover extracts structured output by **parsing the response text as JSON** — `ProverResult.model_validate_json(response.text)` at `src/ax_prover/prover/agent.py:283`, and the reviewer (`agent.py:407`), memory (`memory.py:181`), and summary (`agent.py:495`) calls follow the same content-parsing pattern. Extraction does **not** depend on langchain's `parsed` object. Therefore any path that puts schema-matching JSON into `content` works — which `json_object` mode does.
 
@@ -60,6 +62,7 @@ Add to `configs/llms.yaml` (and mirror into `src/ax_prover/configs/llms.yaml` if
       api_key: ${oc.env:DEEPSEEK_API_KEY}
       temperature: null
       max_tokens: null
+      reasoning_effort: "high"  # low | medium | high | max | xhigh
 ```
 
 - Model string has no `provider:` prefix, so `create_llm`'s `_PROVIDER_API_KEY_ENV` check is skipped (same as `qwen`) — it will not demand `OPENAI_API_KEY`.
@@ -102,7 +105,16 @@ In `_get_runnable`, do not set `strict=True` for DeepSeek. Change the guard so `
 
 No new machinery. When `json_object` output fails to validate against the schema, the existing `model_validate_json` + `StructuredOutputParsingFailedFeedback` path (`agent.py:282–287`) already feeds the failure back for another attempt. Confirm the reviewer/memory/summary call sites have equivalent handling; if any assume a guaranteed-valid pydantic, add matching parse-failure handling.
 
-### 6. Reasoning content (minor)
+### 6. Thinking-mode / effort selection
+
+DeepSeek exposes reasoning effort through the OpenAI-standard `reasoning_effort` parameter, which `langchain_openai.ChatOpenAI` forwards natively. This is therefore **config-only** — no `LLMClient` change.
+
+- Valid values (confirmed against the live API): `low`, `medium`, `high`, `max`, `xhigh`. These map 1:1 to the Opus 4.8 effort slider, so effort intent transfers directly across configs.
+- Set `reasoning_effort` in `deepseek_v4_pro.provider_config` (default `high`, matching `opus48_local.yaml`).
+- To disable reasoning entirely, `thinking: {"type": "disabled"}` works, but a theorem prover wants reasoning on, so this is not exposed by default.
+- Validation: unit test asserting the `reasoning_effort` value flows into the constructed `ChatOpenAI` (and that the config accepts the documented values).
+
+### 7. Reasoning content (minor)
 
 `get_reasoning` reads `response.content_blocks` for `type == "reasoning"`. DeepSeek returns reasoning in a separate `reasoning_content` field. During implementation, verify whether `langchain_openai` surfaces `reasoning_content` as a reasoning content block. If it does not, adapt `get_reasoning` to also read the DeepSeek location (e.g. `additional_kwargs`). Impact is limited to the lab-notebook / previous-attempt context and logging, not proof correctness — so this is a nice-to-have, not a blocker.
 
@@ -110,6 +122,16 @@ No new machinery. When `json_object` output fails to validate against the schema
 
 - **B — forced-tool-call structured output**: bind a synthetic `submit_result` tool as the schema and force `tool_choice`. Stronger schema enforcement, but collides with the proposer's real search tools and forces restructuring `agentic_loop`. Too invasive.
 - **C — schema-in-prompt with no `response_format`**: simplest, but drops the `json_object` guarantee, producing more malformed-JSON retries. Strictly worse than A.
+
+## Parallelism
+
+Running many proofs in parallel (the `experiment` command's `--max-concurrency`, with Lean builds gated by `lean_semaphore`) is **orthogonal to the model choice** and requires no DeepSeek-specific work:
+
+- Each proving task builds its own `ProverAgent` → its own `LLMClient` → its own `ChatOpenAI`, so there is no shared mutable LLM state across parallel proofs.
+- DeepSeek calls are ordinary async HTTP requests via the OpenAI async client; concurrency is bounded by `--max-concurrency`, exactly as with the Anthropic/OpenAI providers today.
+- DeepSeek rate limits (429s) are absorbed by the existing `retry_config` (exponential backoff with jitter), the same mechanism already relied on for other providers.
+
+Expected to work as-is; the end-to-end verification run will use the `experiment` path (or at least a concurrent smoke check) rather than a single synchronous prove to confirm.
 
 ## Verification
 
