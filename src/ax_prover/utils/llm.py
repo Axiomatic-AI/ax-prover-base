@@ -24,6 +24,19 @@ _PROVIDER_API_KEY_ENV = {
 }
 
 
+def _is_deepseek_model(llm: BaseChatModel) -> bool:
+    """True when this ChatOpenAI instance is backed by the DeepSeek endpoint.
+
+    DeepSeek is routed via model_provider="openai", so it is a ChatOpenAI
+    instance and cannot be told apart from real OpenAI by isinstance alone.
+    """
+    if not isinstance(llm, ChatOpenAI):
+        return False
+    model = (getattr(llm, "model_name", "") or "").lower()
+    base_url = str(getattr(llm, "openai_api_base", "") or "").lower()
+    return model.startswith("deepseek") or "deepseek" in base_url
+
+
 def create_llm(config: LLMConfig) -> BaseChatModel:
     """Create an LLM instance from configuration."""
     provider = config.model.split(":")[0] if ":" in config.model else None
