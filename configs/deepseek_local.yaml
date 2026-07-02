@@ -1,0 +1,16 @@
+# DeepSeek V4 Pro with the default tool set (public leansearch.net + web + local search).
+# Uses DeepSeek's OpenAI-compatible endpoint; requires DEEPSEEK_API_KEY.
+import:
+  - llms.yaml
+  - tools.yaml
+  - default.yaml
+
+prover:
+  prover_llm: ${llm_configs.deepseek_v4_pro}
+  # AI4Math competition rules: only the sorry placeholders may change.
+  restrict_to_proof_body: true
+  proposer_tools:
+    search_lean: ${tool_configs.search_lean_search}
+    search_web: ${tool_configs.search_web}
+    search_lean_local: ${tool_configs.search_lean_local}
+    search_cslib: ${tool_configs.search_cslib}

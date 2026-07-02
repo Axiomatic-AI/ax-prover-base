@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from ax_prover.config import LLMConfig
 from ax_prover.utils.llm import LLMClient, _is_deepseek_model, get_reasoning
+from ax_prover.utils.config import _load_yaml_with_imports
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -131,3 +132,12 @@ def test_deepseek_llms_config_entry(monkeypatch):
     assert ds.provider_config.reasoning_effort == "high"
     # api_key resolves from DEEPSEEK_API_KEY via the oc.env resolver
     assert ds.provider_config.api_key == "dummy-key"
+
+
+def test_deepseek_local_run_config_selects_deepseek(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dummy-key")
+    configs = _load_yaml_with_imports(str(_REPO_ROOT / "configs" / "deepseek_local.yaml"))
+    cfg = OmegaConf.merge(*configs)
+    assert cfg.prover.prover_llm.model == "deepseek-v4-pro"
+    assert cfg.prover.restrict_to_proof_body is True
+    assert "search_lean_local" in cfg.prover.proposer_tools
