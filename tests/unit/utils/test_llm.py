@@ -107,6 +107,7 @@ def test_get_reasoning_falls_back_to_deepseek_reasoning_content():
     response = AIMessage(
         content="final answer",
         additional_kwargs={"reasoning_content": "step-by-step thinking"},
+        response_metadata={"model_provider": "openai"},
     )
     assert get_reasoning(response) == "step-by-step thinking"
 
