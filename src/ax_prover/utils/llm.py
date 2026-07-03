@@ -38,12 +38,48 @@ def _is_deepseek_model(llm: BaseChatModel) -> bool:
     return model.startswith("deepseek") or "deepseek" in base_url
 
 
+def _is_deepseek_config(config: LLMConfig) -> bool:
+    """True when this config selects DeepSeek via the OpenAI-compatible endpoint."""
+    provider_config = config.provider_config or {}
+    if provider_config.get("model_provider") != "openai":
+        return False
+    model = (config.model or "").lower()
+    base_url = str(provider_config.get("base_url") or "").lower()
+    return model.startswith("deepseek") or "deepseek" in base_url
+
+
+class _DeepSeekChatOpenAI(ChatOpenAI):
+    """ChatOpenAI variant that surfaces DeepSeek's non-standard `reasoning_content`.
+
+    Base ChatOpenAI intentionally drops provider-specific fields, so DeepSeek's
+    chain-of-thought (returned in each choice's `reasoning_content`) never reaches
+    the AIMessage. We copy it into `additional_kwargs`, where `get_reasoning` reads
+    it and LangSmith logs it alongside the rest of the message.
+    """
+
+    def _create_chat_result(self, response, generation_info=None):
+        result = super()._create_chat_result(response, generation_info)
+        response_dict = response if isinstance(response, dict) else response.model_dump()
+        choices = response_dict.get("choices") or []
+        for generation, choice in zip(result.generations, choices, strict=False):
+            reasoning = (choice.get("message") or {}).get("reasoning_content")
+            if reasoning:
+                generation.message.additional_kwargs["reasoning_content"] = reasoning
+        return result
+
+
 def create_llm(config: LLMConfig) -> BaseChatModel:
     """Create an LLM instance from configuration."""
     provider = config.model.split(":")[0] if ":" in config.model else None
     key_env = _PROVIDER_API_KEY_ENV.get(provider)
     if key_env and not os.environ.get(key_env):
         raise OSError(f"{key_env} is not set. Check your .env.secrets file.")
+
+    if _is_deepseek_config(config):
+        # Use our subclass so DeepSeek's reasoning_content is preserved. Drop
+        # model_provider (an init_chat_model routing key, not a ChatOpenAI field).
+        provider_config = {k: v for k, v in config.provider_config.items() if k != "model_provider"}
+        return _DeepSeekChatOpenAI(model=config.model, **provider_config)
 
     return init_chat_model(
         config.model,

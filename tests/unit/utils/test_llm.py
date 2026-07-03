@@ -13,7 +13,14 @@ from pydantic import BaseModel
 
 from ax_prover.config import LLMConfig
 from ax_prover.utils.config import load_env_secrets, merge_configs
-from ax_prover.utils.llm import LLMClient, _is_deepseek_model, get_reasoning
+from ax_prover.utils.llm import (
+    LLMClient,
+    _DeepSeekChatOpenAI,
+    _is_deepseek_config,
+    _is_deepseek_model,
+    create_llm,
+    get_reasoning,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -153,6 +160,78 @@ def test_no_schema_injection_for_non_deepseek(monkeypatch):
     client = _openai_client(monkeypatch)
     messages = [HumanMessage(content="hi")]
     assert client._maybe_inject_schema(messages, SamplePerson) == messages
+
+
+def test_is_deepseek_config_true_by_model_name():
+    cfg = LLMConfig(model="deepseek-v4-pro", provider_config={"model_provider": "openai"})
+    assert _is_deepseek_config(cfg) is True
+
+
+def test_is_deepseek_config_true_by_base_url():
+    cfg = LLMConfig(
+        model="proxy",
+        provider_config={"model_provider": "openai", "base_url": "https://api.deepseek.com"},
+    )
+    assert _is_deepseek_config(cfg) is True
+
+
+def test_is_deepseek_config_false_for_plain_openai():
+    cfg = LLMConfig(model="gpt-4o", provider_config={"model_provider": "openai"})
+    assert _is_deepseek_config(cfg) is False
+
+
+def test_create_llm_uses_deepseek_subclass():
+    cfg = LLMConfig(
+        model="deepseek-v4-pro",
+        provider_config={
+            "model_provider": "openai",
+            "base_url": "https://api.deepseek.com",
+            "api_key": "test-key",
+            "reasoning_effort": "high",
+        },
+    )
+    llm = create_llm(cfg)
+    assert isinstance(llm, _DeepSeekChatOpenAI)
+    # subclass must still be detected as DeepSeek by the instance check
+    assert _is_deepseek_model(llm) is True
+
+
+def _deepseek_subclass() -> _DeepSeekChatOpenAI:
+    return _DeepSeekChatOpenAI(
+        model="deepseek-v4-pro", api_key="test-key", base_url="https://api.deepseek.com"
+    )
+
+
+def test_deepseek_subclass_injects_reasoning_content():
+    llm = _deepseek_subclass()
+    response = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "the answer",
+                    "reasoning_content": "step-by-step thinking",
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "model": "deepseek-v4-pro",
+    }
+    result = llm._create_chat_result(response)
+    msg = result.generations[0].message
+    assert msg.additional_kwargs.get("reasoning_content") == "step-by-step thinking"
+    # and it round-trips through get_reasoning
+    assert get_reasoning(msg) == "step-by-step thinking"
+
+
+def test_deepseek_subclass_no_reasoning_key_when_absent():
+    llm = _deepseek_subclass()
+    response = {
+        "choices": [{"message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
+        "model": "deepseek-v4-pro",
+    }
+    result = llm._create_chat_result(response)
+    assert "reasoning_content" not in result.generations[0].message.additional_kwargs
 
 
 def test_get_reasoning_falls_back_to_deepseek_reasoning_content():
