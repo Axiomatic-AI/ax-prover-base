@@ -5,14 +5,14 @@ import os
 from pathlib import Path
 
 import pytest
-from omegaconf import OmegaConf
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from omegaconf import OmegaConf
 from pydantic import BaseModel
 
 from ax_prover.config import LLMConfig
-from ax_prover.utils.llm import LLMClient, _is_deepseek_model, get_reasoning
 from ax_prover.utils.config import load_env_secrets, merge_configs
+from ax_prover.utils.llm import LLMClient, _is_deepseek_model, get_reasoning
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -23,12 +23,16 @@ class SamplePerson(BaseModel):
 
 
 def test_is_deepseek_true_by_model_name():
-    llm = ChatOpenAI(model="deepseek-v4-pro", api_key="test-key", base_url="https://api.deepseek.com")
+    llm = ChatOpenAI(
+        model="deepseek-v4-pro", api_key="test-key", base_url="https://api.deepseek.com"
+    )
     assert _is_deepseek_model(llm) is True
 
 
 def test_is_deepseek_true_by_base_url():
-    llm = ChatOpenAI(model="some-proxy-model", api_key="test-key", base_url="https://api.deepseek.com/v1")
+    llm = ChatOpenAI(
+        model="some-proxy-model", api_key="test-key", base_url="https://api.deepseek.com/v1"
+    )
     assert _is_deepseek_model(llm) is True
 
 
@@ -160,12 +164,17 @@ def test_llms_import_resolves_without_deepseek_key(monkeypatch):
     assert cfg.prover.prover_llm.model == "anthropic:claude-opus-4-5"
 
 
-def _deepseek_key_available() -> bool:
+def _run_live_tests() -> bool:
     load_env_secrets()  # loads .env.secrets into os.environ if present
-    return bool(os.environ.get("DEEPSEEK_API_KEY"))
+    return os.environ.get("AX_PROVER_LIVE_TESTS") == "1" and bool(
+        os.environ.get("DEEPSEEK_API_KEY")
+    )
 
 
-@pytest.mark.skipif(not _deepseek_key_available(), reason="DEEPSEEK_API_KEY not available")
+@pytest.mark.skipif(
+    not _run_live_tests(),
+    reason="opt-in live DeepSeek test; set AX_PROVER_LIVE_TESTS=1 (requires DEEPSEEK_API_KEY)",
+)
 def test_live_deepseek_structured_output_parallel():
     load_env_secrets()
     config = LLMConfig(
