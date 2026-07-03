@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from omegaconf import OmegaConf
 from pydantic import BaseModel
@@ -86,6 +87,31 @@ def test_openai_uses_strict_tools_with_schema(monkeypatch):
 def test_openai_no_strict_without_schema(monkeypatch):
     client = _openai_client(monkeypatch)
     assert client._use_strict_tools(None) is False
+
+
+@tool
+def _sample_tool(query: str) -> str:
+    """A sample tool for binding tests."""
+    return "result"
+
+
+def test_deepseek_skips_structured_output_bind_with_tools():
+    # DeepSeek's json_object response_format forces langchain_openai through OpenAI's
+    # .parse() path, which rejects non-strict tools client-side. DeepSeek can't use
+    # strict tools, so response_format must be skipped when tools are bound.
+    client = _deepseek_client()
+    assert client._should_bind_structured_output([_sample_tool]) is False
+
+
+def test_deepseek_binds_structured_output_without_tools():
+    client = _deepseek_client()
+    assert client._should_bind_structured_output(None) is True
+
+
+def test_openai_binds_structured_output_with_tools(monkeypatch):
+    # Real OpenAI supports strict tools + response_format together, so the bind stays.
+    client = _openai_client(monkeypatch)
+    assert client._should_bind_structured_output([_sample_tool]) is True
 
 
 def test_schema_injection_appends_json_instruction_for_deepseek():

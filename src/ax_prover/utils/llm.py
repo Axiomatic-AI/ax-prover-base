@@ -211,7 +211,7 @@ class LLMClient:
             strict = True if self._use_strict_tools(output_schema) else None
             model = self._base_llm.bind_tools(tools, strict=strict)
 
-        if output_schema:
+        if output_schema and self._should_bind_structured_output(tools):
             model = model.bind(**self._structured_output_bind_kwargs(output_schema))
 
         if retry_config:
@@ -226,6 +226,20 @@ class LLMClient:
             and not _is_deepseek_model(self._base_llm)
             and output_schema
         )
+
+    def _should_bind_structured_output(self, tools: list[BaseTool] | None) -> bool:
+        """Whether to bind the structured-output response_format alongside the current call.
+
+        DeepSeek's json_object response_format makes langchain_openai route through
+        OpenAI's `.parse()` helper, which rejects any non-strict tool client-side.
+        DeepSeek cannot use strict tools, so json_object and tools are incompatible.
+        When tools are bound we therefore skip the response_format for DeepSeek and rely
+        on the schema injected into the prompt by _maybe_inject_schema; agentic_loop's
+        final answer call binds no tools, so it still gets json_object enforcement.
+        """
+        if tools and _is_deepseek_model(self._base_llm):
+            return False
+        return True
 
     def _structured_output_bind_kwargs(self, schema: type[BaseModel]) -> dict:
         """Return provider-specific kwargs that constrain the output to a JSON schema.
