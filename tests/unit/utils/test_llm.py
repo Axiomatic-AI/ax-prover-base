@@ -101,6 +101,22 @@ def test_schema_injection_appends_json_instruction_for_deepseek():
     assert len(messages) == 2
 
 
+def test_schema_injection_omits_tool_language_without_tools():
+    client = _deepseek_client()
+    out = client._maybe_inject_schema([HumanMessage(content="q")], SamplePerson, has_tools=False)
+    text = out[-1].content
+    assert "JSON" in text
+    assert "tool" not in text.lower()  # no tool-permission language when no tools are bound
+
+
+def test_schema_injection_includes_tool_language_with_tools():
+    client = _deepseek_client()
+    out = client._maybe_inject_schema([HumanMessage(content="q")], SamplePerson, has_tools=True)
+    text = out[-1].content
+    assert "JSON" in text
+    assert "tool" in text.lower()
+
+
 def test_no_schema_injection_without_schema():
     client = _deepseek_client()
     messages = [HumanMessage(content="hi")]
