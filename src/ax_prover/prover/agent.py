@@ -64,6 +64,11 @@ from .prompts import (
     SUMMARIZE_OUTPUT_USER_PROMPT,
 )
 
+# Fallback context window for models whose langchain profile carries no
+# max_input_tokens (e.g. OpenAI-compatible endpoints like DeepSeek / qwen,
+# which init_chat_model has no built-in profile for).
+DEFAULT_MAX_INPUT_TOKENS = 128_000
+
 
 class ProverAgent:
     """
@@ -95,6 +100,12 @@ class ProverAgent:
         self.summary_llm_client = LLMClient(summary_llm_config)
 
         self.max_input_tokens = self.llm_client.profile.get("max_input_tokens")
+        if self.max_input_tokens is None:
+            self.logger.warning(
+                "Model profile has no max_input_tokens (unprofiled provider); "
+                f"falling back to {DEFAULT_MAX_INPUT_TOKENS}"
+            )
+            self.max_input_tokens = DEFAULT_MAX_INPUT_TOKENS
         if self.max_input_tokens < 1000:
             self.logger.error("Error: max_input_tokens abnormally small")
 
