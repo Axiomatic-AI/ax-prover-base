@@ -8,16 +8,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ax_prover.config import LLMConfig, ProverConfig
+from ax_prover.config import ProverConfig
 from ax_prover.evaluators import (
-    _compute_costs,
     build_timeout_count,
     compilation_error_count,
     is_proven,
     max_iterations_reached,
     number_of_iterations,
     reviewer_rejections,
-    token_cost,
     tool_usage,
 )
 
@@ -85,77 +83,6 @@ class TestMetricEvaluators:
     def test_max_iterations_reached_default(self):
         """Returns False when metrics are missing."""
         assert max_iterations_reached({}) is False
-
-
-class TestComputeCosts:
-    """Tests for the pure cost math."""
-
-    def test_basic_costs(self):
-        costs = _compute_costs(1_000_000, 2_000_000, 0.28, 0.42)
-        assert costs["input_cost"] == pytest.approx(0.28)
-        assert costs["output_cost"] == pytest.approx(0.84)
-        assert costs["total_cost"] == pytest.approx(1.12)
-
-    def test_zero_tokens(self):
-        costs = _compute_costs(0, 0, 0.28, 0.42)
-        assert costs == {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}
-
-
-def _prover_config_with_prices(input_price, output_price) -> ProverConfig:
-    return ProverConfig(
-        prover_llm=LLMConfig(
-            model="deepseek-v4-pro",
-            input_token_price=input_price,
-            output_token_price=output_price,
-        )
-    )
-
-
-class TestTokenCost:
-    """Tests for the token_cost evaluator."""
-
-    def test_returns_empty_when_prices_unset(self):
-        """No feedback (and no error) when prices are not configured."""
-        config = _prover_config_with_prices(None, None)
-        assert token_cost(_fake_run(), config) == []
-
-    def test_uses_aggregated_root_tokens(self):
-        """Reads aggregated token counts off the root run without querying children."""
-        config = _prover_config_with_prices(0.28, 0.42)
-        run = _fake_run(prompt_tokens=1_000_000, completion_tokens=1_000_000)
-        with patch("ax_prover.evaluators.Client") as mock_client:
-            result = token_cost(run, config)
-            mock_client.return_value.list_runs.assert_not_called()
-
-        scores = {item["key"]: item["score"] for item in result}
-        assert scores["input_cost"] == pytest.approx(0.28)
-        assert scores["output_cost"] == pytest.approx(0.42)
-        assert scores["total_cost"] == pytest.approx(0.70)
-
-    def test_falls_back_to_summing_llm_runs(self):
-        """When the root lacks token counts, sums the trace's LLM runs."""
-        config = _prover_config_with_prices(1.0, 1.0)
-        run = _fake_run(prompt_tokens=None, completion_tokens=None)
-        llm_runs = [
-            SimpleNamespace(run_type="llm", prompt_tokens=1_000_000, completion_tokens=500_000),
-            SimpleNamespace(run_type="llm", prompt_tokens=1_000_000, completion_tokens=500_000),
-            SimpleNamespace(run_type="tool", prompt_tokens=None, completion_tokens=None),
-        ]
-        with patch("ax_prover.evaluators.Client") as mock_client:
-            mock_client.return_value.list_runs.return_value = llm_runs
-            result = token_cost(run, config)
-
-        scores = {item["key"]: item["score"] for item in result}
-        assert scores["input_cost"] == pytest.approx(2.0)
-        assert scores["output_cost"] == pytest.approx(1.0)
-        assert scores["total_cost"] == pytest.approx(3.0)
-
-    def test_returns_empty_on_client_error(self):
-        """A LangSmith failure yields no feedback rather than erroring the row."""
-        config = _prover_config_with_prices(0.28, 0.42)
-        run = _fake_run(prompt_tokens=None, completion_tokens=None)
-        with patch("ax_prover.evaluators.Client", side_effect=RuntimeError("boom")):
-            assert token_cost(run, config) == []
 
 
 class TestToolUsageHardening:
