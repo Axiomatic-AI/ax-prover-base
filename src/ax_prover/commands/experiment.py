@@ -14,6 +14,7 @@ from ..evaluators import (
     max_iterations_reached,
     number_of_iterations,
     reviewer_rejections,
+    token_cost,
     tool_usage,
 )
 from ..models import ProverOutput
@@ -65,6 +66,10 @@ async def experiment(
             # Wrapper to pass the config to the tool_usage evaluator preserving the signature
             return tool_usage(run, config.prover)
 
+        def _token_cost(run: Run) -> list[dict]:
+            # Wrapper to pass the config to the token_cost evaluator preserving the signature
+            return token_cost(run, config.prover)
+
         try:
             config_dict = OmegaConf.to_container(OmegaConf.structured(config), resolve=True)
         except Exception as e:
@@ -95,6 +100,7 @@ async def experiment(
                     is_proven,
                     number_of_iterations,
                     _tool_usage,
+                    _token_cost,
                     max_iterations_reached,
                     reviewer_rejections,
                 ],

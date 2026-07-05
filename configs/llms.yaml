@@ -102,6 +102,10 @@ llm_configs:
   # DeepSeek models (OpenAI-compatible endpoint)
   deepseek_v4_pro:
     model: "deepseek-v4-pro"
+    # USD per 1M tokens, used by the token_cost evaluator (DeepSeek is not in
+    # LangSmith's native price map). Verify against current DeepSeek pricing.
+    input_token_price: 0.28
+    output_token_price: 0.42
     provider_config:
       model_provider: "openai"
       base_url: "https://api.deepseek.com"

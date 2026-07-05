@@ -58,6 +58,11 @@ class LLMConfig:
     model: str
     provider_config: dict[str, Any] = field(default_factory=dict)
     retry_config: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_LLM_RETRY_CONFIG))
+    # Prices in USD per 1M tokens, used by the token_cost evaluator to surface cost
+    # for endpoints LangSmith's native price map doesn't cover (e.g. DeepSeek).
+    # Leave null to disable cost estimation.
+    input_token_price: float | None = None
+    output_token_price: float | None = None
 
 
 @dataclass
