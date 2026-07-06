@@ -6,6 +6,7 @@ class wires `run()` to the underlying server. End-to-end behavior against a real
 Lean project is covered in tests/regression.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from lean_interact import Command
@@ -46,3 +47,32 @@ class TestLeanInteractServer:
         assert result == dummy_result
         fake_server.async_run.assert_awaited_once()
         fake_server.kill.assert_called_once()
+
+    async def test_run_serializes_concurrent_commands(self, tmp_path, monkeypatch):
+        """Concurrent run() calls never overlap on the single-subprocess REPL."""
+        active = 0
+        max_active = 0
+
+        async def fake_async_run(_command):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0)  # yield: overlap would surface here if unlocked
+            active -= 1
+            return "ok"
+
+        fake_server = MagicMock()
+        fake_server.async_run = AsyncMock(side_effect=fake_async_run)
+
+        monkeypatch.setattr(
+            "ax_prover.utils.lean_interact.AutoLeanServer", lambda *_a, **_k: fake_server
+        )
+        monkeypatch.setattr("ax_prover.utils.lean_interact.LocalProject", lambda **_k: None)
+        monkeypatch.setattr("ax_prover.utils.lean_interact.LeanREPLConfig", lambda **_k: None)
+
+        async with LeanInteractServer(str(tmp_path), LeanInteractConfig()) as server:
+            await asyncio.gather(
+                *(server.run(Command(cmd="example : 1 = 1 := rfl")) for _ in range(10))
+            )
+
+        assert max_active == 1

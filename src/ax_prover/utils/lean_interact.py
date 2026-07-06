@@ -24,11 +24,18 @@ class LeanInteractServer:
         self._config = config
         self._server: AutoLeanServer | None = None
         self._lock = asyncio.Lock()  # lock to ensure only one server is created
+        self._run_lock = asyncio.Lock()  # serialize commands: the REPL is one subprocess
 
     async def run(self, command: Command) -> CommandResponse | LeanError:
-        "Run the command and return the response or error."
+        """Run the command and return the response or error.
+
+        Commands are serialized: the REPL is a single subprocess, and concurrent
+        callers (experiment samples share one server) would otherwise race on it or
+        trip its memory backstop, surfacing as spurious LeanErrors.
+        """
         server = await self._get_server()
-        return await server.async_run(command)
+        async with self._run_lock:
+            return await server.async_run(command)
 
     async def aclose(self) -> None:
         "Close the server."
