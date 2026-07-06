@@ -7,6 +7,7 @@ from lean_interact.interface import (
     DeclarationInfo,
     DeclModifiers,
     DeclSignature,
+    LeanError,
     Pos,
     Range,
     ScopeInfo,
@@ -184,6 +185,16 @@ class TestListDeclarationsFromCode:
             for info, sorries, tactics in scenarios
         ]
         assert result == expected
+
+    async def test_raises_clear_error_on_fatal_lean_error(self):
+        """A fatal LeanError (e.g. a file that does not compile) surfaces its message
+        instead of failing later with an opaque AttributeError on `.declarations`."""
+        server = MagicMock(
+            run=AsyncMock(return_value=LeanError(message="unknown package 'Mathlib'"))
+        )
+
+        with pytest.raises(RuntimeError, match="unknown package 'Mathlib'"):
+            await list_declarations_from_code(server, "import Mathlib")
 
 
 class TestFormatGoalStateAtSorries:

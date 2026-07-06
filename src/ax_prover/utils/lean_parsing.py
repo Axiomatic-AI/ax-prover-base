@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from lean_interact import Command, FileCommand
-from lean_interact.interface import DeclarationInfo, Sorry, Tactic
+from lean_interact.interface import CommandResponse, DeclarationInfo, LeanError, Sorry, Tactic
 
 from ..models.declaration import Declaration
 from .lean_interact import LeanInteractServer
@@ -92,15 +92,15 @@ def format_goal_state_at_sorries(sorries: list[Sorry]) -> str:
 
 async def list_declarations_from_code(
     server: LeanInteractServer, code: str, all_tactics: bool = False
-) -> list[DeclarationInfo]:
+) -> list[Declaration]:
     """List all declarations from a code snippet."""
     response = await server.run(Command(cmd=code, declarations=True, all_tactics=all_tactics))
-    return _bundle_declarations(response.declarations, response.sorries, response.tactics)
+    return _bundle_response(response, "the provided code snippet")
 
 
 async def list_declarations_from_file(
     server: LeanInteractServer, file_path: Path, all_tactics: bool = False
-) -> list[DeclarationInfo]:
+) -> list[Declaration]:
     """List all declarations from a file.
 
     Set `all_tactics=True` to also collect the tactics used in each declaration (needed for
@@ -110,6 +110,18 @@ async def list_declarations_from_file(
     response = await server.run(
         FileCommand(path=str(file_path), declarations=True, all_tactics=all_tactics)
     )
+    return _bundle_response(response, str(file_path))
+
+
+def _bundle_response(response: CommandResponse | LeanError, source: str) -> list[Declaration]:
+    """Turn a REPL response into declarations, failing loudly on a fatal Lean error.
+
+    A file that does not compile at all (e.g. a missing import) comes back as a `LeanError`,
+    which carries no declarations. Surfacing its message here turns an opaque downstream
+    `AttributeError` into a clear compilation failure the caller can report.
+    """
+    if isinstance(response, LeanError):
+        raise RuntimeError(f"Lean failed to process {source}:\n{response.message}")
     return _bundle_declarations(response.declarations, response.sorries, response.tactics)
 
 
