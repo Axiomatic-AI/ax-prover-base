@@ -568,10 +568,13 @@ async def _detect_cheats_in_code(
     if proposed_declaration.kind == "axiom":
         return AxiomDetectedFeedback(count=1, locations=proposed_declaration.code)
 
-    if proposed_declaration.search_tactics:
-        return SearchTacticsDetectedFeedback(
-            count=len(proposed_declaration.search_tactics), locations=proposed_declaration.code
+    if search_tactics := proposed_declaration.search_tactics:
+        # Pinpoint the offending tactics by line so the prover replaces exactly those,
+        # instead of dumping the whole proof and letting it strip out innocent tactics.
+        locations = "\n".join(
+            f"line {tactic.start_pos.line}: {tactic.tactic.strip()}" for tactic in search_tactics
         )
+        return SearchTacticsDetectedFeedback(count=len(search_tactics), locations=locations)
     return None
 
 
