@@ -69,6 +69,13 @@ from .prompts import (
 # which init_chat_model has no built-in profile for).
 DEFAULT_MAX_INPUT_TOKENS = 128_000
 
+# Approximate characters per token, used to convert the token budget into a character
+# budget when trimming oversized build output. Measured ~2.5 chars/token on dense
+# DeepSeek Lean traces; 2.0 keeps headroom below the true ratio so the char-based
+# bound still (approximately) respects the token budget instead of the old, wildly
+# conservative 1-char-per-token assumption that truncated output far too early.
+CHARS_PER_TOKEN = 2.0
+
 
 class ProverAgent:
     """
@@ -99,11 +106,15 @@ class ProverAgent:
         summary_llm_config = self.config.summarize_output.llm or self.config.prover_llm
         self.summary_llm_client = LLMClient(summary_llm_config)
 
-        self.max_input_tokens = self.llm_client.profile.get("max_input_tokens")
+        # Config takes priority; fall back to the langchain profile, then a default.
+        self.max_input_tokens = (
+            self.config.prover_llm.max_input_tokens
+            or self.llm_client.profile.get("max_input_tokens")
+        )
         if self.max_input_tokens is None:
             self.logger.warning(
-                "Model profile has no max_input_tokens (unprofiled provider); "
-                f"falling back to {DEFAULT_MAX_INPUT_TOKENS}"
+                "Model profile has no max_input_tokens (unprofiled provider) and none "
+                f"set in config; falling back to {DEFAULT_MAX_INPUT_TOKENS}"
             )
             self.max_input_tokens = DEFAULT_MAX_INPUT_TOKENS
         if self.max_input_tokens < 1000:
@@ -224,12 +235,14 @@ class ProverAgent:
 
     def _build_error_processing(self, message: str) -> str:
         length = len(message)
-        # Below we are using length as an upper bound for tokens. We want to ensure that tokens <= self.max_input_tokens,
-        # but we know that tokens <= length, therefore, length <= self.max_input_tokens implies tokens <= self.max_input_tokens
-        if length <= self.max_input_tokens:
+        # max_input_tokens is a token budget; convert it to an approximate character
+        # budget via CHARS_PER_TOKEN so we don't truncate far earlier than necessary
+        # (the old bound assumed 1 char == 1 token).
+        char_budget = int(self.max_input_tokens * CHARS_PER_TOKEN)
+        if length <= char_budget:
             return message
         message_separator = "\n... (build output too long, lines ommited)\n"
-        half = (self.max_input_tokens - len(message_separator)) // 2
+        half = (char_budget - len(message_separator)) // 2
         return f"{message[:half]}{message_separator}{message[-half:]}"
 
     async def _memory_processor_node(self, state: ProverAgentState) -> dict:

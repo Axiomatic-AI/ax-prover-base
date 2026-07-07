@@ -95,6 +95,9 @@ llm_configs:
   # DeepSeek models (OpenAI-compatible endpoint)
   deepseek_v4_pro:
     model: "deepseek-v4-pro"
+    # DeepSeek's context window. Set explicitly because LangChain has no built-in
+    # profile for OpenAI-compatible endpoints, so it can't be inferred automatically.
+    max_input_tokens: 128000
     provider_config:
       model_provider: "openai"
       base_url: "https://api.deepseek.com"

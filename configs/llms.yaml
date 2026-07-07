@@ -106,6 +106,9 @@ llm_configs:
     # price-map entry that drives native cost tracking; keep the two in sync.
     input_token_price: 0.435
     output_token_price: 0.87
+    # DeepSeek's context window. Set explicitly because LangChain has no built-in
+    # profile for OpenAI-compatible endpoints, so it can't be inferred automatically.
+    max_input_tokens: 128000
     provider_config:
       model_provider: "openai"
       base_url: "https://api.deepseek.com"

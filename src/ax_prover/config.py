@@ -63,6 +63,10 @@ class LLMConfig:
     # model name); keep these in sync with that entry. Leave null if unknown.
     input_token_price: float | None = None
     output_token_price: float | None = None
+    # Context-window size in tokens. Set this for providers LangChain has no built-in
+    # profile for (e.g. DeepSeek and other OpenAI-compatible endpoints); otherwise the
+    # agent falls back to a conservative default and logs a warning.
+    max_input_tokens: int | None = None
 
 
 @dataclass
