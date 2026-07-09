@@ -39,6 +39,8 @@ class ReplSource(NamedTuple):
 REPL_SOURCES: tuple[ReplSource, ...] = (
     # lean_interact's default fork: backports the REPL across v4.8.0-rc1 .. v4.31.0-rc1.
     ReplSource(git=DEFAULT_REPL_GIT_URL, rev=DEFAULT_REPL_VERSION),
+    # Our fork extending the backports to the stable v4.31.0 release.
+    ReplSource(git="https://github.com/austinletson-ax/repl", rev="v1.3.18"),
     # Official upstream, tracking the newest Lean version not yet backported above.
     ReplSource(git="https://github.com/leanprover-community/repl", rev="master"),
 )
