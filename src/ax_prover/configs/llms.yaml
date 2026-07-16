@@ -66,6 +66,30 @@ llm_configs:
       thinking_level: "high"
 
   # OpenAI models
+  gpt_5_6_sol:
+    # gpt-5.6-sol is the flagship of the GPT-5.6 family (the `gpt-5.6` alias
+    # routes here). effort supports none/low/medium/high/xhigh/max.
+    # effort=medium keeps proposal latency reasonable; effort=high can produce
+    # multi-minute reasoning traces per call. An explicit timeout is set because
+    # the OpenAI client otherwise waits forever (request_timeout defaults to None),
+    # so a stalled request would hang the whole run.
+    model: "openai:gpt-5.6-sol"
+    provider_config:
+      temperature: null
+      max_tokens: null
+      timeout: 600
+      reasoning:
+        effort: "high"
+        # summary: "auto"  # We don't support summaries yet because we are not verified
+    retry_config:
+      stop_after_attempt: 6
+      wait_exponential_jitter: true
+      exponential_jitter_params:
+        initial: 0.5
+        max: 30
+        exp_base: 2.0
+        jitter: 1.0
+
   gpt_5_2:
     model: "openai:gpt-5.2"
     provider_config:
