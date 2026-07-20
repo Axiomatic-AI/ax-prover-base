@@ -85,8 +85,8 @@ class TestMetricEvaluators:
         assert max_iterations_reached({}) is False
 
 
-class TestToolUsageHardening:
-    """Tests for the hardened tool_usage evaluator."""
+class TestToolUsage:
+    """Tests for the tool_usage evaluator (single list_runs, no retry/guard)."""
 
     def _config(self) -> ProverConfig:
         return ProverConfig(
@@ -94,73 +94,18 @@ class TestToolUsageHardening:
         )
 
     def test_counts_tool_runs(self):
+        """Counts tool runs from a single list_runs call."""
         runs = [
             SimpleNamespace(run_type="llm", name="deepseek"),
             SimpleNamespace(run_type="tool", name="search_lean_search_tool"),
             SimpleNamespace(run_type="tool", name="search_lean_search_tool"),
         ]
-        with (
-            patch("ax_prover.evaluators.Client") as mock_client,
-            patch("ax_prover.evaluators.time.sleep"),
-        ):
-            # Same listing every poll → the count is immediately stable.
-            mock_client.return_value.list_runs.return_value = runs
+        mock = MagicMock()
+        mock.list_runs.return_value = runs
+        with patch("ax_prover.evaluators.Client", return_value=mock):
             result = tool_usage(_fake_run(), self._config())
 
+        assert mock.list_runs.call_count == 1
         scores = {item["key"]: item["score"] for item in result}
         assert scores["tool_usage"] == 2
-        assert scores["search_lean_search_tool"] == 2
-
-    def test_never_raises_on_client_error(self):
-        """A LangSmith failure reports zeros instead of throwing."""
-        with patch("ax_prover.evaluators.Client", side_effect=RuntimeError("network down")):
-            result = tool_usage(_fake_run(), self._config())
-
-        scores = {item["key"]: item["score"] for item in result}
-        assert scores["tool_usage"] == 0
-        assert scores["search_lean_search_tool"] == 0
-
-    def test_retries_until_trace_is_populated(self):
-        """Retries listing runs while the trace has not yet flushed, until it stabilizes."""
-        empty = []
-        populated = [
-            SimpleNamespace(run_type="llm", name="deepseek"),
-            SimpleNamespace(run_type="tool", name="search_lean_search_tool"),
-        ]
-        mock = MagicMock()
-        # empty → populated → populated (stable): stops when the count stops changing.
-        mock.list_runs.side_effect = [empty, populated, populated]
-        with (
-            patch("ax_prover.evaluators.Client", return_value=mock),
-            patch("ax_prover.evaluators.time.sleep") as mock_sleep,
-        ):
-            result = tool_usage(_fake_run(), self._config())
-
-        assert mock.list_runs.call_count == 3
-        assert mock_sleep.call_count == 2
-        scores = {item["key"]: item["score"] for item in result}
-        assert scores["search_lean_search_tool"] == 1
-
-    def test_waits_for_tool_runs_to_flush(self):
-        """Does not return on the first poll that has an LLM run but no tool runs yet.
-
-        Reproduces the flush race: the LLM run uploads before its tool child runs, so
-        returning on the first LLM-only listing under-counts tools.
-        """
-        llm_only = [SimpleNamespace(run_type="llm", name="deepseek")]
-        with_tools = [
-            SimpleNamespace(run_type="llm", name="deepseek"),
-            SimpleNamespace(run_type="tool", name="search_lean_search_tool"),
-            SimpleNamespace(run_type="tool", name="search_lean_search_tool"),
-        ]
-        mock = MagicMock()
-        # LLM run present first, tools arrive on the next poll, then the set stabilizes.
-        mock.list_runs.side_effect = [llm_only, with_tools, with_tools]
-        with (
-            patch("ax_prover.evaluators.Client", return_value=mock),
-            patch("ax_prover.evaluators.time.sleep"),
-        ):
-            result = tool_usage(_fake_run(), self._config())
-
-        scores = {item["key"]: item["score"] for item in result}
         assert scores["search_lean_search_tool"] == 2
