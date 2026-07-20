@@ -11,6 +11,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
+from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode
@@ -26,16 +27,8 @@ _PROVIDER_API_KEY_ENV = {
 
 
 def _is_deepseek_model(llm: BaseChatModel) -> bool:
-    """True when this ChatOpenAI instance is backed by the DeepSeek endpoint.
-
-    DeepSeek is routed via model_provider="openai", so it is a ChatOpenAI
-    instance and cannot be told apart from real OpenAI by isinstance alone.
-    """
-    if not isinstance(llm, ChatOpenAI):
-        return False
-    model = (getattr(llm, "model_name", "") or "").lower()
-    base_url = str(getattr(llm, "openai_api_base", "") or "").lower()
-    return model.startswith("deepseek") or "deepseek" in base_url
+    """True when this is a DeepSeek-backed chat model (a ChatDeepSeek instance)."""
+    return isinstance(llm, ChatDeepSeek)
 
 
 def _is_deepseek_config(config: LLMConfig) -> bool:
@@ -48,26 +41,6 @@ def _is_deepseek_config(config: LLMConfig) -> bool:
     return model.startswith("deepseek") or "deepseek" in base_url
 
 
-class _DeepSeekChatOpenAI(ChatOpenAI):
-    """ChatOpenAI variant that surfaces DeepSeek's non-standard `reasoning_content`.
-
-    Base ChatOpenAI intentionally drops provider-specific fields, so DeepSeek's
-    chain-of-thought (returned in each choice's `reasoning_content`) never reaches
-    the AIMessage. We copy it into `additional_kwargs`, where `get_reasoning` reads
-    it and LangSmith logs it alongside the rest of the message.
-    """
-
-    def _create_chat_result(self, response, generation_info=None):
-        result = super()._create_chat_result(response, generation_info)
-        response_dict = response if isinstance(response, dict) else response.model_dump()
-        choices = response_dict.get("choices") or []
-        for generation, choice in zip(result.generations, choices, strict=False):
-            reasoning = (choice.get("message") or {}).get("reasoning_content")
-            if reasoning:
-                generation.message.additional_kwargs["reasoning_content"] = reasoning
-        return result
-
-
 def create_llm(config: LLMConfig) -> BaseChatModel:
     """Create an LLM instance from configuration."""
     provider = config.model.split(":")[0] if ":" in config.model else None
@@ -76,10 +49,11 @@ def create_llm(config: LLMConfig) -> BaseChatModel:
         raise OSError(f"{key_env} is not set. Check your .env.secrets file.")
 
     if _is_deepseek_config(config):
-        # Use our subclass so DeepSeek's reasoning_content is preserved. Drop
-        # model_provider (an init_chat_model routing key, not a ChatOpenAI field).
+        # ChatDeepSeek preserves DeepSeek's non-standard reasoning_content (which base
+        # ChatOpenAI drops). Drop model_provider (an init_chat_model routing key that
+        # ChatDeepSeek doesn't accept as a field).
         provider_config = {k: v for k, v in config.provider_config.items() if k != "model_provider"}
-        return _DeepSeekChatOpenAI(model=config.model, **provider_config)
+        return ChatDeepSeek(model=config.model, **provider_config)
 
     return init_chat_model(
         config.model,
@@ -100,6 +74,10 @@ async def agentic_loop(
         A tuple of (final_response, all_new_messages) where all_new_messages includes every
         intermediate AI message, tool result, and the final response.
     """
+    # Track whether the current response came from a tools-bound call. DeepSeek only
+    # enforces the json_object response_format when no tools are bound, so a response
+    # from a tools-bound call is not schema-enforced at the API level.
+    last_call_bound_tools = bool(tools)
     response = await client.ainvoke(messages, tools=tools, output_schema=output_schema)
     new_messages: list[BaseMessage] = [response]
 
@@ -121,11 +99,30 @@ async def agentic_loop(
                 HumanMessage(content="NO MORE TOOL CALLS ALLOWED.")
             ]
             response = await client.ainvoke(invoke_messages, output_schema=output_schema)
+            last_call_bound_tools = False
         else:
             response = await client.ainvoke(
                 invoke_messages, tools=tools, output_schema=output_schema
             )
+            last_call_bound_tools = True
 
+        new_messages.append(response)
+
+    # DeepSeek enforces the json_object response_format only on tool-free calls (see
+    # LLMClient._should_bind_structured_output). If the model stopped requesting tools
+    # before the forced final answer, the returned message came from a tools-bound call
+    # and its JSON was constrained only by the injected prompt — not the API. Re-issue
+    # one tool-free call so the final message is schema-enforced like every other provider.
+    if (
+        output_schema is not None
+        and last_call_bound_tools
+        and not response.tool_calls
+        and _is_deepseek_model(client._base_llm)
+    ):
+        invoke_messages = (
+            messages + new_messages + [HumanMessage(content="NO MORE TOOL CALLS ALLOWED.")]
+        )
+        response = await client.ainvoke(invoke_messages, output_schema=output_schema)
         new_messages.append(response)
 
     return response

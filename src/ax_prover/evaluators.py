@@ -13,24 +13,29 @@ from .utils import get_logger
 logger = get_logger(__name__)
 
 # LangSmith uploads child runs (LLM calls, tool calls) from a background thread,
-# so they may not be queryable the instant an evaluator fires. Retry listing the
-# trace until it looks populated (an LLM run is always present in a proof run).
-_TRACE_LIST_RETRIES = 4
+# so they may not all be queryable the instant an evaluator fires. Retry listing
+# the trace until the run set stops growing (see _list_trace_runs).
+_TRACE_LIST_RETRIES = 5
 _TRACE_LIST_RETRY_WAIT_S = 1.5
 
 
 def _list_trace_runs(client: Client, trace_id) -> list[Run]:
-    """List a trace's runs, retrying until the trace looks populated.
+    """List a trace's runs, retrying until the run set stops growing.
 
-    Tolerates LangSmith's asynchronous run upload: returns as soon as an LLM run
-    appears (every proof run makes at least one LLM call), otherwise falls back
-    to the last attempt's result.
+    Tolerates LangSmith's asynchronous run upload: an LLM run typically flushes
+    before its tool child runs, so returning the instant any run appears
+    under-counts tools. Poll until the run count is unchanged across two
+    consecutive listings (with at least one LLM run present, so we don't stabilize
+    on an empty/not-yet-started trace), or the retry budget is exhausted.
     """
     runs: list[Run] = []
+    prev_count = -1
     for attempt in range(_TRACE_LIST_RETRIES):
         runs = list(client.list_runs(trace_id=trace_id))
-        if any(r.run_type == "llm" for r in runs):
+        has_llm = any(r.run_type == "llm" for r in runs)
+        if has_llm and len(runs) == prev_count:
             return runs
+        prev_count = len(runs)
         if attempt < _TRACE_LIST_RETRIES - 1:
             time.sleep(_TRACE_LIST_RETRY_WAIT_S)
     return runs

@@ -58,11 +58,6 @@ class LLMConfig:
     model: str
     provider_config: dict[str, Any] = field(default_factory=dict)
     retry_config: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_LLM_RETRY_CONFIG))
-    # Prices in USD per 1M tokens, documenting the model's cost near its config.
-    # Cost is tracked natively by LangSmith via its model price map (keyed on the
-    # model name); keep these in sync with that entry. Leave null if unknown.
-    input_token_price: float | None = None
-    output_token_price: float | None = None
     # Context-window size in tokens. Set this for providers LangChain has no built-in
     # profile for (e.g. DeepSeek and other OpenAI-compatible endpoints); otherwise the
     # agent falls back to a conservative default and logs a warning.

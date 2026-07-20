@@ -106,19 +106,7 @@ class ProverAgent:
         summary_llm_config = self.config.summarize_output.llm or self.config.prover_llm
         self.summary_llm_client = LLMClient(summary_llm_config)
 
-        # Config takes priority; fall back to the langchain profile, then a default.
-        self.max_input_tokens = (
-            self.config.prover_llm.max_input_tokens
-            or self.llm_client.profile.get("max_input_tokens")
-        )
-        if self.max_input_tokens is None:
-            self.logger.warning(
-                "Model profile has no max_input_tokens (unprofiled provider) and none "
-                f"set in config; falling back to {DEFAULT_MAX_INPUT_TOKENS}"
-            )
-            self.max_input_tokens = DEFAULT_MAX_INPUT_TOKENS
-        if self.max_input_tokens < 1000:
-            self.logger.error("Error: max_input_tokens abnormally small")
+        self.max_input_tokens = self._resolve_max_input_tokens()
 
     @classmethod
     async def create(
@@ -232,6 +220,26 @@ class ProverAgent:
             if isinstance(prev_msg, ProposalMessage):
                 return prev_msg
         return None
+
+    def _resolve_max_input_tokens(self) -> int:
+        """Input-token budget: config value, else the langchain profile, else a default.
+
+        Providers with no langchain profile (OpenAI-compatible endpoints like DeepSeek /
+        qwen) report no max_input_tokens, so fall back to a conservative default rather
+        than leaving it unset — an unset budget breaks the char-budget trimming below.
+        """
+        max_input_tokens = self.config.prover_llm.max_input_tokens or self.llm_client.profile.get(
+            "max_input_tokens"
+        )
+        if max_input_tokens is None:
+            self.logger.warning(
+                "Model profile has no max_input_tokens (unprofiled provider) and none "
+                f"set in config; falling back to {DEFAULT_MAX_INPUT_TOKENS}"
+            )
+            max_input_tokens = DEFAULT_MAX_INPUT_TOKENS
+        if max_input_tokens < 1000:
+            self.logger.error("Error: max_input_tokens abnormally small")
+        return max_input_tokens
 
     def _build_error_processing(self, message: str) -> str:
         length = len(message)
