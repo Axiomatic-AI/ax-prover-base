@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from lean_interact import Command, FileCommand
@@ -12,6 +13,29 @@ from .lean_interact import LeanInteractServer
 from .logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def get_unproven(folder: str, file_path: str) -> list[str]:
+    """Return the names of declarations in a file that still contain `sorry`.
+
+    Synchronous, self-contained entry point for external callers (e.g. the
+    ax-prover-server sorry-detection script): it owns the LeanInteractServer
+    lifecycle and delegates the parsing to `parse_prove_target`, so the
+    detection logic lives in exactly one place.
+
+    Must be called from a synchronous context (no running event loop).
+    """
+
+    async def _run() -> list[str]:
+        # Imported lazily to avoid a circular import (proving imports this module).
+        from ..config import LeanInteractConfig
+        from .proving import parse_prove_target
+
+        async with LeanInteractServer(folder, LeanInteractConfig()) as server:
+            items = await parse_prove_target(server, folder, file_path)
+            return [item.location.name for item in items]
+
+    return asyncio.run(_run())
 
 
 def read_declaration_source_code(declaration: Declaration, file_path: Path) -> str:
