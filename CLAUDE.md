@@ -183,7 +183,9 @@ def _format_relative_time(timestamp_str: str) -> str:
 
 Good (complex function with unintuitive logic, multi-line docstring justified):
 ```python
-def _assign_hierarchical_numbers(checkpoints: list[dict], parent_map: dict[str, str | None]) -> None:
+def _assign_hierarchical_numbers(
+    checkpoints: list[dict], parent_map: dict[str, str | None]
+) -> None:
     """
     Assign hierarchical numbers to checkpoints, detecting branches from restorations.
 
