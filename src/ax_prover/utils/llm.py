@@ -37,6 +37,21 @@ def create_llm(config: LLMConfig) -> BaseChatModel:
     )
 
 
+def _sanitize_replayed_tool_calls(message: AIMessage) -> None:
+    """Strip ``parsed_arguments`` from OpenAI ``function_call`` content blocks in place.
+
+    The structured-output (`.parse()`) path adds a ``parsed_arguments`` field to each
+    function-call block. When such an assistant message is replayed in a later request,
+    the OpenAI Responses API rejects it ("Unknown parameter: input[..].parsed_arguments").
+    Removing it keeps tool-calling + structured-output loops working.
+    """
+    if not isinstance(message.content, list):
+        return
+    for block in message.content:
+        if isinstance(block, dict) and block.get("type") == "function_call":
+            block.pop("parsed_arguments", None)
+
+
 async def agentic_loop(
     client: "LLMClient",
     messages: list[BaseMessage],
@@ -51,6 +66,7 @@ async def agentic_loop(
         intermediate AI message, tool result, and the final response.
     """
     response = await client.ainvoke(messages, tools=tools, output_schema=output_schema)
+    _sanitize_replayed_tool_calls(response)
     new_messages: list[BaseMessage] = [response]
 
     tool_node = ToolNode(tools)
@@ -75,6 +91,7 @@ async def agentic_loop(
             response = await client.ainvoke(
                 invoke_messages, tools=tools, output_schema=output_schema
             )
+        _sanitize_replayed_tool_calls(response)
 
         new_messages.append(response)
 
