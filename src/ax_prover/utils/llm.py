@@ -1,5 +1,6 @@
 """LLM factory functions."""
 
+import json
 import os
 
 from anthropic import transform_schema
@@ -10,6 +11,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
+from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode
@@ -24,12 +26,34 @@ _PROVIDER_API_KEY_ENV = {
 }
 
 
+def _is_deepseek_model(llm: BaseChatModel) -> bool:
+    """True when this is a DeepSeek-backed chat model (a ChatDeepSeek instance)."""
+    return isinstance(llm, ChatDeepSeek)
+
+
+def _is_deepseek_config(config: LLMConfig) -> bool:
+    """True when this config selects DeepSeek via the OpenAI-compatible endpoint."""
+    provider_config = config.provider_config or {}
+    if provider_config.get("model_provider") != "openai":
+        return False
+    model = (config.model or "").lower()
+    base_url = str(provider_config.get("base_url") or "").lower()
+    return model.startswith("deepseek") or "deepseek" in base_url
+
+
 def create_llm(config: LLMConfig) -> BaseChatModel:
     """Create an LLM instance from configuration."""
     provider = config.model.split(":")[0] if ":" in config.model else None
     key_env = _PROVIDER_API_KEY_ENV.get(provider)
     if key_env and not os.environ.get(key_env):
         raise OSError(f"{key_env} is not set. Check your .env.secrets file.")
+
+    if _is_deepseek_config(config):
+        # ChatDeepSeek preserves DeepSeek's non-standard reasoning_content (which base
+        # ChatOpenAI drops). Drop model_provider (an init_chat_model routing key that
+        # ChatDeepSeek doesn't accept as a field).
+        provider_config = {k: v for k, v in config.provider_config.items() if k != "model_provider"}
+        return ChatDeepSeek(model=config.model, **provider_config)
 
     return init_chat_model(
         config.model,
@@ -50,6 +74,10 @@ async def agentic_loop(
         A tuple of (final_response, all_new_messages) where all_new_messages includes every
         intermediate AI message, tool result, and the final response.
     """
+    # Track whether the current response came from a tools-bound call. DeepSeek only
+    # enforces the json_object response_format when no tools are bound, so a response
+    # from a tools-bound call is not schema-enforced at the API level.
+    last_call_bound_tools = bool(tools)
     response = await client.ainvoke(messages, tools=tools, output_schema=output_schema)
     new_messages: list[BaseMessage] = [response]
 
@@ -71,21 +99,46 @@ async def agentic_loop(
                 HumanMessage(content="NO MORE TOOL CALLS ALLOWED.")
             ]
             response = await client.ainvoke(invoke_messages, output_schema=output_schema)
+            last_call_bound_tools = False
         else:
             response = await client.ainvoke(
                 invoke_messages, tools=tools, output_schema=output_schema
             )
+            last_call_bound_tools = True
 
+        new_messages.append(response)
+
+    # DeepSeek enforces the json_object response_format only on tool-free calls (see
+    # LLMClient._should_bind_structured_output). If the model stopped requesting tools
+    # before the forced final answer, the returned message came from a tools-bound call
+    # and its JSON was constrained only by the injected prompt — not the API. Re-issue
+    # one tool-free call so the final message is schema-enforced like every other provider.
+    if (
+        output_schema is not None
+        and last_call_bound_tools
+        and not response.tool_calls
+        and _is_deepseek_model(client._base_llm)
+    ):
+        invoke_messages = (
+            messages + new_messages + [HumanMessage(content="NO MORE TOOL CALLS ALLOWED.")]
+        )
+        response = await client.ainvoke(invoke_messages, output_schema=output_schema)
         new_messages.append(response)
 
     return response
 
 
 def get_reasoning(response: AIMessage) -> str:
-    """Extract the reasoning from an LLM response."""
+    """Extract reasoning from an LLM response.
+
+    Prefers native reasoning content blocks; falls back to DeepSeek's separate
+    `reasoning_content` field, which langchain_openai surfaces in additional_kwargs.
+    """
     reasoning = "\n\n".join(
         [msg.get("reasoning", "") for msg in response.content_blocks if msg["type"] == "reasoning"]
     )
+    if not reasoning:
+        reasoning = response.additional_kwargs.get("reasoning_content", "") or ""
     return reasoning
 
 
@@ -133,10 +186,45 @@ class LLMClient:
     ) -> AIMessage:
         """Invoke with optional tools, structured output, and retry."""
         effective_retry = retry_config or self._retry_config
+        messages = self._maybe_inject_schema(messages, output_schema, has_tools=bool(tools))
         runnable = self._get_runnable(
             tools=tools, output_schema=output_schema, retry_config=effective_retry
         )
         return await runnable.ainvoke(messages)
+
+    def _maybe_inject_schema(
+        self,
+        messages: LanguageModelInput,
+        output_schema: type[BaseModel] | None,
+        has_tools: bool = False,
+    ) -> LanguageModelInput:
+        """Append a JSON-schema instruction for DeepSeek's json_object mode.
+
+        json_object mode neither enforces nor communicates the schema and requires
+        the literal word "JSON" in the prompt, so the schema is injected explicitly.
+        When `has_tools` is False, the instruction omits tool-permission language so
+        it doesn't contradict a preceding "no more tool calls" instruction and push
+        the model to emit tool-call-like text instead of pure JSON.
+        Non-DeepSeek providers pass the schema natively and are left unchanged.
+        """
+        if output_schema is None or not _is_deepseek_model(self._base_llm):
+            return messages
+        if not isinstance(messages, list):
+            return messages
+
+        schema_json = json.dumps(output_schema.model_json_schema(), indent=2)
+        if has_tools:
+            preamble = (
+                "You may use the available tools as needed. When you give your final "
+                "answer, respond with a single JSON object and no other text, no markdown "
+                "code fences. "
+            )
+        else:
+            preamble = (
+                "Respond with a single JSON object and no other text, no markdown code fences. "
+            )
+        instruction = f"{preamble}The JSON object must conform to this JSON schema:\n{schema_json}"
+        return list(messages) + [HumanMessage(content=instruction)]
 
     def _get_runnable(
         self,
@@ -151,18 +239,40 @@ class LLMClient:
         model: Runnable = self._base_llm
 
         if tools:
-            # OpenAI requires strict=True when combining tools with structured output
-            # other providers default to None (omit the field)
-            strict = True if isinstance(self._base_llm, ChatOpenAI) and output_schema else None
+            # OpenAI requires strict=True when combining tools with structured output;
+            # DeepSeek and other providers omit the field.
+            strict = True if self._use_strict_tools(output_schema) else None
             model = self._base_llm.bind_tools(tools, strict=strict)
 
-        if output_schema:
+        if output_schema and self._should_bind_structured_output(tools):
             model = model.bind(**self._structured_output_bind_kwargs(output_schema))
 
         if retry_config:
             model = model.with_retry(**retry_config)
 
         return model
+
+    def _use_strict_tools(self, output_schema: type[BaseModel] | None) -> bool:
+        """Strict tool schemas are OpenAI-only; DeepSeek rejects them like strict json_schema."""
+        return bool(
+            isinstance(self._base_llm, ChatOpenAI)
+            and not _is_deepseek_model(self._base_llm)
+            and output_schema
+        )
+
+    def _should_bind_structured_output(self, tools: list[BaseTool] | None) -> bool:
+        """Whether to bind the structured-output response_format alongside the current call.
+
+        DeepSeek's json_object response_format makes langchain_openai route through
+        OpenAI's `.parse()` helper, which rejects any non-strict tool client-side.
+        DeepSeek cannot use strict tools, so json_object and tools are incompatible.
+        When tools are bound we therefore skip the response_format for DeepSeek and rely
+        on the schema injected into the prompt by _maybe_inject_schema; agentic_loop's
+        final answer call binds no tools, so it still gets json_object enforcement.
+        """
+        if tools and _is_deepseek_model(self._base_llm):
+            return False
+        return True
 
     def _structured_output_bind_kwargs(self, schema: type[BaseModel]) -> dict:
         """Return provider-specific kwargs that constrain the output to a JSON schema.
@@ -171,6 +281,11 @@ class LLMClient:
         `with_structured_output`, which prevents the use of any tools and forces the output
         to be an instance of the schema.
         """
+        # DeepSeek rejects json_schema strict mode; use json_object and inject the
+        # schema into the prompt via _maybe_inject_schema (see ainvoke).
+        if _is_deepseek_model(self._base_llm):
+            return {"response_format": {"type": "json_object"}}
+
         # LANGCHAIN PLSSS ALLOW ME TO DO STRUCTURED OUTPUT WITH TOOL BINDINGS
         # LOOK AT WHAT IT NEED TO DO C'MONNNNN
 

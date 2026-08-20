@@ -44,8 +44,7 @@ def tool_usage(run: Run, config: ProverConfig) -> dict[str, int]:
 
     tool_calls = {tool_name_from_type(tool_type): 0 for tool_type in available_tools}
 
-    # Since we wrap our run function and the root does not populate child runs, we need to list
-    # all the runs in the same trace and filter for the tool calls.
+    # Root run does not populate child runs; list the trace once and count tools.
     client = Client()
     for r in client.list_runs(trace_id=run.trace_id):
         if r.run_type == "tool":

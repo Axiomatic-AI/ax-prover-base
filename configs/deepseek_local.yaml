@@ -1,0 +1,13 @@
+# DeepSeek V4 Pro run config (OpenAI-compatible endpoint; requires DEEPSEEK_API_KEY).
+# Uses this branch's default tool set (public LeanSearch + web search). When this
+# branch is merged into the AI4Math line, enrich with local/cslib search + restrict_to_proof_body.
+import:
+  - llms.yaml
+  - tools.yaml
+  - default.yaml
+
+prover:
+  prover_llm: ${llm_configs.deepseek_v4_pro}
+  proposer_tools:
+    search_lean: ${tool_configs.search_lean_search}
+    search_web: ${tool_configs.search_web}

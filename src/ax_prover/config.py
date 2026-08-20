@@ -58,6 +58,10 @@ class LLMConfig:
     model: str
     provider_config: dict[str, Any] = field(default_factory=dict)
     retry_config: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_LLM_RETRY_CONFIG))
+    # Context-window size in tokens. Set this for providers LangChain has no built-in
+    # profile for (e.g. DeepSeek and other OpenAI-compatible endpoints); otherwise the
+    # agent falls back to a conservative default and logs a warning.
+    max_input_tokens: int | None = None
 
 
 @dataclass

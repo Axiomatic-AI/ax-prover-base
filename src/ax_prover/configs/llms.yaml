@@ -91,3 +91,20 @@ llm_configs:
       max_tokens: null
       base_url: "https://api.mulerouter.ai/vendors/openai/v1"
       model_provider: "openai"
+
+  # DeepSeek models (OpenAI-compatible endpoint)
+  deepseek_v4_pro:
+    model: "deepseek-v4-pro"
+    # DeepSeek's context window. Set explicitly because LangChain has no built-in
+    # profile for OpenAI-compatible endpoints, so it can't be inferred automatically.
+    max_input_tokens: 128000
+    provider_config:
+      model_provider: "openai"
+      base_url: "https://api.deepseek.com"
+      # Default null so configs importing this file still resolve when the key
+      # is unset (merge_configs resolves the whole tree, including this entry
+      # even when DeepSeek isn't the selected model). Set DEEPSEEK_API_KEY to run DeepSeek.
+      api_key: ${oc.env:DEEPSEEK_API_KEY,null}
+      temperature: null
+      max_tokens: null
+      reasoning_effort: "high"  # low | medium | high | max | xhigh
