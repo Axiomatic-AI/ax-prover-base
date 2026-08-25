@@ -11,12 +11,13 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
+from langchain_core.utils.function_calling import convert_to_openai_function
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel
 
-from ..config import LLMConfig
+from ..config import LLMConfig, StructuredOutputMode
 from .reasoning_trace import (
     LLMTraceCapture,
     activate_trace_capture,
@@ -167,6 +168,7 @@ class LLMClient:
             http_async_client=self._trace_http_client,
         )
         self._retry_config: dict = config.retry_config
+        self._structured_output_mode = StructuredOutputMode(config.structured_output_mode)
 
     @property
     def profile(self) -> dict:
@@ -231,6 +233,15 @@ class LLMClient:
         # LANGCHAIN PLSSS ALLOW ME TO DO STRUCTURED OUTPUT WITH TOOL BINDINGS
         # LOOK AT WHAT IT NEED TO DO C'MONNNNN
 
+        if (
+            self._structured_output_mode is StructuredOutputMode.JSON_SCHEMA_MANUAL
+            and not isinstance(self._base_llm, ChatOpenAI)
+        ):
+            raise ValueError(
+                "structured_output_mode=json_schema_manual requires an OpenAI-compatible "
+                "ChatOpenAI provider"
+            )
+
         if isinstance(self._base_llm, ChatAnthropic):
             model_name = getattr(self._base_llm, "model", "")  # Need to check 4.5 or 4.6+
             return _anthropic_structured_kwargs(model_name, schema)
@@ -239,7 +250,7 @@ class LLMClient:
             return _google_structured_kwargs(schema.model_json_schema())
 
         if isinstance(self._base_llm, ChatOpenAI):
-            return _openai_structured_kwargs(schema)
+            return _openai_structured_kwargs(schema, self._structured_output_mode)
 
         raise NotImplementedError(
             f"Structured output bind kwargs not implemented for {type(self._base_llm).__name__}."
@@ -271,5 +282,34 @@ def _google_structured_kwargs(schema: type[BaseModel]) -> dict:
     }
 
 
-def _openai_structured_kwargs(schema: type[BaseModel]) -> dict:
-    return {"response_format": schema}
+def _openai_structured_kwargs(
+    schema: type[BaseModel],
+    mode: StructuredOutputMode = StructuredOutputMode.NATIVE_PYDANTIC,
+) -> dict:
+    """Build native or manually parsed OpenAI structured-output arguments.
+
+    The manual mode deliberately passes a plain response-format dictionary. The
+    OpenAI SDK still sends the same strict JSON-schema constraint to the server,
+    but it does not eagerly parse non-empty assistant content as the Pydantic
+    model before AxProver can inspect sibling tool calls.
+    """
+    if mode is StructuredOutputMode.NATIVE_PYDANTIC:
+        return {"response_format": schema}
+
+    if mode is not StructuredOutputMode.JSON_SCHEMA_MANUAL:
+        raise ValueError(f"Unsupported structured output mode: {mode}")
+
+    function = convert_to_openai_function(schema, strict=True)
+    parameters = function.get("parameters")
+    if not isinstance(parameters, dict):
+        raise ValueError(f"Could not derive a JSON schema for {schema.__name__}")
+    return {
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": function["name"],
+                "strict": True,
+                "schema": parameters,
+            },
+        }
+    }

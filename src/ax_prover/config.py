@@ -21,6 +21,7 @@ __all__ = [
     "MemoryConfig",
     "ProverConfig",
     "ReasoningTraceConfig",
+    "StructuredOutputMode",
     "SummarizeOutputConfig",
 ]
 
@@ -33,6 +34,13 @@ class LogLevel(StrEnum):
     WARNING = "WARNING"
     ERROR = "ERROR"
     CRITICAL = "CRITICAL"
+
+
+class StructuredOutputMode(StrEnum):
+    """How provider structured-output responses are parsed by the client."""
+
+    NATIVE_PYDANTIC = "native_pydantic"
+    JSON_SCHEMA_MANUAL = "json_schema_manual"
 
 
 DEFAULT_LLM_RETRY_CONFIG = {
@@ -59,6 +67,9 @@ class LLMConfig:
     model: str
     provider_config: dict[str, Any] = field(default_factory=dict)
     retry_config: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_LLM_RETRY_CONFIG))
+    # Keep this string-typed so OmegaConf accepts the public lower-case values
+    # used in YAML. LLMClient converts it to StructuredOutputMode and validates it.
+    structured_output_mode: str = StructuredOutputMode.NATIVE_PYDANTIC
 
 
 @dataclass
