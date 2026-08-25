@@ -20,6 +20,7 @@ __all__ = [
     "LogLevel",
     "MemoryConfig",
     "ProverConfig",
+    "ReasoningTraceConfig",
     "SummarizeOutputConfig",
 ]
 
@@ -77,6 +78,20 @@ class SummarizeOutputConfig:
 
 
 @dataclass
+class ReasoningTraceConfig:
+    """Configuration for local reasoning-token traces."""
+
+    enabled: bool = False
+    output_dir: str | None = None
+    run_id: str = "manual"
+    problem_uuid: str | None = None
+    top_logprobs: int = 20
+    vocabulary_size: int | None = None
+    require_alignment: bool = True
+    entropy_version: str = "reasoning_topk_v1"
+
+
+@dataclass
 class ProverConfig:
     """Configuration for ProverAgent."""
 
@@ -87,6 +102,8 @@ class ProverConfig:
         default_factory=lambda: MemoryConfig(class_name="ExperienceProcessor")
     )
     summarize_output: SummarizeOutputConfig = field(default_factory=SummarizeOutputConfig)
+    max_input_tokens: int = 32768
+    reasoning_trace: ReasoningTraceConfig = field(default_factory=ReasoningTraceConfig)
     user_comments: str | None = None
 
 

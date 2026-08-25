@@ -18,6 +18,7 @@ class ProposalMessage(AIMessage):
     imports: list[str] = Field(default_factory=list)
     opens: list[str] = Field(default_factory=list)
     code: str
+    trace_call_id: str | None = None
 
     def __init__(
         self,
@@ -26,6 +27,7 @@ class ProposalMessage(AIMessage):
         location: Location | None = None,
         imports: list[str] | None = None,
         opens: list[str] | None = None,
+        trace_call_id: str | None = None,
         **kwargs,
     ):
         """Initialize with auto-formatted content from structured fields."""
@@ -46,6 +48,7 @@ class ProposalMessage(AIMessage):
             imports=imports_list,
             opens=opens_list,
             code=code,
+            trace_call_id=trace_call_id,
             **kwargs,
         )
 

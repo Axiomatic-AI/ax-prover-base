@@ -17,9 +17,17 @@ class BaseMemory(ABC):
 
     llm: LLMClient | None = None
 
-    def __init__(self, llm_config: LLMConfig | None = None):
+    def __init__(
+        self,
+        llm_config: LLMConfig | None = None,
+        *,
+        capture_raw_http: bool = False,
+    ):
         if llm_config:
-            self.llm = LLMClient(LLMConfig(**llm_config))
+            self.llm = LLMClient(
+                LLMConfig(**llm_config),
+                capture_raw_http=capture_raw_http,
+            )
 
         self.logger = get_logger(__name__)
 
@@ -53,8 +61,10 @@ class PreviousKProcessor(BaseMemory):
         self,
         llm_config: LLMConfig | None = None,
         k: int = 1,
+        *,
+        capture_raw_http: bool = False,
     ):
-        super().__init__(llm_config=llm_config)
+        super().__init__(llm_config=llm_config, capture_raw_http=capture_raw_http)
         self.k = k
 
     def _find_previous_proposal(

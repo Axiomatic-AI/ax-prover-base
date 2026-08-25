@@ -2,6 +2,7 @@
 
 import os
 
+import httpx
 from anthropic import transform_schema
 from langchain.chat_models import init_chat_model
 from langchain_anthropic import ChatAnthropic
@@ -16,6 +17,11 @@ from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel
 
 from ..config import LLMConfig
+from .reasoning_trace import (
+    LLMTraceCapture,
+    activate_trace_capture,
+    capture_httpx_response,
+)
 
 _PROVIDER_API_KEY_ENV = {
     "anthropic": "ANTHROPIC_API_KEY",
@@ -24,16 +30,27 @@ _PROVIDER_API_KEY_ENV = {
 }
 
 
-def create_llm(config: LLMConfig) -> BaseChatModel:
+def create_llm(
+    config: LLMConfig,
+    *,
+    http_async_client: httpx.AsyncClient | None = None,
+) -> BaseChatModel:
     """Create an LLM instance from configuration."""
     provider = config.model.split(":")[0] if ":" in config.model else None
     key_env = _PROVIDER_API_KEY_ENV.get(provider)
-    if key_env and not os.environ.get(key_env):
+    if key_env and not os.environ.get(key_env) and not config.provider_config.get("api_key"):
         raise OSError(f"{key_env} is not set. Check your .env.secrets file.")
 
+    provider_config = dict(config.provider_config)
+    if http_async_client is not None:
+        if provider_config.get("http_async_client") is not None:
+            raise ValueError(
+                "http_async_client cannot be supplied when raw HTTP capture is enabled"
+            )
+        provider_config["http_async_client"] = http_async_client
     return init_chat_model(
         config.model,
-        **config.provider_config,
+        **provider_config,
     )
 
 
@@ -43,14 +60,19 @@ async def agentic_loop(
     tools: list[BaseTool],
     output_schema: type[BaseModel] | None = None,
     max_tool_iterations: int = 5,
-) -> tuple[AIMessage, list[BaseMessage]]:
+    trace_capture: LLMTraceCapture | None = None,
+) -> AIMessage:
     """Invoke an LLM with tools, executing tool calls in a loop until the model stops calling tools.
 
     Returns:
-        A tuple of (final_response, all_new_messages) where all_new_messages includes every
-        intermediate AI message, tool result, and the final response.
+        The final model response after any requested tool calls have completed.
     """
-    response = await client.ainvoke(messages, tools=tools, output_schema=output_schema)
+    response = await client.ainvoke(
+        messages,
+        tools=tools,
+        output_schema=output_schema,
+        trace_capture=trace_capture,
+    )
     new_messages: list[BaseMessage] = [response]
 
     tool_node = ToolNode(tools)
@@ -70,10 +92,17 @@ async def agentic_loop(
             invoke_messages = invoke_messages + [
                 HumanMessage(content="NO MORE TOOL CALLS ALLOWED.")
             ]
-            response = await client.ainvoke(invoke_messages, output_schema=output_schema)
+            response = await client.ainvoke(
+                invoke_messages,
+                output_schema=output_schema,
+                trace_capture=trace_capture,
+            )
         else:
             response = await client.ainvoke(
-                invoke_messages, tools=tools, output_schema=output_schema
+                invoke_messages,
+                tools=tools,
+                output_schema=output_schema,
+                trace_capture=trace_capture,
             )
 
         new_messages.append(response)
@@ -83,10 +112,16 @@ async def agentic_loop(
 
 def get_reasoning(response: AIMessage) -> str:
     """Extract the reasoning from an LLM response."""
-    reasoning = "\n\n".join(
-        [msg.get("reasoning", "") for msg in response.content_blocks if msg["type"] == "reasoning"]
-    )
-    return reasoning
+    for field_name in ("reasoning", "reasoning_content"):
+        value = response.additional_kwargs.get(field_name)
+        if isinstance(value, str) and value:
+            return value
+    values = [
+        str(block.get("reasoning") or block.get("text") or "")
+        for block in response.content_blocks
+        if isinstance(block, dict) and block.get("type") == "reasoning"
+    ]
+    return "\n\n".join(value for value in values if value)
 
 
 class LLMClient:
@@ -114,15 +149,30 @@ class LLMClient:
         response = await client.ainvoke(messages, retry_config={"stop_after_attempt": 3})
     """
 
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: LLMConfig, *, capture_raw_http: bool = False):
         """Initialize the LLMClient with a configuration."""
-        self._base_llm: BaseChatModel = create_llm(config)
+        provider = config.model.split(":", 1)[0] if ":" in config.model else None
+        if capture_raw_http and provider != "openai":
+            raise ValueError("Raw HTTP tracing currently requires the OpenAI provider")
+        self._trace_http_client = (
+            httpx.AsyncClient(
+                event_hooks={"response": [capture_httpx_response]},
+                timeout=None,
+            )
+            if capture_raw_http
+            else None
+        )
+        self._base_llm: BaseChatModel = create_llm(
+            config,
+            http_async_client=self._trace_http_client,
+        )
         self._retry_config: dict = config.retry_config
 
     @property
     def profile(self) -> dict:
         """Model metadata (max_input_tokens, max_output_tokens, capabilities, etc.)."""
-        return getattr(self._base_llm, "profile", {})
+        profile = getattr(self._base_llm, "profile", None)
+        return profile if isinstance(profile, dict) else {}
 
     async def ainvoke(
         self,
@@ -130,13 +180,20 @@ class LLMClient:
         tools: list[BaseTool] | None = None,
         output_schema: type[BaseModel] | None = None,
         retry_config: dict | None = None,
+        trace_capture: LLMTraceCapture | None = None,
     ) -> AIMessage:
         """Invoke with optional tools, structured output, and retry."""
         effective_retry = retry_config or self._retry_config
         runnable = self._get_runnable(
             tools=tools, output_schema=output_schema, retry_config=effective_retry
         )
-        return await runnable.ainvoke(messages)
+        with activate_trace_capture(trace_capture):
+            return await runnable.ainvoke(messages)
+
+    async def aclose(self) -> None:
+        """Close the optional tracing HTTP client."""
+        if self._trace_http_client is not None:
+            await self._trace_http_client.aclose()
 
     def _get_runnable(
         self,

@@ -1,5 +1,6 @@
 """Prover agent for creating and completing proofs in Lean 4."""
 
+import time
 from collections.abc import Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -50,6 +51,13 @@ from ..utils.lean_parsing import (
     list_declarations_from_file,
 )
 from ..utils.llm import LLMClient, agentic_loop, get_reasoning
+from ..utils.reasoning_trace import (
+    LLMTraceCapture,
+    LLMTraceContext,
+    ReasoningAlignmentError,
+    ReasoningTraceWriter,
+    activate_trace_capture,
+)
 from . import memory as memory_module
 from .memory import BaseMemory
 from .prompts import (
@@ -86,17 +94,29 @@ class ProverAgent:
 
         self.proposer_tools = []
 
-        self.llm_client = LLMClient(self.config.prover_llm)
+        self.llm_client = LLMClient(
+            self.config.prover_llm,
+            capture_raw_http=self.config.reasoning_trace.enabled,
+        )
+        self.reasoning_trace_writer = ReasoningTraceWriter(self.config.reasoning_trace)
+        self._trace_call_index = 0
 
         memory_class = getattr(memory_module, self.config.memory_config.class_name)
-        self.memory = memory_class(**self.config.memory_config.init_args)
+        memory_init_args = dict(self.config.memory_config.init_args)
+        memory_init_args["capture_raw_http"] = self.config.reasoning_trace.enabled
+        self.memory = memory_class(**memory_init_args)
 
         summary_llm_config = self.config.summarize_output.llm or self.config.prover_llm
-        self.summary_llm_client = LLMClient(summary_llm_config)
+        self.summary_llm_client = LLMClient(
+            summary_llm_config,
+            capture_raw_http=self.config.reasoning_trace.enabled,
+        )
 
-        self.max_input_tokens = self.llm_client.profile.get("max_input_tokens")
+        self.max_input_tokens = (
+            self.llm_client.profile.get("max_input_tokens") or self.config.max_input_tokens
+        )
         if self.max_input_tokens < 1000:
-            self.logger.error("Error: max_input_tokens abnormally small")
+            raise ValueError("max_input_tokens must be at least 1000")
 
     @classmethod
     async def create(
@@ -223,7 +243,39 @@ class ProverAgent:
 
     async def _memory_processor_node(self, state: ProverAgentState) -> dict:
         """Process memory using the configured memory strategy."""
-        return await self.memory.process(state)
+        capture = self._new_trace_capture(state, role="memory")
+        try:
+            with activate_trace_capture(capture):
+                result = await self.memory.process(state)
+        except Exception as error:
+            self.reasoning_trace_writer.record_transport_failure(capture=capture, error=error)
+            raise
+        if capture.exchanges:
+            self.reasoning_trace_writer.record_proposer(
+                capture=capture,
+                normalized_response=None,
+            )
+        return result
+
+    def _new_trace_capture(
+        self,
+        state: ProverAgentState,
+        *,
+        role: str,
+    ) -> LLMTraceCapture:
+        """Create a call identity without changing AxProver control flow."""
+
+        self._trace_call_index += 1
+        return LLMTraceCapture(
+            context=LLMTraceContext(
+                run_id=self.config.reasoning_trace.run_id,
+                problem_uuid=(self.config.reasoning_trace.problem_uuid or state.item.location.name),
+                theorem_name=state.item.location.name,
+                iteration=state.iteration_count + 1,
+                call_index=self._trace_call_index,
+                role=role,
+            )
+        )
 
     async def _proposer_node(self, state: ProverAgentState, config: RunnableConfig) -> dict:
         self.logger.info(
@@ -271,22 +323,80 @@ class ProverAgent:
             HumanMessage(content=query),
         ]
 
-        response = await agentic_loop(
-            self.llm_client,
-            context_messages,
-            tools=self.proposer_tools,
-            output_schema=ProverResult,
-            max_tool_iterations=self.runtime.config.max_tool_calling_iterations,
-        )
+        trace_capture = self._new_trace_capture(state, role="proposer")
+        trace_context = trace_capture.context
+        try:
+            response = await agentic_loop(
+                self.llm_client,
+                context_messages,
+                tools=self.proposer_tools,
+                output_schema=ProverResult,
+                max_tool_iterations=self.runtime.config.max_tool_calling_iterations,
+                trace_capture=trace_capture,
+            )
+        except Exception as error:
+            failure_summary = self.reasoning_trace_writer.record_transport_failure(
+                capture=trace_capture,
+                error=error,
+            )
+            self.reasoning_trace_writer.record_lean_check(
+                call_id=failure_summary["call_id"],
+                problem_uuid=trace_context.problem_uuid,
+                theorem_name=trace_context.theorem_name,
+                iteration=trace_context.iteration,
+                outcome="not_run_client_failure",
+                success=False,
+                feedback_type=type(error).__name__,
+                diagnostics=str(error),
+                duration_seconds=0.0,
+            )
+            if (
+                self.config.reasoning_trace.require_alignment
+                and failure_summary["alignment_status"] != "aligned"
+            ):
+                raise ReasoningAlignmentError(
+                    f"{trace_context.call_id}: {failure_summary['alignment_status']}"
+                ) from error
+            raise
+
+        try:
+            trace_summary = self.reasoning_trace_writer.record_proposer(
+                capture=trace_capture,
+                normalized_response=response,
+            )
+        except ReasoningAlignmentError as error:
+            self.reasoning_trace_writer.record_lean_check(
+                call_id=trace_context.call_id,
+                problem_uuid=trace_context.problem_uuid,
+                theorem_name=trace_context.theorem_name,
+                iteration=trace_context.iteration,
+                outcome="not_run_reasoning_trace_contract_failed",
+                success=False,
+                feedback_type=type(error).__name__,
+                diagnostics=str(error),
+                duration_seconds=0.0,
+            )
+            raise
 
         try:
             result = ProverResult.model_validate_json(response.text)
         except Exception as e:
             self.logger.error(f"Structured output parsing failed: {e}")
             feedback = StructuredOutputParsingFailedFeedback(error_message=str(e))
+            self.reasoning_trace_writer.record_lean_check(
+                call_id=trace_summary["call_id"],
+                problem_uuid=trace_context.problem_uuid,
+                theorem_name=trace_context.theorem_name,
+                iteration=trace_context.iteration,
+                outcome="not_run_structured_output_parse_failed",
+                success=False,
+                feedback_type=feedback.feedback_type,
+                diagnostics=str(e),
+                duration_seconds=0.0,
+            )
             return {"messages": [feedback]}
 
-        reasoning = get_reasoning(response)
+        reasoning = trace_summary.get("reasoning") or get_reasoning(response)
         self.logger.info(f"[Iteration {state.iteration_count + 1}] Generated proof")
         self.logger.debug(f"Proposer reasoning: \n{reasoning}")
         self.logger.debug(f"Code: \n{result.updated_theorem}")
@@ -297,10 +407,37 @@ class ProverAgent:
             imports=result.imports,
             opens=result.opens,
             code=result.updated_theorem,
+            trace_call_id=trace_summary["call_id"],
         )
         return {"messages": [proposal]}
 
     async def _builder_node(self, state: ProverAgentState) -> dict:
+        started_at = time.monotonic()
+        try:
+            result = await self._run_builder_node(state)
+        except Exception as error:
+            self._record_lean_check(
+                state=state,
+                feedback_type=type(error).__name__,
+                outcome="builder_exception",
+                success=False,
+                diagnostics=str(error),
+                duration_seconds=time.monotonic() - started_at,
+            )
+            raise
+
+        feedback = result.get("messages", [None])[-1]
+        self._record_lean_check(
+            state=state,
+            feedback_type=getattr(feedback, "feedback_type", type(feedback).__name__),
+            outcome=getattr(feedback, "feedback_type", "builder_unknown"),
+            success=bool(getattr(feedback, "is_success", False)),
+            diagnostics=getattr(feedback, "content", ""),
+            duration_seconds=time.monotonic() - started_at,
+        )
+        return result
+
+    async def _run_builder_node(self, state: ProverAgentState) -> dict:
         self.logger.info(
             f"Testing code at: {state.item.location.formatted_context if state.item.location else 'unknown'}"
         )
@@ -385,6 +522,29 @@ class ProverAgent:
             "metrics": state.metrics,
         }
 
+    def _record_lean_check(
+        self,
+        *,
+        state: ProverAgentState,
+        feedback_type: str,
+        outcome: str,
+        success: bool,
+        diagnostics: str,
+        duration_seconds: float,
+    ) -> None:
+        proposal = state.last_proposal
+        self.reasoning_trace_writer.record_lean_check(
+            call_id=proposal.trace_call_id if proposal else None,
+            problem_uuid=(self.config.reasoning_trace.problem_uuid or state.item.location.name),
+            theorem_name=state.item.location.name,
+            iteration=state.iteration_count,
+            outcome=outcome,
+            success=success,
+            feedback_type=feedback_type,
+            diagnostics=diagnostics,
+            duration_seconds=duration_seconds,
+        )
+
     async def _reviewer_node(self, state: ProverAgentState, config: RunnableConfig) -> dict:
         self.logger.info("Reviewing proof")
 
@@ -404,7 +564,23 @@ class ProverAgent:
             HumanMessage(content=query),
         ]
 
-        response = await self.llm_client.ainvoke(messages, output_schema=ReviewDecision)
+        trace_capture = self._new_trace_capture(state, role="reviewer")
+        try:
+            response = await self.llm_client.ainvoke(
+                messages,
+                output_schema=ReviewDecision,
+                trace_capture=trace_capture,
+            )
+        except Exception as error:
+            self.reasoning_trace_writer.record_transport_failure(
+                capture=trace_capture,
+                error=error,
+            )
+            raise
+        self.reasoning_trace_writer.record_proposer(
+            capture=trace_capture,
+            normalized_response=response,
+        )
         try:
             review_result = ReviewDecision.model_validate_json(response.text)
         except Exception as e:
@@ -492,11 +668,24 @@ class ProverAgent:
             experience=state.experience or "No experience recorded",
         )
 
-        response = await self.summary_llm_client.ainvoke(
-            [
-                SystemMessage(content=SUMMARIZE_OUTPUT_SYSTEM_PROMPT),
-                HumanMessage(content=query),
-            ]
+        trace_capture = self._new_trace_capture(state, role="summarizer")
+        try:
+            response = await self.summary_llm_client.ainvoke(
+                [
+                    SystemMessage(content=SUMMARIZE_OUTPUT_SYSTEM_PROMPT),
+                    HumanMessage(content=query),
+                ],
+                trace_capture=trace_capture,
+            )
+        except Exception as error:
+            self.reasoning_trace_writer.record_transport_failure(
+                capture=trace_capture,
+                error=error,
+            )
+            raise
+        self.reasoning_trace_writer.record_proposer(
+            capture=trace_capture,
+            normalized_response=response,
         )
 
         summary = response.text
@@ -553,6 +742,15 @@ class ProverAgent:
         except Exception as e:
             self.logger.error(f"Error: {e}")
             raise
+
+    async def aclose(self) -> None:
+        """Close HTTP clients owned by this agent."""
+
+        await self.llm_client.aclose()
+        if self.memory.llm is not None:
+            await self.memory.llm.aclose()
+        if self.summary_llm_client is not self.llm_client:
+            await self.summary_llm_client.aclose()
 
 
 async def _detect_cheats_in_code(

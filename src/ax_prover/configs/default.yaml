@@ -15,6 +15,9 @@ prover:
   summarize_output:
     enabled: true
     llm: ${prover.prover_llm}
+  max_input_tokens: 32768
+  reasoning_trace:
+    enabled: false
 runtime:
   max_tool_calling_iterations: 1
   lean:

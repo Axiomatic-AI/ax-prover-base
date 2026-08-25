@@ -1,0 +1,42 @@
+prover:
+  prover_llm:
+    model: "openai:Qwen/Qwen3.8-27B-FP8"
+    provider_config:
+      api_key: "local-vllm"
+      base_url: "${oc.env:AX_PROVER_API_BASE,http://127.0.0.1:8000/v1}"
+      temperature: 1.0
+      top_p: 0.95
+      presence_penalty: 0.0
+      max_tokens: 24576
+      logprobs: true
+      top_logprobs: 20
+      streaming: false
+      max_retries: 0
+      extra_body:
+        top_k: 20
+        min_p: 0.0
+        repetition_penalty: 1.0
+        include_reasoning: true
+        reasoning_effort: xhigh
+        chat_template_kwargs:
+          enable_thinking: true
+          preserve_thinking: true
+    retry_config:
+      stop_after_attempt: 3
+  max_input_tokens: 32768
+  reasoning_trace:
+    enabled: true
+    output_dir: "${oc.env:AX_PROVER_TRACE_DIR}"
+    run_id: "${oc.env:RUN_ID}"
+    problem_uuid: null
+    top_logprobs: 20
+    vocabulary_size: 248320
+    # Tracing must remain observational. Unaligned calls are persisted and
+    # rejected by the post-run smoke/full artifact gate, never fed back to or
+    # used to terminate the AxProver agent.
+    require_alignment: false
+    entropy_version: reasoning_topk_v1
+runtime:
+  lean:
+    max_concurrent_builds: 1
+  log_level: INFO
