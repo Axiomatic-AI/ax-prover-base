@@ -70,7 +70,7 @@ async def test_independent_nodes_share_one_round(workspace, store, wide_blueprin
 
 
 async def test_node_agent_limit_is_respected(workspace, store, monkeypatch):
-    """Bounds concurrent model agents; Lean compiles are serialized separately."""
+    """A positive limit throttles concurrent model agents, for provider rate limits."""
     blueprint = make_blueprint(
         *(make_node(f"h{i}") for i in range(6)),
         make_node(
@@ -248,3 +248,62 @@ async def test_solving_a_node_cancels_its_queued_compiles(
     assert set(cancelled) == {"my_target:left", "my_target:right", "my_target:target"}
     # The lease belongs to the target, so the scheduler must not release it mid-run.
     assert released == []
+
+
+async def test_zero_means_unbounded_so_the_whole_frontier_runs_at_once(
+    workspace, store, monkeypatch
+):
+    """The paper dispatches every ready lemma in parallel with no stated cap."""
+    width = 9
+    blueprint = make_blueprint(
+        *(make_node(f"h{i}") for i in range(width)),
+        make_node(
+            "target", tuple(f"h{i}" for i in range(width)), is_target=True, lean_name="my_target"
+        ),
+    )
+    running = 0
+    peak = 0
+    released = asyncio.Event()
+
+    async def prove_node(workspace, blueprint, node, client, role, search_tool=None):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        if peak >= width:
+            released.set()
+        await released.wait()
+        running -= 1
+        return NodeAttemptResult(outcome=NodeOutcome.SOLVED, proof_body="by x", attempts=1)
+
+    monkeypatch.setattr(scheduler, "prove_node", prove_node)
+    store.reconcile(blueprint, ENVIRONMENT)
+
+    await run_schedule(workspace, blueprint, store, None, ROLE, max_node_agents=0)
+
+    assert peak == width, "every ready node should run concurrently"
+
+
+async def test_a_positive_limit_still_caps_a_wide_frontier(workspace, store, monkeypatch):
+    blueprint = make_blueprint(
+        *(make_node(f"h{i}") for i in range(9)),
+        make_node(
+            "target", tuple(f"h{i}" for i in range(9)), is_target=True, lean_name="my_target"
+        ),
+    )
+    running = 0
+    peak = 0
+
+    async def prove_node(workspace, blueprint, node, client, role, search_tool=None):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0)
+        running -= 1
+        return NodeAttemptResult(outcome=NodeOutcome.SOLVED, proof_body="by x", attempts=1)
+
+    monkeypatch.setattr(scheduler, "prove_node", prove_node)
+    store.reconcile(blueprint, ENVIRONMENT)
+
+    await run_schedule(workspace, blueprint, store, None, ROLE, max_node_agents=3)
+
+    assert peak <= 3

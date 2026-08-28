@@ -7,6 +7,7 @@ assumptions, but it makes proof reuse and failure attribution simple.
 """
 
 import asyncio
+import contextlib
 from dataclasses import dataclass, field
 
 from langchain_core.tools import BaseTool
@@ -40,7 +41,7 @@ async def run_schedule(
     client: LLMClient,
     role: BlueprintRoleConfig,
     search_tool: BaseTool | None = None,
-    max_node_agents: int = 4,
+    max_node_agents: int = 12,
 ) -> ScheduleReport:
     """Prove the target's required nodes in dependency order until the frontier dries up.
 
@@ -61,9 +62,14 @@ async def run_schedule(
         if service is not None:
             service.cancel_node(workspace.node_key(node_id))
 
-    # Bounds concurrent model agents only. Their Lean compilations are serialized
-    # independently by the compile service.
-    semaphore = asyncio.Semaphore(max(1, max_node_agents))
+    # Bounds concurrent model agents only; their Lean compilations are limited separately
+    # by the compile service. Zero or less means unbounded, which is what the paper does:
+    # it "dispatches each lemma to a Lean prover in parallel" with no stated cap, so the
+    # whole ready frontier runs at once. A positive value throttles, which is worth setting
+    # when a provider rate limit, rather than the frontier, is the real constraint.
+    limiter = (
+        asyncio.Semaphore(max_node_agents) if max_node_agents > 0 else contextlib.nullcontext()
+    )
     report = ScheduleReport()
 
     while True:
@@ -85,7 +91,7 @@ async def run_schedule(
             mid-round would otherwise discard every proof the round had already found,
             since the gather never returns.
             """
-            async with semaphore:
+            async with limiter:
                 try:
                     result = await prove_node(
                         workspace, blueprint, by_id[node_id], client, role, search_tool

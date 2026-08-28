@@ -53,7 +53,11 @@ def _add_blueprint_arguments(
         type=int,
         default=None,
         metavar="N",
-        help="Maximum node agents reasoning concurrently (default: from config)",
+        help=(
+            "Maximum node agents reasoning concurrently; 0 means unbounded, so the whole "
+            "ready frontier runs at once (default: from config). Set a positive value only "
+            "to respect a provider rate limit."
+        ),
     )
     group.add_argument(
         "--max-lean-compiles",

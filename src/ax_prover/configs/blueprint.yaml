@@ -43,7 +43,9 @@ blueprint:
   # concurrent compilations: one server serializes internally on a lock, so extra workers
   # per server only contend. Each warm Mathlib environment needs ~2GB resident, so budget
   # roughly one server per 4GB of spare RAM. 1 suits a laptop; a 128GB host can run 8-16.
-  max_node_agents: 4
+  # Wide enough that measured frontiers (up to 9) are not throttled, while still capping
+  # total concurrent provider requests. 0 = unbounded, as the paper describes.
+  max_node_agents: 12
   max_lean_compiles: 1
   checkpoint_dir: ".axiomatic/blueprint"
   artifacts_dir: ".axiomatic/blueprint/artifacts"

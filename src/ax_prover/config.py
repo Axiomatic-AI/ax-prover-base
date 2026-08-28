@@ -185,8 +185,11 @@ class BlueprintConfig:
     prover_tools: dict[str, dict[str, Any] | None] = field(default_factory=dict)
     max_refinement_rounds: int = 8
     # Node agents reason, search, and wait on the model concurrently; their Lean
-    # compilations run on a separate pool of warm servers.
-    max_node_agents: int = 4
+    # compilations run on a separate pool of warm servers. 0 means unbounded, which is what
+    # the paper describes: it dispatches every ready lemma in parallel with no stated cap.
+    # The default throttles instead, because a provider rate limit, not the frontier, is
+    # usually the binding constraint; measured frontiers reach 9, so 12 rarely throttles.
+    max_node_agents: int = 12
     # Number of Lean servers, which is also the number of concurrent compilations: one
     # server serializes internally on a lock, so extra workers per server only contend.
     # Each warm Mathlib environment needs ~2GB resident, so 1 suits a small machine and a
