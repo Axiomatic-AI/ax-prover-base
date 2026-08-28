@@ -1,0 +1,55 @@
+# Blueprint-driven proving mode.
+#
+# Usage:
+#   ax-prover --config blueprint.yaml prove MyProject/Foo.lean:my_theorem --blueprint
+#
+# The three roles default to the same model but are configured independently, so an
+# expensive architect can be paired with a cheap node prover:
+#   blueprint:
+#     architect:
+#       llm: ${llm_configs.claude_opus_4_5}
+
+import:
+  - llms.yaml
+  - tools.yaml
+
+blueprint:
+  enabled: true
+  llm: ${llm_configs.deepseek_v4_flash}
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    provider_sort: "exacto"
+  # Blueprint mode exposes only lean_compile and mathlib_search. No web or repo search.
+  prover_tools:
+    mathlib_search: ${tool_configs.search_lean_search}
+  # max_total_tokens counts cumulative *billed* tokens, so a turn's re-sent transcript is
+  # counted on every call. The paper's 65536 starved node provers after 1-2 of their 4
+  # attempts while costing well under a cent, so these are deliberately generous.
+  architect:
+    max_total_tokens: 2000000
+    max_attempts: 8
+    max_tool_iterations: 8
+  prover:
+    max_total_tokens: 1000000
+    max_attempts: 4
+    max_tool_iterations: 8
+  refiner:
+    max_total_tokens: 2000000
+    max_attempts: 4
+    max_tool_iterations: 8
+  max_refinement_rounds: 8
+  # Model-side concurrency is independent of Lean-side concurrency. Raise
+  # max_lean_compiles only where there is RAM for several Mathlib environments.
+  max_node_agents: 4
+  max_lean_compiles: 1
+  checkpoint_dir: ".axiomatic/blueprint"
+  artifacts_dir: ".axiomatic/blueprint/artifacts"
+  require_comparator: false
+  comparator:
+    binary: "comparator"
+    module_prefix: "AxProverComparator"
+    permitted_axioms:
+      - "propext"
+      - "Quot.sound"
+      - "Classical.choice"
+    timeout: 1800

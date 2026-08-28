@@ -25,10 +25,22 @@ class LeanInteractServer:
         self._server: AutoLeanServer | None = None
         self._lock = asyncio.Lock()  # lock to ensure only one server is created
 
-    async def run(self, command: Command) -> CommandResponse | LeanError:
-        "Run the command and return the response or error."
+    async def run(
+        self,
+        command: Command,
+        add_to_session_cache: bool = False,
+        timeout: float | None = None,
+    ) -> CommandResponse | LeanError:
+        """Run the command and return the response or error.
+
+        Set `add_to_session_cache` for a stable warm-up command that should be replayed if
+        the server restarts after a crash, timeout, or memory pressure. Candidate commands
+        must stay out of the replay cache, or recovery would replay obsolete work.
+        """
         server = await self._get_server()
-        return await server.async_run(command)
+        return await server.async_run(
+            command, add_to_session_cache=add_to_session_cache, timeout=timeout
+        )
 
     async def aclose(self) -> None:
         "Close the server."

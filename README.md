@@ -38,6 +38,32 @@ The agent runs an iterative loop:
 
 The loop continues until the proof is complete or the iteration budget is exhausted (default: 50).
 
+### Blueprint mode
+
+`--blueprint` selects a second, additive proving mode that decomposes a hard target into a
+DAG of helper lemmas instead of attacking it directly. The direct prover above is the
+default and is unchanged.
+
+1. **Architect** — writes a compiling Lean skeleton of `sorry`ed helper lemmas, each
+   carrying its graph identity in an `ax-blueprint` docstring block. Its only tool is
+   `lean_compile`.
+2. **Canonicalization** — the skeleton is compiled and its declarations extracted, so the
+   graph is derived from what Lean actually elaborated, never from parsing a model response.
+3. **Frontier scheduling** — nodes whose declared parents are already solved are proven
+   concurrently. Each node prover sees one statement, its direct parents' signatures, and
+   the file's trusted context; it returns a proof body and nothing else. Candidate proofs
+   compile against one warm Lean server for the whole run (~0.06s per attempt on a Mathlib
+   project, versus a ~39s median for a fresh `lake env lean`), and a node counts as solved
+   only if it also passes an axiom check.
+4. **Refinement** — failed nodes are diagnosed as `PROOF_TOO_HARD` or `STATEMENT_WRONG`, and
+   a refiner revises the graph. Proofs whose interface fingerprint is unchanged are reused.
+5. **Assembly** — helpers are rendered in topological order inside a deterministic unique
+   namespace immediately before the target, the whole file is compiled, and
+   [Comparator](https://github.com/leanprover/comparator) judges the result.
+
+The user's source file is read once at run start and written exactly once at the end, only
+after every check passes. Failed, cancelled, and interrupted runs change it zero times.
+
 ## Quick Start
 
 ```bash
@@ -115,6 +141,43 @@ ax-prover prove MyModule:theorem_name --skip-build
 ax-prover prove MyModule:theorem_name -o result.json
 ```
 
+### Blueprint mode
+
+```bash
+# Decompose the target into helper lemmas, then prove them bottom-up
+ax-prover --config blueprint.yaml prove MyModule:theorem_name --blueprint
+
+# Resume an interrupted run, reusing every proof whose interface is unchanged
+ax-prover --config blueprint.yaml prove MyModule:theorem_name --blueprint --resume
+
+# Discard the checkpoint and start over
+ax-prover --config blueprint.yaml prove MyModule:theorem_name --blueprint --restart
+
+# Tune the budgets for one run
+ax-prover --config blueprint.yaml prove MyModule:theorem_name --blueprint \
+    --max-refinements 16 --max-node-agents 8
+```
+
+Model-side and Lean-side concurrency are separate. `--max-node-agents` controls how many
+node agents reason and search at once; `--max-lean-compiles` (default 1) controls how many
+Lean compilations run at once. Each concurrent Mathlib environment needs roughly 2GB
+resident, so raise the latter only on a machine with memory to spare.
+
+The bundled `blueprint.yaml` runs all three roles on DeepSeek through OpenRouter, which
+needs `OPENROUTER_API_KEY`. Each role is configured independently, so you can pair an
+expensive architect with a cheap node prover:
+
+```yaml
+blueprint:
+  architect:
+    llm: ${llm_configs.claude_opus_4_5}
+```
+
+Results are reported as `solved`, `failed`, `infrastructure_error`, or
+`comparator_pending`. Comparator needs Linux plus `landrun` and `lean4export` on `PATH`; on
+other platforms a run that passes the full Lean build reports `comparator_pending` and
+Linux CI remains the authoritative gate. Pass `--require-comparator` to fail instead.
+
 ### Running experiments
 
 Run batch evaluations on [LangSmith](https://smith.langchain.com) datasets:
@@ -125,6 +188,9 @@ ax-prover experiment dataset_name
 
 # With custom concurrency
 ax-prover experiment dataset_name --max-concurrency 8
+
+# Blueprint mode, with graph and refinement metrics as evaluators
+ax-prover --config blueprint.yaml experiment putnam_solutions_tiny --max-concurrency 4
 ```
 
 <details>

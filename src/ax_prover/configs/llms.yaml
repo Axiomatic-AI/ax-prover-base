@@ -91,3 +91,13 @@ llm_configs:
       max_tokens: null
       base_url: "https://api.mulerouter.ai/vendors/openai/v1"
       model_provider: "openai"
+
+  # OpenRouter-hosted models. Requires OPENROUTER_API_KEY.
+  # `provider_sort` is lifted into OpenRouter's provider routing field.
+  deepseek_v4_flash:
+    model: "openrouter:deepseek/deepseek-v4-flash-0731"
+    provider_config:
+      temperature: null
+      max_tokens: null
+      reasoning_effort: "xhigh"
+      provider_sort: "exacto"

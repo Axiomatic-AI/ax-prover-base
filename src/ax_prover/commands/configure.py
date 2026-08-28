@@ -13,6 +13,7 @@ _API_KEYS = [
     ("ANTHROPIC_API_KEY", "Anthropic (Claude) — recommended", True),
     ("OPENAI_API_KEY", "OpenAI", False),
     ("GOOGLE_API_KEY", "Google (Gemini)", False),
+    ("OPENROUTER_API_KEY", "OpenRouter (blueprint mode)", False),
     ("TAVILY_API_KEY", "Tavily (web search)", False),
     ("LANGSMITH_API_KEY", "LangSmith (tracing, optional)", False),
 ]

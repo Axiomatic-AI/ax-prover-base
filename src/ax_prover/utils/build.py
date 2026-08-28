@@ -201,7 +201,7 @@ def _format_lean_errors(error_output: str, file_path: str, file_content: str) ->
     return "\n".join(formatted)
 
 
-async def _run_lean_subprocess(
+async def run_lean_subprocess(
     command: list[str],
     cwd: str,
     timeout: float,
@@ -297,7 +297,7 @@ async def check_lean_file(
 
         # Acquire semaphore before starting subprocess to limit concurrent builds
         async with semaphore:
-            returncode, stdout_str, stderr_str = await _run_lean_subprocess(
+            returncode, stdout_str, stderr_str = await run_lean_subprocess(
                 command, base_folder, config.check_file_timeout
             )
 
@@ -308,7 +308,7 @@ async def check_lean_file(
                     f"Falling back to 'lake env lean {file_path}'"
                 )
                 fallback_command = ["lake", "env", "lean", file_path]
-                returncode, stdout_str, stderr_str = await _run_lean_subprocess(
+                returncode, stdout_str, stderr_str = await run_lean_subprocess(
                     fallback_command, base_folder, config.check_file_timeout
                 )
 

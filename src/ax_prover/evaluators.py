@@ -83,3 +83,56 @@ def build_timeout_count(outputs: dict) -> int:
 def max_iterations_reached(outputs: dict) -> bool:
     """LangSmith evaluator that checks if max iterations has been reached."""
     return outputs.get("metrics", {}).get("max_iterations_reached", False)
+
+
+BLUEPRINT_SUCCESS_STATUSES = frozenset({"solved", "comparator_pending"})
+
+
+@traceable
+def blueprint_solved(outputs: dict) -> bool:
+    """LangSmith evaluator: did a blueprint run land a verified proof in the source?"""
+    if "error" in outputs and outputs.get("error") == "exception":
+        logger.warning(f"Blueprint run failed: {outputs.get('message')}")
+        return False
+
+    return outputs.get("status") in BLUEPRINT_SUCCESS_STATUSES
+
+
+@traceable
+def blueprint_graph_size(outputs: dict) -> int:
+    """LangSmith evaluator: number of nodes in the final blueprint."""
+    return outputs.get("graph_size", 0)
+
+
+@traceable
+def blueprint_refinement_rounds(outputs: dict) -> int:
+    """LangSmith evaluator: refinement rounds the run needed."""
+    return outputs.get("refinement_rounds", 0)
+
+
+@traceable
+def blueprint_reused_proofs(outputs: dict) -> int:
+    """LangSmith evaluator: proofs preserved across refinement."""
+    return outputs.get("reused_proofs", 0)
+
+
+@traceable
+def blueprint_node_attempts(outputs: dict) -> int:
+    """LangSmith evaluator: total node proving attempts across the run."""
+    return sum(record.get("attempts", 0) for record in outputs.get("node_records", []))
+
+
+@traceable
+def blueprint_comparator_passed(outputs: dict) -> bool:
+    """LangSmith evaluator: did Comparator accept the proof on this host?"""
+    return outputs.get("comparator_status") == "passed"
+
+
+BLUEPRINT_EVALUATORS = [
+    blueprint_solved,
+    blueprint_graph_size,
+    blueprint_refinement_rounds,
+    blueprint_reused_proofs,
+    blueprint_node_attempts,
+    blueprint_comparator_passed,
+]

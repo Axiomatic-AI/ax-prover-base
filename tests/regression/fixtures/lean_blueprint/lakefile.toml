@@ -1,0 +1,5 @@
+name = "blueprint"
+defaultTargets = ["Blueprint"]
+
+[[lean_lib]]
+name = "Blueprint"

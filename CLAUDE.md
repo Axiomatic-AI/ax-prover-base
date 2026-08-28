@@ -66,6 +66,13 @@ ax-prover prove MyModule:theorem_name --overwrite
 
 # Run batch experiments on a LangSmith dataset
 ax-prover experiment dataset_name --max-concurrency 8
+
+# Prove via the blueprint architect (helper-lemma decomposition)
+ax-prover --config blueprint.yaml prove MyModule:theorem_name --blueprint
+
+# Resume or restart a blueprint run
+ax-prover --config blueprint.yaml prove MyModule:theorem_name --blueprint --resume
+ax-prover --config blueprint.yaml prove MyModule:theorem_name --blueprint --restart
 ```
 
 **Note on `--skip-build` flag:**
@@ -85,6 +92,102 @@ The agent uses a 4-node iterative LangGraph workflow:
 4. **Memory** (`src/ax_prover/prover/memory.py`) — Summarizes lessons from failed attempts into a concise context ("lab notebook") to prevent repeating mistakes. Default strategy: `ExperienceProcessor` (self-reflection).
 
 Loop: Proposer → Builder → (Reviewer if build succeeds) → Memory → back to Proposer. Terminates on review approval, max iterations, or build timeout.
+
+### Blueprint Agent (`src/ax_prover/blueprint/`)
+
+An additive second proving mode, selected only with `--blueprint`. It decomposes a target
+into a DAG of helper lemmas rather than attacking it directly. The direct prover's
+`agent.py` is untouched; nothing routes here unless blueprint mode is explicitly selected.
+
+Pipeline (`orchestrator.py` is the state machine):
+
+1. **Architect** (`generation.py`) — produces a compiling Lean skeleton of `sorry`ed helper
+   lemmas. Its only tool is `lean_compile`.
+2. **Canonicalization** (`extraction.py`, `graph.py`) — the skeleton is compiled, its
+   declarations extracted, and the graph validated. The graph is derived from what Lean
+   elaborated, never from parsing model text.
+3. **Scheduling** (`scheduler.py`) — nodes whose declared parents are solved run
+   concurrently. Node provers (`node_prover.py`) are isolated and return proof bodies only.
+   Model-side and Lean-side concurrency are separate limits (see below).
+4. **Refinement** (`refinement.py`) — diagnoses drive a graph revision; `proof_store.py`
+   reuses proofs whose interface fingerprint is unchanged.
+5. **Assembly** (`assembly.py`, `comparator.py`) — deterministic same-file rendering, full
+   build, Comparator gate, then one atomic source edit.
+
+Key invariants, each covered by tests:
+
+- **The target is immutable by construction.** `workspace.py` renders the target from the
+  user's own file text; the architect supplies only helper source, declared parent edges,
+  and a proof plan. The signature is still checked defensively.
+- **Models return proof bodies, not declarations.** `tools.normalize_proof_body` strips
+  fences, restated theorems, and top-level commands before anything is compiled.
+- **The source is written exactly once**, at the end, after the assembled file compiles and
+  no `sorry`, `admit`, `axiom`, or `native_decide` remains in the generated region. Every
+  failure path writes nothing.
+- **Only `lean_compile` and `mathlib_search` are exposed.** No web search, no repo search,
+  no memory, no LLM reviewer.
+
+**Compilation backend** (`lean_service.py`): candidate compiles go through one warm
+`LeanInteract` server for the whole run, not a fresh `lake env lean` per attempt. Measured on
+a Mathlib project: ~0.06s warm versus a ~39s subprocess median, because LeanInteract reuses
+the elaborated state at the longest matching command prefix. Consequences to respect:
+
+- Always submit the **complete** module source. LeanInteract finds the reuse point itself;
+  splitting imports from the proof defeats it.
+- `max_node_agents` (default 4) bounds concurrent model agents; `max_lean_compiles`
+  (default 1) bounds concurrent compilations. They are deliberately independent: agents
+  reason, search, and wait on the provider in parallel while their `lean_compile` calls
+  serialize through one server. Competing Mathlib environments each need ~2GB resident, and
+  a server restart costs a full 25-134s re-elaboration, so raise `max_lean_compiles` only
+  where there is memory headroom.
+- Only the **stable prefix** (imports, options, trusted context) is warmed with
+  `add_to_session_cache=True`, so a crash replays the shared environment rather than a pile
+  of obsolete graph branches. Per-node parent signatures are excluded by design.
+- Call `service.invalidate(...)` when imports, toolchain, lake options, trusted context, or
+  parent signatures change. A changed proof body preserves the cache.
+- A single response supplies errors, warnings, declarations, sorries, and axioms, so there
+  is no second parsing pass after a successful compile.
+- The final assembled file is verified with batch `lake env lean`, deliberately independent
+  of any incremental REPL state, before Comparator runs.
+
+**Node acceptance is compile plus axiom check.** A node is solved only when the compile
+reports no error *and* `#print axioms <decl>` lists nothing outside the allow-list
+(`DEFAULT_PERMITTED_AXIOMS` plus this node's parent placeholder names). This exists because a
+compiler-clean proof can still reach a `sorry`: `have h : ... := sorry` compiles with only a
+warning. It is also why a proven parent is rendered as a named `axiom` rather than
+`:= sorry` in a node's scratch module - otherwise every proof *using* a parent would
+transitively depend on `sorryAx` and be indistinguishable from an unproven hole.
+
+Related, and worth knowing when reading verdicts: `simpa using nonexistent_lemma` compiles
+with **no error** when `simp` alone closes the goal, because `simpa` discards the unused
+term. Verified sound via `#print axioms` (only `propext`), so it is misleading rather than
+unsound.
+
+**Extraction backend:** `extraction.py` is an adapter over `lean_interact`, whose
+`DeclarationInfo` already carries every canonical field the design calls for (`full_name`,
+`kind`, elaborated `signature`/`type` pretty-printing, docstring, source range, and
+`type`/`value` constant dependencies). Swapping in a different extractor means replacing
+`extract_declarations` only.
+
+**Blueprint docstring protocol:** every generated helper declares its graph identity in a
+fenced JSON block inside its Lean docstring:
+
+````lean
+/--
+```ax-blueprint
+{"version": 1, "id": "positive_denominator", "parents": []}
+```
+
+## Statement
+
+The denominator is positive.
+-/
+theorem positive_denominator (x : Real) (hx : 0 < x) : 0 < x + 1 := by
+  sorry
+````
+
+Docstring prose is deliberately excluded from proof fingerprints, so a prose-only
+refinement preserves every stored proof.
 
 ### Key Abstractions
 
@@ -262,18 +365,22 @@ Secrets cascade (first found wins, shell env always takes priority):
 4. Package root `.env.secrets` (editable installs)
 
 Required: at least one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`
-Optional: `TAVILY_API_KEY` (web search), `LANGSMITH_API_KEY` (tracing)
+Optional: `TAVILY_API_KEY` (web search), `LANGSMITH_API_KEY` (tracing),
+`OPENROUTER_API_KEY` (blueprint mode's default models)
 
 ### YAML Config
 
 LLM model is configured via YAML config files (no hardcoded default).
 Default config is bundled in the package at `src/ax_prover/configs/default.yaml`.
+Blueprint mode's config is bundled at `src/ax_prover/configs/blueprint.yaml`; layer it on
+with `--config blueprint.yaml`.
 Config resolution: CWD > `--folder` > bundled package configs > package root `configs/`.
 
 ## Repository Structure
 
 ```
 src/ax_prover/
+├── blueprint/       # Blueprint mode (architect, scheduler, refiner, assembly, lean_service)
 ├── commands/        # CLI command implementations (prove, experiment, configure)
 ├── configs/         # Bundled default YAML configs and secrets template
 ├── models/          # Pydantic state models (proving, messages, files, declaration)

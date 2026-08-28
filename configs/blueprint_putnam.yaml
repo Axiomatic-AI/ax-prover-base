@@ -1,0 +1,11 @@
+# Blueprint mode tuned for the `putnam_solutions_tiny` acceptance benchmark.
+#
+#   ax-prover --config blueprint_putnam.yaml experiment putnam_solutions_tiny
+#
+# Dataset: e29db63d-ad8b-4e2e-8633-45d12a72755f
+
+import:
+  - ../src/ax_prover/configs/blueprint.yaml
+
+blueprint:
+  max_refinement_rounds: 16

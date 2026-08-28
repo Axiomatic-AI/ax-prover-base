@@ -8,11 +8,82 @@ import sys
 from pathlib import Path
 
 from .commands import experiment, prove
+from .commands.prove import BlueprintOverrides
 from .config import Config
 from .utils import get_logger, load_env_secrets, merge_configs, reconfigure_log_level, save_config
 from .utils.build import build_lean_repo
 
 logger = get_logger(__name__)
+
+
+def _add_blueprint_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add blueprint-mode flags to the prove subcommand."""
+    group = parser.add_argument_group("blueprint mode")
+    group.add_argument(
+        "--blueprint",
+        action="store_true",
+        help="Prove via the blueprint architect: decompose the target into helper lemmas",
+    )
+    group.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume a blueprint run from its checkpoint, reusing valid proofs",
+    )
+    group.add_argument(
+        "--restart",
+        action="store_true",
+        help="Discard any blueprint checkpoint and start the run from scratch",
+    )
+    group.add_argument(
+        "--max-refinements",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Maximum blueprint refinement rounds (default: from config)",
+    )
+    group.add_argument(
+        "--max-node-agents",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Maximum node agents reasoning concurrently (default: from config)",
+    )
+    group.add_argument(
+        "--max-lean-compiles",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Maximum concurrent Lean compilations (default: 1). Raise only on a machine "
+            "with memory headroom for several Mathlib environments."
+        ),
+    )
+    group.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help="Directory holding blueprint checkpoints (default: from config)",
+    )
+    group.add_argument(
+        "--require-comparator",
+        action="store_true",
+        help="Fail the run if Comparator cannot run (instead of reporting comparator_pending)",
+    )
+
+
+def _blueprint_overrides(args: argparse.Namespace) -> BlueprintOverrides:
+    """Collect blueprint CLI flags into overrides."""
+    return BlueprintOverrides(
+        enabled=args.blueprint,
+        resume=args.resume,
+        restart=args.restart,
+        max_refinements=args.max_refinements,
+        max_node_agents=args.max_node_agents,
+        max_lean_compiles=args.max_lean_compiles,
+        checkpoint_dir=args.checkpoint_dir,
+        require_comparator=args.require_comparator,
+    )
 
 
 def main() -> None:
@@ -48,6 +119,12 @@ Examples:
 
   # Prove the theorem at a specific line in a file
   ax-prover prove MyProject/Algebra/Ring.lean#L42
+
+  # Prove with the blueprint architect (helper-lemma decomposition)
+  ax-prover prove MyProject/Algebra/Ring.lean:my_theorem --blueprint
+
+  # Resume an interrupted blueprint run from its checkpoint
+  ax-prover prove MyProject/Algebra/Ring.lean:my_theorem --blueprint --resume
 
   # Run an experiment on a dataset
   ax-prover experiment dataset_name
@@ -120,6 +197,7 @@ Examples:
         metavar="FILE",
         help="Write JSON output to file",
     )
+    _add_blueprint_arguments(prove_parser)
 
     experiment_parser = subparsers.add_parser(
         "experiment", help="Run prover experiments on a LangSmith dataset"
@@ -144,6 +222,14 @@ Examples:
         type=str,
         default=None,
         help="Prefix for the experiment name (default: <dataset_name>_experiment)",
+    )
+    experiment_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Blueprint mode: reuse checkpointed proofs whose interface is unchanged, so an "
+            "interrupted run continues instead of reproving from scratch"
+        ),
     )
     experiment_parser.add_argument(
         "--skip-build",
@@ -208,6 +294,7 @@ Examples:
                 config,
                 overwrite=overwrite,
                 output_file=output_file,
+                blueprint=_blueprint_overrides(args),
             )
         )
         sys.exit(exit_code)
@@ -227,6 +314,7 @@ Examples:
                 max_concurrency=max_concurrency,
                 experiment_prefix=experiment_prefix,
                 output_file=output_file,
+                resume=args.resume,
             )
         )
         sys.exit(exit_code)

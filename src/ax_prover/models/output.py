@@ -1,6 +1,7 @@
 """Structured output models for prover results."""
 
 import logging
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -15,6 +16,10 @@ class ProverOutput(BaseModel):
     success: bool = Field(description="Whether the proof succeeded")
     error: str | None = Field(default=None, description="Error message if failed")
     summary: str = Field(default="", description="LLM-generated summary of the prover run")
+    details: dict[str, Any] | None = Field(
+        default=None,
+        description="Mode-specific metrics, e.g. a blueprint run's graph and node records",
+    )
 
     @classmethod
     def from_prover_state(cls, state: ProverAgentState) -> "ProverOutput":
