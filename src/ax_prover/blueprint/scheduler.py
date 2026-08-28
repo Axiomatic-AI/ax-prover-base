@@ -96,6 +96,12 @@ async def run_schedule(
                     result = await prove_node(
                         workspace, blueprint, by_id[node_id], client, role, search_tool
                     )
+                except asyncio.CancelledError:
+                    # CancelledError is a BaseException, so the handler below cannot see it.
+                    # The node stays pending in the checkpoint and is retried on resume, so
+                    # nothing is lost; cancellation must keep propagating.
+                    logger.warning(f"Node {node_id!r} cancelled; it stays pending")
+                    raise
                 except Exception as e:  # noqa: BLE001 - reported as an infrastructure error
                     logger.exception(f"Node {node_id!r} raised an unexpected error")
                     result = NodeAttemptResult(

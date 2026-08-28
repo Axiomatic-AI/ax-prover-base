@@ -307,3 +307,22 @@ async def test_a_positive_limit_still_caps_a_wide_frontier(workspace, store, mon
     await run_schedule(workspace, blueprint, store, None, ROLE, max_node_agents=3)
 
     assert peak <= 3
+
+
+async def test_a_cancelled_node_stays_pending_and_propagates(
+    workspace, store, wide_blueprint, monkeypatch
+):
+    """Cancellation is a BaseException, so the broad handler cannot absorb it."""
+
+    async def cancelled(workspace, blueprint, node, client, role, search_tool=None):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(scheduler, "prove_node", cancelled)
+    store.reconcile(wide_blueprint, ENVIRONMENT)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_schedule(workspace, wide_blueprint, store, None, ROLE)
+
+    # Nothing is lost: the checkpoint still has the node pending, so resume retries it.
+    resumed = ProofStore.open(store.path.parent, "Mod:my_target", resume=True)
+    assert resumed.records["left"].status is NodeStatus.PENDING

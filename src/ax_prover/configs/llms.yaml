@@ -94,7 +94,20 @@ llm_configs:
 
   # OpenRouter-hosted models. Requires OPENROUTER_API_KEY.
   # `provider_sort` is lifted into OpenRouter's provider routing field.
+  # Reasoning effort is not a paper parameter; Appendix A discloses only token lengths and
+  # retry counts. Traces put 145 of 150 run-minutes in LLM calls (p90 103s, max 284s) versus
+  # 3 minutes in Lean, so effort dominates wall-clock. `high` is the starting point; raise to
+  # `xhigh` if solve rate suffers.
   deepseek_v4_flash:
+    model: "openrouter:deepseek/deepseek-v4-flash-0731"
+    provider_config:
+      temperature: null
+      max_tokens: null
+      reasoning_effort: "high"
+      provider_sort: "exacto"
+
+  # Kept for an effort A/B against the above.
+  deepseek_v4_flash_xhigh:
     model: "openrouter:deepseek/deepseek-v4-flash-0731"
     provider_config:
       temperature: null
