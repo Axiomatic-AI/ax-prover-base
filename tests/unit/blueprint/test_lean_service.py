@@ -441,3 +441,20 @@ async def test_qualified_keys_keep_targets_on_separate_servers(ok_response):
     assert service.lease("putnam_2005_a5:target") == a
     assert service.lease("putnam_1986_a6:target") == b
     await service.aclose()
+
+
+async def test_two_groups_do_not_evict_each_others_warm_prefix(ok_response):
+    """Warming the whole pool per target made concurrent targets thrash each other."""
+    servers = [FakeServer(ok_response) for _ in range(2)]
+    service = await service_for(servers)
+
+    a, b = "Mod:a", "Mod:b"
+    for _ in range(3):
+        for group, prefix in ((a, "import A\n"), (b, "import B\n")):
+            await service.warm(prefix, index=service.lease(group))
+            await service.compile("body", node_id=f"{group}:n", group=group)
+
+    # One warm-up per group, not one per alternation.
+    assert service.stats.warmups == 2
+    assert len(set(service._leases.values())) == 2
+    await service.aclose()

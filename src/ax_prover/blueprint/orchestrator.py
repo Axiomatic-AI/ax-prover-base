@@ -74,7 +74,6 @@ class BlueprintOrchestrator:
         self.prover_role = config.role("prover")
         self.refiner_role = config.role("refiner")
 
-        self._compile_stats: dict = {}
         self._extra_servers: list[LeanInteractServer] = []
         self.service = LeanCompileService(runtime.lean_interact_server)
         self.architect_client = LLMClient(self.architect_role.llm)
@@ -158,9 +157,6 @@ class BlueprintOrchestrator:
             return await self._prove_with_service(item, options, self.service)
         finally:
             self.service.release(item.location.formatted_context)
-            # Pool-wide, since the pool is shared across the batch. Per-node counts are
-            # qualified by target so they stay attributable.
-            self._compile_stats = self.service.stats.as_dict()
 
     async def _prove_with_service(
         self, item: TargetItem, options: BlueprintOptions, service: LeanCompileService
@@ -168,13 +164,11 @@ class BlueprintOrchestrator:
         target = item.location.formatted_context
         workspace = self._open_workspace(item, service)
 
-        if len(service.servers) > 1:
-            # Warm every server up front and in parallel: otherwise the first node to land
-            # on a cold server pays a full Mathlib elaboration mid-round. A single server
-            # is still warmed lazily, so a fully resumed run pays nothing.
-            elapsed = await service.warm_all(workspace.stable_prefix)
-            if elapsed:
-                logger.info(f"Warmed {len(service.servers)} Lean servers in {elapsed:.1f}s")
+        # No eager warm-up. `compile_candidate` warms this target's leased server on first
+        # use and no-ops thereafter, so a run that never reaches Lean pays nothing. Warming
+        # the whole pool with one target's prefix was actively harmful: concurrent targets
+        # evicted each other's warm state, and a two target run spent 9 warm-ups on 10
+        # compiles.
 
         store = ProofStore.open(
             self.config.checkpoint_dir,
@@ -448,5 +442,8 @@ class BlueprintOrchestrator:
             comparator_status=comparator_status,
             source_modified=source_modified,
             error=error,
-            compile_stats=dict(self._compile_stats),
+            # Read at result time, not in a finally that runs afterwards: the pool is
+            # shared across the batch, so a stale snapshot would report another target's
+            # numbers, or none at all for whichever target finished first.
+            compile_stats=self.service.stats.as_dict(),
         )
