@@ -48,10 +48,24 @@ class NodeProposal(BaseModel):
 
 
 class NodeTriage(BaseModel):
-    """Structured triage of a node that could not be proven."""
+    """Three-part review of a node that could not be proven."""
 
     outcome: Literal["PROOF_TOO_HARD", "STATEMENT_WRONG"]
     detail: str = Field(description="One or two sentences explaining the verdict")
+    analysis: str = Field(
+        default="",
+        description=(
+            "Forensic account: what was tried, what compiled, what errors remained, and "
+            "where the gap is"
+        ),
+    )
+    suggested_fix: str = Field(
+        default="",
+        description=(
+            "For STATEMENT_WRONG, why it is false and how to repair it. For "
+            "PROOF_TOO_HARD, a helper-lemma decomposition that bridges the gap."
+        ),
+    )
 
 
 @dataclass
@@ -286,5 +300,7 @@ async def diagnose_node(
     return NodeDiagnosis(
         outcome=NodeOutcome(triage.outcome),
         detail=triage.detail,
+        analysis=triage.analysis,
+        suggested_fix=triage.suggested_fix,
         last_error=last_error,
     )

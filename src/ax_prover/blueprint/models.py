@@ -123,10 +123,17 @@ class NodeOutcome(StrEnum):
 
 
 class NodeDiagnosis(BaseModel):
-    """Structured explanation of why a node was not solved."""
+    """Structured explanation of why a node was not solved.
+
+    `analysis` and `suggested_fix` mirror the paper's three-part review: a one-line verdict
+    gives the refiner nothing to act on, whereas a forensic account plus a proposed
+    decomposition is what lets it bridge the gap rather than guess.
+    """
 
     outcome: NodeOutcome
     detail: str = ""
+    analysis: str = ""
+    suggested_fix: str = ""
     last_error: str = ""
 
 

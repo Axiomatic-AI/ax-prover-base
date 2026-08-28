@@ -12,7 +12,8 @@ from ..utils.lean_interact import LeanInteractServer
 from ..utils.llm import LLMClient
 from ..utils.logging import get_logger
 from .generation import SkeletonCandidate, run_skeleton_loop, truncate_context
-from .models import Blueprint, NodeRecord, NodeStatus
+from .graph import topological_order
+from .models import Blueprint, NodeDiagnosis, NodeRecord, NodeStatus
 from .prompts import BLUEPRINT_PROTOCOL, REFINER_SYSTEM_PROMPT, REFINER_USER_PROMPT
 from .tools import make_skeleton_compile_tool
 from .workspace import BlueprintWorkspace
@@ -20,48 +21,60 @@ from .workspace import BlueprintWorkspace
 logger = get_logger(__name__)
 
 
-def format_solved(blueprint: Blueprint, records: dict[str, NodeRecord]) -> str:
-    """List solved helpers with their exact statements, so the refiner can preserve them."""
-    solved = [
-        node
-        for node in blueprint.helpers
-        if records.get(node.id) and records[node.id].status is NodeStatus.SOLVED
-    ]
-    if not solved:
-        return "(none yet)"
-
-    return "\n\n".join(
-        f"- `{node.id}` is proven:\n```lean\n{node.statement_source_no_doc.rstrip()}\n```"
-        for node in solved
-    )
+#: Verdict markers the refiner reads. Input-only: the prompt tells it not to copy them back.
+PROVED_MARKER = "-- PROVED"
+UNPROVED_MARKER = "-- UNPROVED"
+NOT_ATTEMPTED_MARKER = "-- NOT ATTEMPTED"
 
 
-def format_failures(blueprint: Blueprint, records: dict[str, NodeRecord]) -> str:
-    """Report each unsolved node's diagnosis and its last compiler output."""
-    by_id = blueprint.by_id
-    sections = []
+def render_review(diagnosis: NodeDiagnosis | None) -> str:
+    """Render a failed node's three-part review block."""
+    if diagnosis is None:
+        return ""
 
-    for node_id, record in records.items():
-        if record.status is NodeStatus.SOLVED or node_id not in by_id:
+    sections = [f"## Diagnosis\n{diagnosis.outcome}"]
+    analysis = diagnosis.analysis or diagnosis.detail or "(no analysis recorded)"
+    sections.append(f"## Analysis\n{analysis.strip()}")
+    if diagnosis.suggested_fix.strip():
+        sections.append(f"## Suggested Fix\n{diagnosis.suggested_fix.strip()}")
+    if diagnosis.last_error.strip():
+        sections.append(f"## Last compiler output\n{diagnosis.last_error.strip()}")
+
+    return "/- Diagnosis\n" + "\n\n".join(sections) + "\n-/"
+
+
+def annotate_skeleton(blueprint: Blueprint, records: dict[str, NodeRecord]) -> str:
+    """Render the graph with each node's verdict and review attached in-band.
+
+    The paper's refiner reads verdicts as comments inside the skeleton rather than as a
+    separate report, which keeps each diagnosis adjacent to the statement it concerns.
+    """
+    blocks = []
+
+    for node in topological_order(blueprint):
+        if node.is_target:
             continue
 
-        node = by_id[node_id]
-        diagnosis = record.diagnosis
-        outcome = diagnosis.outcome if diagnosis else "NOT ATTEMPTED"
-        detail = diagnosis.detail if diagnosis else "blocked: a parent was never solved"
-        errors = diagnosis.last_error if diagnosis else ""
+        record = records.get(node.id)
+        statement = node.statement_source.rstrip()
+        declaration = f"{statement} := by sorry"
 
-        section = (
-            f"## `{node_id}` - {outcome}\n\n"
-            f"```lean\n{node.statement_source_no_doc.rstrip()}\n```\n\n"
-            f"Diagnosis: {detail}\n"
-            f"Attempts: {record.attempts}"
-        )
-        if errors:
-            section += f"\n\nLast compiler output:\n```\n{errors}\n```"
-        sections.append(section)
+        if record is None:
+            blocks.append(f"{NOT_ATTEMPTED_MARKER}\n{declaration}")
+            continue
 
-    return "\n\n".join(sections) if sections else "(none)"
+        if record.status is NodeStatus.SOLVED:
+            blocks.append(f"{PROVED_MARKER}\n{declaration}")
+            continue
+
+        if record.diagnosis is None:
+            blocks.append(f"{NOT_ATTEMPTED_MARKER}\n{declaration}")
+            continue
+
+        review = render_review(record.diagnosis)
+        blocks.append(f"{UNPROVED_MARKER}\n{declaration}\n\n{review}")
+
+    return "\n\n".join(blocks) if blocks else "(the graph has no helpers yet)"
 
 
 async def refine_blueprint(
@@ -83,9 +96,7 @@ async def refine_blueprint(
         target_statement=workspace.target_statement_with_doc.rstrip() + " := by sorry",
         target_signature=workspace.target_signature,
         namespace_full=workspace.namespace_full,
-        helpers=blueprint.skeleton.strip() or "(unavailable)",
-        solved=format_solved(blueprint, records),
-        failures=format_failures(blueprint, records),
+        annotated_skeleton=annotate_skeleton(blueprint, records),
         file_context=truncate_context(workspace.prefix),
     )
 
