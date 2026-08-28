@@ -22,6 +22,11 @@ def store(tmp_path):
     return ProofStore.open(tmp_path, "Mod:my_target")
 
 
+def cancelled_set(values):
+    """Identity helper, so the released/cancelled assertion reads symmetrically."""
+    return set(values)
+
+
 def fake_prover(outcomes: dict[str, NodeOutcome], observed: list[str] | None = None):
     """A `prove_node` stand-in driven by a per-node outcome table."""
 
@@ -239,5 +244,6 @@ async def test_solving_a_node_cancels_its_queued_compiles(
     finally:
         workspace.compile_service = None
 
-    assert set(cancelled) == {"left", "right", "target"}
-    assert set(released) == {"left", "right", "target"}
+    # Keys are target-qualified so unrelated targets cannot share a lease.
+    assert set(cancelled) == {"my_target:left", "my_target:right", "my_target:target"}
+    assert set(released) == cancelled_set(cancelled)

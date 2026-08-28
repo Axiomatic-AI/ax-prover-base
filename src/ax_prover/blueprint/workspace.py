@@ -205,6 +205,15 @@ class BlueprintWorkspace:
         relative = str(scratch.relative_to(self.base_folder))
         return output.replace(relative, "<scratch>.lean").replace(scratch.name, "<scratch>.lean")
 
+    def node_key(self, node_id: str) -> str:
+        """Pool-wide key for a node, qualified by target.
+
+        Node ids repeat across targets (every graph has a `target` node), so unqualified
+        keys would collide in the pool's leases and stats and pin unrelated targets to one
+        server.
+        """
+        return f"{self.location.name}:{node_id}" if node_id else ""
+
     @property
     def stable_prefix(self) -> str:
         """The common environment worth warming once: imports, options, trusted context.
@@ -234,12 +243,11 @@ class BlueprintWorkspace:
             return await self.compile_source(source, label=label)
 
         # Warm only the server this request will land on; the pool leases stickily.
-        await self.compile_service.warm(
-            self.stable_prefix, index=self.compile_service.lease(node_id)
-        )
+        key = self.node_key(node_id)
+        await self.compile_service.warm(self.stable_prefix, index=self.compile_service.lease(key))
         outcome = await self.compile_service.compile(
             source,
-            node_id=node_id,
+            node_id=key,
             priority=priority or CompilePriority.NODE,
             check_axioms_of=check_axioms_of,
             allowed_axioms=allowed_axioms,

@@ -130,6 +130,9 @@ async def _prove_all_items(
                 if not output_file:
                     raise
 
+        if orchestrator is not None:
+            await orchestrator.aclose()
+
         if output_file:
             write_json_output(outputs, output_file)
 

@@ -126,6 +126,9 @@ async def experiment(
 
             await results.wait()
 
+            if orchestrator is not None:
+                await orchestrator.aclose()
+
             error_count = 0
             for result in results._results:
                 outputs = result["run"].outputs
@@ -217,7 +220,11 @@ async def _run_blueprint_sample(
     logger.info(f"Running blueprint experiment for: {target}")
 
     try:
-        items = await parse_prove_target(runtime.lean_interact_server, runtime.base_folder, target)
+        # Parse on a pool server chosen by target: a single server serializes internally,
+        # so routing every concurrent target at one server makes batch start-up serial.
+        items = await parse_prove_target(
+            orchestrator.parse_server(target), runtime.base_folder, target
+        )
 
         if not items:
             raise ValueError(f"No unproven functions found in: {target}")

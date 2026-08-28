@@ -75,6 +75,8 @@ class BlueprintOrchestrator:
         self.refiner_role = config.role("refiner")
 
         self._compile_stats: dict = {}
+        self._extra_servers: list[LeanInteractServer] = []
+        self.service = LeanCompileService(runtime.lean_interact_server)
         self.architect_client = LLMClient(self.architect_role.llm)
         self.prover_client = LLMClient(self.prover_role.llm)
         self.refiner_client = LLMClient(self.refiner_role.llm)
@@ -83,7 +85,43 @@ class BlueprintOrchestrator:
     async def create(cls, config: BlueprintConfig, runtime: Runtime) -> "BlueprintOrchestrator":
         """Build an orchestrator, warming up the optional `mathlib_search` backend."""
         search_tool = await make_mathlib_search_tool(config.prover_tools, runtime)
-        return cls(config, runtime, search_tool)
+        instance = cls(config, runtime, search_tool)
+        instance._open_pool()
+        return instance
+
+    def _open_pool(self) -> None:
+        """Create the run's Lean server pool, shared by every target this orchestrator proves.
+
+        The pool is orchestrator-scoped, not per-target: a batch run proves many targets
+        concurrently, and creating a pool per target would multiply servers by the batch
+        concurrency and exhaust memory.
+        """
+        size = max(1, self.config.max_lean_compiles)
+        self._extra_servers = [
+            LeanInteractServer(self.runtime.base_folder, self.runtime.config.lean_interact)
+            for _ in range(size - 1)
+        ]
+        # Slot 0 is the runtime's own server, so a single-server pool adds nothing.
+        self.service = LeanCompileService([self.runtime.lean_interact_server, *self._extra_servers])
+        if self._extra_servers:
+            logger.info(f"Lean server pool: {size} servers ({len(self._extra_servers)} new)")
+
+    def parse_server(self, key: str) -> LeanInteractServer:
+        """A pool server to parse a target file with, spread by key.
+
+        Target parsing elaborates a whole Mathlib-importing file, and a single server
+        serializes internally, so routing every concurrent target at one server makes batch
+        start-up serial.
+        """
+        servers = self.service.servers
+        return servers[hash(key) % len(servers)]
+
+    async def aclose(self) -> None:
+        """Shut down the compile queue and the servers this orchestrator created."""
+        await self.service.aclose()
+        for server in self._extra_servers:
+            await server.aclose()
+        self._extra_servers = []
 
     async def prove(
         self, item: TargetItem, options: BlueprintOptions | None = None
@@ -113,34 +151,12 @@ class BlueprintOrchestrator:
             )
 
     async def _prove(self, item: TargetItem, options: BlueprintOptions) -> BlueprintRunResult:
-        # A pool of warm REPLs for the whole run. Candidate compiles reuse an elaborated
-        # prefix instead of paying a fresh Mathlib elaboration per attempt, and a node's
-        # attempts stay on one server so its own cache branch is reused too.
-        servers, extras = self._build_server_pool()
-        service = LeanCompileService(servers)
         try:
-            return await self._prove_with_service(item, options, service)
+            return await self._prove_with_service(item, options, self.service)
         finally:
-            self._compile_stats = service.stats.as_dict()
-            await service.aclose()
-            for extra in extras:
-                await extra.aclose()
-
-    def _build_server_pool(self) -> tuple[list[LeanInteractServer], list[LeanInteractServer]]:
-        """Build the Lean server pool, reusing the runtime's server as the first slot.
-
-        Returns the full pool and just the servers this run created, which are the ones it
-        must close. Reusing the runtime's server keeps the single-server default identical
-        to before, rather than silently doubling memory use.
-        """
-        size = max(1, self.config.max_lean_compiles)
-        extras = [
-            LeanInteractServer(self.runtime.base_folder, self.runtime.config.lean_interact)
-            for _ in range(size - 1)
-        ]
-        if extras:
-            logger.info(f"Using a pool of {size} Lean servers ({len(extras)} additional)")
-        return [self.runtime.lean_interact_server, *extras], extras
+            # Pool-wide, since the pool is shared across the batch. Per-node counts are
+            # qualified by target so they stay attributable.
+            self._compile_stats = self.service.stats.as_dict()
 
     async def _prove_with_service(
         self, item: TargetItem, options: BlueprintOptions, service: LeanCompileService

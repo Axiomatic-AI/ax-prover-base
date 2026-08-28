@@ -341,7 +341,8 @@ async def test_warm_service_reuses_the_prefix_across_candidates(blueprint_worksp
         assert result.success, result.output
         # One warm-up for the whole run, not one per candidate.
         assert service.stats.warmups == 1
-        assert service.stats.per_node[node.id] == 3
+        # Stats keys are target-qualified, so counts stay attributable pool-wide.
+        assert service.stats.per_node[workspace.node_key(node.id)] == 3
         # Three candidates plus the skeleton compile from build_blueprint.
         assert service.stats.completed == 4
         assert service.stats.mean_warm_seconds > 0

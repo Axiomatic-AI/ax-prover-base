@@ -399,3 +399,17 @@ async def test_axioms_are_not_gated_without_a_declaration_to_check():
 
     assert outcome.success
     await service.aclose()
+
+
+async def test_qualified_keys_keep_targets_on_separate_servers(ok_response):
+    """Every graph has a node called `target`; unqualified keys would collide."""
+    servers = [FakeServer(ok_response) for _ in range(4)]
+    service = await service_for(servers)
+
+    a = service.lease("putnam_2005_a5:target")
+    b = service.lease("putnam_1986_a6:target")
+    service._inflight[a] += 1
+
+    assert service.lease("putnam_2005_a5:target") == a
+    assert service.lease("putnam_1986_a6:target") == b
+    await service.aclose()
