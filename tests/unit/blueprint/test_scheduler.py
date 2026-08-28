@@ -246,4 +246,5 @@ async def test_solving_a_node_cancels_its_queued_compiles(
 
     # Keys are target-qualified so unrelated targets cannot share a lease.
     assert set(cancelled) == {"my_target:left", "my_target:right", "my_target:target"}
-    assert set(released) == cancelled_set(cancelled)
+    # The lease belongs to the target, so the scheduler must not release it mid-run.
+    assert released == []

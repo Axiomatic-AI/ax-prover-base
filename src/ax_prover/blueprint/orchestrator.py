@@ -106,15 +106,18 @@ class BlueprintOrchestrator:
         if self._extra_servers:
             logger.info(f"Lean server pool: {size} servers ({len(self._extra_servers)} new)")
 
-    def parse_server(self, key: str) -> LeanInteractServer:
-        """A pool server to parse a target file with, spread by key.
+    def parse_server(self) -> LeanInteractServer:
+        """The next pool server to parse a target file with, round-robin.
 
-        Target parsing elaborates a whole Mathlib-importing file, and a single server
-        serializes internally, so routing every concurrent target at one server makes batch
-        start-up serial.
+        Target parsing elaborates a whole Mathlib-importing file, and one server serializes
+        internally, so routing every concurrent target at one server makes batch start-up
+        serial. Round-robin also spreads the initial Mathlib load across the whole pool.
+
+        Deliberately not the target's proving lease: that lease is keyed on `Module:name`,
+        which is only known after parsing, so keying it on the dataset path would strand a
+        warm prefix on a server the target never uses.
         """
-        servers = self.service.servers
-        return servers[hash(key) % len(servers)]
+        return self.service.servers[self.service.lease("")]
 
     async def aclose(self) -> None:
         """Shut down the compile queue and the servers this orchestrator created."""
@@ -154,6 +157,7 @@ class BlueprintOrchestrator:
         try:
             return await self._prove_with_service(item, options, self.service)
         finally:
+            self.service.release(item.location.formatted_context)
             # Pool-wide, since the pool is shared across the batch. Per-node counts are
             # qualified by target so they stay attributable.
             self._compile_stats = self.service.stats.as_dict()

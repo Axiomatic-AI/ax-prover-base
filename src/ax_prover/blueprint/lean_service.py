@@ -185,6 +185,7 @@ class LeanCompileService:
         self._workers: list[asyncio.Task] = []
         self._cancelled_nodes: set[str] = set()
         self._leases: dict[str, int] = {}
+        self._round_robin = itertools.count()
         self._inflight: list[int] = [0] * len(pool)
         self._warmed_prefix: list[str | None] = [None] * len(pool)
         self._started = False
@@ -213,24 +214,28 @@ class LeanCompileService:
         self._workers = []
         self._started = False
 
-    def lease(self, node_id: str, priority: int = int(CompilePriority.NODE)) -> int:
-        """Return the server index a request should run on, creating a sticky lease.
+    def lease(self, group: str) -> int:
+        """Return the server index a group's work runs on, creating a sticky lease.
 
-        A node keeps its server for its whole attempt sequence. Structural work has no node
-        of its own, so it goes wherever there is least queued.
+        Groups are targets, not individual nodes, because the warm prefix is per target:
+        putting two targets on one server makes it thrash between their prefixes,
+        re-elaborating one that was just evicted. All of a target's nodes therefore share a
+        server, which keeps both its prefix and its per-node cache branches warm.
+
+        Assignment is round-robin rather than least-in-flight: warm compiles finish in
+        milliseconds, so in-flight counts are almost always zero and ties would send every
+        group to server 0.
         """
-        if node_id and node_id in self._leases:
-            return self._leases[node_id]
+        if not group:
+            return next(self._round_robin) % len(self.servers)
 
-        index = min(range(len(self.servers)), key=lambda i: self._inflight[i])
-        if node_id:
-            self._leases[node_id] = index
-        del priority
-        return index
+        if group not in self._leases:
+            self._leases[group] = next(self._round_robin) % len(self.servers)
+        return self._leases[group]
 
-    def release(self, node_id: str) -> None:
-        """Drop a node's lease once it is solved or abandoned."""
-        self._leases.pop(node_id, None)
+    def release(self, group: str) -> None:
+        """Drop a group's lease once its target is finished."""
+        self._leases.pop(group, None)
 
     async def warm(self, stable_prefix: str, index: int | None = None) -> float:
         """Elaborate the stable prefix on one server, or on all of them.
@@ -288,6 +293,7 @@ class LeanCompileService:
         self,
         source: str,
         node_id: str = "",
+        group: str = "",
         priority: CompilePriority = CompilePriority.NODE,
         check_axioms_of: str | None = None,
         allowed_axioms: frozenset[str] = frozenset(),
@@ -299,6 +305,8 @@ class LeanCompileService:
                 finds the reuse point itself, and splitting imports from the proof defeats
                 it.
             node_id: Owning node, for per-node accounting and cancellation.
+            group: Lease group, normally the target name. Determines which server runs
+                this, so a target's whole graph stays on one warm prefix.
             priority: Structural work (architect, refiner) outranks node candidates.
             check_axioms_of: Fully qualified declaration to run `#print axioms` on.
             allowed_axioms: Axioms the declaration may legitimately depend on - the
@@ -324,7 +332,7 @@ class LeanCompileService:
             future=asyncio.get_running_loop().create_future(),
         )
 
-        index = self.lease(node_id, int(priority))
+        index = self.lease(group or node_id)
         self.stats.submitted += 1
         self.stats.per_worker[index] = self.stats.per_worker.get(index, 0) + 1
         if node_id:

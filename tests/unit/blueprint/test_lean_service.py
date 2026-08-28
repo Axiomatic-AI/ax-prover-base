@@ -220,8 +220,10 @@ async def test_several_servers_compile_in_parallel(ok_response):
     servers = [FakeServer(ok_response, delay=0.02) for _ in range(3)]
     service = await service_for(servers)
 
-    # Distinct node ids, so leases spread across the pool.
-    await asyncio.gather(*(service.compile(f"c{i}", node_id=f"n{i}") for i in range(6)))
+    # Distinct groups, so leases spread across the pool.
+    await asyncio.gather(
+        *(service.compile(f"c{i}", node_id=f"n{i}", group=f"g{i}") for i in range(6))
+    )
 
     assert service.max_lean_compiles == 3
     assert sum(1 for s in servers if s.commands) > 1, "work should span several servers"
@@ -230,13 +232,13 @@ async def test_several_servers_compile_in_parallel(ok_response):
     await service.aclose()
 
 
-async def test_a_nodes_attempts_stay_on_one_server(ok_response):
-    """Sticky leasing keeps a node's own incremental cache branch reusable."""
+async def test_a_targets_whole_graph_stays_on_one_server(ok_response):
+    """Sticky leasing keeps the target's warm prefix and node branches reusable."""
     servers = [FakeServer(ok_response) for _ in range(3)]
     service = await service_for(servers)
 
-    for _ in range(4):
-        await service.compile("body", node_id="sticky")
+    for i in range(4):
+        await service.compile("body", node_id=f"Mod:t:n{i}", group="Mod:t")
 
     busy = [i for i, s in enumerate(servers) if s.commands]
     assert len(busy) == 1
@@ -244,15 +246,41 @@ async def test_a_nodes_attempts_stay_on_one_server(ok_response):
     await service.aclose()
 
 
-async def test_releasing_a_lease_frees_the_node(ok_response):
+async def test_groups_spread_round_robin_across_servers(ok_response):
+    """Least-in-flight sent everything to server 0: warm compiles finish too fast."""
+    servers = [FakeServer(ok_response) for _ in range(4)]
+    service = await service_for(servers)
+
+    # Sequential, so every lease is taken while nothing is in flight.
+    for t in range(4):
+        await service.compile("body", node_id=f"t{t}:n", group=f"target_{t}")
+
+    assert all(s.commands for s in servers), "each server should get one target"
+    assert len(set(service._leases.values())) == 4
+    await service.aclose()
+
+
+async def test_two_targets_never_share_a_prefix_on_one_server(ok_response):
+    """Sharing a server makes it thrash between the two targets' prefixes."""
+    servers = [FakeServer(ok_response) for _ in range(4)]
+    service = await service_for(servers)
+
+    a = service.lease("Mod:target_a")
+    b = service.lease("Mod:target_b")
+
+    assert a != b
+    await service.aclose()
+
+
+async def test_releasing_a_lease_frees_the_group(ok_response):
     servers = [FakeServer(ok_response) for _ in range(2)]
     service = await service_for(servers)
 
-    first = service.lease("n1")
-    service.release("n1")
-    service._inflight[first] = 99  # make the old server the least attractive
+    first = service.lease("Mod:t")
+    assert service.lease("Mod:t") == first
 
-    assert service.lease("n1") != first
+    service.release("Mod:t")
+    assert "Mod:t" not in service._leases
     await service.aclose()
 
 
@@ -408,8 +436,8 @@ async def test_qualified_keys_keep_targets_on_separate_servers(ok_response):
 
     a = service.lease("putnam_2005_a5:target")
     b = service.lease("putnam_1986_a6:target")
-    service._inflight[a] += 1
 
+    assert a != b
     assert service.lease("putnam_2005_a5:target") == a
     assert service.lease("putnam_1986_a6:target") == b
     await service.aclose()

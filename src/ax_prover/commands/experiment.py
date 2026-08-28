@@ -222,9 +222,7 @@ async def _run_blueprint_sample(
     try:
         # Parse on a pool server chosen by target: a single server serializes internally,
         # so routing every concurrent target at one server makes batch start-up serial.
-        items = await parse_prove_target(
-            orchestrator.parse_server(target), runtime.base_folder, target
-        )
+        items = await parse_prove_target(orchestrator.parse_server(), runtime.base_folder, target)
 
         if not items:
             raise ValueError(f"No unproven functions found in: {target}")

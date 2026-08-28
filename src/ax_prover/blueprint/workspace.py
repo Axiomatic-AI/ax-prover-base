@@ -205,6 +205,11 @@ class BlueprintWorkspace:
         relative = str(scratch.relative_to(self.base_folder))
         return output.replace(relative, "<scratch>.lean").replace(scratch.name, "<scratch>.lean")
 
+    @property
+    def lease_group(self) -> str:
+        """Pool lease group for this target: its whole graph shares one warm server."""
+        return self.location.formatted_context
+
     def node_key(self, node_id: str) -> str:
         """Pool-wide key for a node, qualified by target.
 
