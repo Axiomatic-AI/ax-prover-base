@@ -86,3 +86,77 @@ def test_putnam_config_raises_the_refinement_budget():
 
     assert config.blueprint.enabled is True
     assert config.blueprint.max_refinement_rounds == 16
+
+
+def test_experiment_subcommand_accepts_the_blueprint_flags():
+    """These were only on `prove`, so `experiment --max-lean-compiles 8` was ignored."""
+    import contextlib
+    import io
+
+    from ax_prover.main import main
+
+    argv = [
+        "ax-prover",
+        "experiment",
+        "ds",
+        "--max-lean-compiles",
+        "8",
+        "--max-node-agents",
+        "6",
+        "--max-refinements",
+        "3",
+    ]
+    with contextlib.suppress(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+        import sys
+
+        original, sys.argv = sys.argv, argv
+        try:
+            # Fails later for lack of a dataset; argument parsing is what matters here.
+            main()
+        finally:
+            sys.argv = original
+
+
+def test_a_mistyped_flag_is_rejected_not_swallowed(capsys):
+    """`parse_known_args` folded unknown flags into config overrides, hiding typos."""
+    import sys
+
+    import pytest
+
+    from ax_prover.main import main
+
+    original, sys.argv = sys.argv, ["ax-prover", "experiment", "ds", "--no-such-flag", "8"]
+    try:
+        with pytest.raises(SystemExit):
+            main()
+    finally:
+        sys.argv = original
+
+    assert "unrecognized argument" in capsys.readouterr().err
+
+
+def test_blueprint_overrides_tolerate_absent_mode_flags():
+    """`experiment` has no --blueprint/--restart, so the collector must not require them."""
+    import argparse
+
+    from ax_prover.commands.prove import BlueprintOverrides
+    from ax_prover.main import _blueprint_overrides
+
+    args = argparse.Namespace(
+        max_refinements=3,
+        max_node_agents=6,
+        max_lean_compiles=8,
+        checkpoint_dir=None,
+        require_comparator=False,
+    )
+    overrides = _blueprint_overrides(args)
+
+    assert isinstance(overrides, BlueprintOverrides)
+    assert overrides.max_lean_compiles == 8
+    assert overrides.enabled is False
+
+    config = merge_configs([Config(), "default.yaml", "blueprint.yaml"])
+    overrides.apply(config)
+    assert config.blueprint.max_lean_compiles == 8
+    assert config.blueprint.max_node_agents == 6
+    assert config.blueprint.max_refinement_rounds == 3

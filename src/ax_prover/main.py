@@ -16,24 +16,31 @@ from .utils.build import build_lean_repo
 logger = get_logger(__name__)
 
 
-def _add_blueprint_arguments(parser: argparse.ArgumentParser) -> None:
-    """Add blueprint-mode flags to the prove subcommand."""
+def _add_blueprint_arguments(
+    parser: argparse.ArgumentParser, include_mode_flags: bool = True
+) -> None:
+    """Add blueprint-mode flags to a subcommand.
+
+    `experiment` selects blueprint mode from config and defines its own `--resume`, so its
+    group omits the mode flags; every budget and concurrency flag applies to both.
+    """
     group = parser.add_argument_group("blueprint mode")
-    group.add_argument(
-        "--blueprint",
-        action="store_true",
-        help="Prove via the blueprint architect: decompose the target into helper lemmas",
-    )
-    group.add_argument(
-        "--resume",
-        action="store_true",
-        help="Resume a blueprint run from its checkpoint, reusing valid proofs",
-    )
-    group.add_argument(
-        "--restart",
-        action="store_true",
-        help="Discard any blueprint checkpoint and start the run from scratch",
-    )
+    if include_mode_flags:
+        group.add_argument(
+            "--blueprint",
+            action="store_true",
+            help="Prove via the blueprint architect: decompose the target into helper lemmas",
+        )
+        group.add_argument(
+            "--resume",
+            action="store_true",
+            help="Resume a blueprint run from its checkpoint, reusing valid proofs",
+        )
+        group.add_argument(
+            "--restart",
+            action="store_true",
+            help="Discard any blueprint checkpoint and start the run from scratch",
+        )
     group.add_argument(
         "--max-refinements",
         type=int,
@@ -74,11 +81,11 @@ def _add_blueprint_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _blueprint_overrides(args: argparse.Namespace) -> BlueprintOverrides:
-    """Collect blueprint CLI flags into overrides."""
+    """Collect blueprint CLI flags into overrides, tolerating absent mode flags."""
     return BlueprintOverrides(
-        enabled=args.blueprint,
-        resume=args.resume,
-        restart=args.restart,
+        enabled=getattr(args, "blueprint", False),
+        resume=getattr(args, "resume", False),
+        restart=getattr(args, "restart", False),
         max_refinements=args.max_refinements,
         max_node_agents=args.max_node_agents,
         max_lean_compiles=args.max_lean_compiles,
@@ -245,9 +252,20 @@ Examples:
         metavar="FILE",
         help="Write JSON output to file",
     )
+    _add_blueprint_arguments(experiment_parser, include_mode_flags=False)
 
     # Parse known args to allow dot-notation overrides as unknown args
     args, unknown_args = parser.parse_known_args()
+
+    # Dot-notation overrides look like `key.subkey=value`. Anything else starting with a
+    # dash is a mistyped or misplaced flag, and silently folding it into the config would
+    # let a setting the user asked for be ignored without a word.
+    bad_flags = [arg for arg in unknown_args if arg.startswith("-")]
+    if bad_flags:
+        parser.error(
+            f"unrecognized argument(s) for this subcommand: {' '.join(bad_flags)}. "
+            "Config overrides use dot notation, e.g. blueprint.max_lean_compiles=8"
+        )
 
     # Handle configure command before loading configs (it doesn't need them)
     if args.command == "configure":
@@ -306,6 +324,8 @@ Examples:
         experiment_prefix = args.experiment_prefix
 
         output_file = args.output
+
+        _blueprint_overrides(args).apply(config)
 
         exit_code = asyncio.run(
             experiment(
