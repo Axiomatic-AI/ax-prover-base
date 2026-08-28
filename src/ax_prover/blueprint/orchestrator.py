@@ -11,11 +11,13 @@ and interrupted runs write nothing.
 from dataclasses import dataclass
 
 from langchain_core.tools import BaseTool
+from langsmith import trace
 
 from ..config import BlueprintConfig
 from ..models.proving import TargetItem
 from ..runtime import Runtime
 from ..utils.build import LeanBuildError
+from ..utils.git import get_git_hash, get_repo_metadata, is_git_dirty
 from ..utils.lean_interact import LeanInteractServer
 from ..utils.lean_parsing import find_declaration_by_name
 from ..utils.llm import LLMClient
@@ -132,10 +134,43 @@ class BlueprintOrchestrator:
 
         Returns a result describing the outcome; exceptions are converted into an
         `infrastructure_error` result so batch runs never crash on one item.
+
+        The whole run is one traced span. The experiment runner supplies its own parent, but
+        `prove` has none, so without this a single-target run emitted no trace at all and was
+        the one path that could not be debugged from LangSmith.
         """
         options = options or BlueprintOptions()
         target = item.location.formatted_context
 
+        with trace(
+            name=f"blueprint:{item.location.name}",
+            run_type="chain",
+            inputs={
+                "target": target,
+                "resume": options.resume,
+                "restart": options.restart,
+            },
+            metadata={
+                "mode": "blueprint",
+                "architect_model": self.architect_role.llm.model,
+                "prover_model": self.prover_role.llm.model,
+                "refiner_model": self.refiner_role.llm.model,
+                "max_refinement_rounds": self.config.max_refinement_rounds,
+                "max_node_agents": self.config.max_node_agents,
+                "max_lean_compiles": self.config.max_lean_compiles,
+                "git_hash": get_git_hash(),
+                "git_dirty": is_git_dirty(),
+                "repo": get_repo_metadata(self.runtime.base_folder),
+            },
+        ) as span:
+            result = await self._prove_reporting_errors(item, options, target)
+            span.end(outputs=result.model_dump(mode="json"))
+            return result
+
+    async def _prove_reporting_errors(
+        self, item: TargetItem, options: BlueprintOptions, target: str
+    ) -> BlueprintRunResult:
+        """Run the pipeline, turning failures into results rather than exceptions."""
         try:
             return await self._prove(item, options)
         except BlueprintError as e:

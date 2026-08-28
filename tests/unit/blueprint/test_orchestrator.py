@@ -435,3 +435,81 @@ async def test_a_diagnosis_survives_into_the_result(config, runtime, item, bluep
 
     diagnoses = [r.diagnosis for r in result.node_records if r.diagnosis]
     assert any(d.detail == "false as stated" for d in diagnoses)
+
+
+async def test_a_run_emits_one_traced_span(config, runtime, item, blueprint, monkeypatch):
+    """`prove --blueprint` had no tracing root, so single-target runs emitted nothing."""
+    spans: list[dict] = []
+
+    class FakeSpan:
+        def __init__(self, kwargs):
+            self.kwargs = kwargs
+            self.outputs = None
+
+        def end(self, outputs=None):
+            self.outputs = outputs
+
+    class fake_trace:
+        def __init__(self, **kwargs):
+            self.span = FakeSpan(kwargs)
+
+        def __enter__(self):
+            spans.append(self.kwargs_and_span())
+            return self.span
+
+        def kwargs_and_span(self):
+            return {"kwargs": self.span.kwargs, "span": self.span}
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(orchestrator_module, "trace", fake_trace)
+    _, fake_compile = patch_pipeline(monkeypatch, blueprint)
+
+    result = await run(config, runtime, item, monkeypatch, fake_compile)
+
+    assert len(spans) == 1
+    kwargs = spans[0]["kwargs"]
+    assert kwargs["name"] == "blueprint:my_target"
+    assert kwargs["run_type"] == "chain"
+    assert kwargs["inputs"]["target"] == "Mod:my_target"
+    meta = kwargs["metadata"]
+    assert meta["mode"] == "blueprint"
+    assert meta["prover_model"].startswith("openrouter:")
+    assert "git_hash" in meta and "max_refinement_rounds" in meta
+    # The outcome is attached, so a trace shows the verdict without opening the checkpoint.
+    assert spans[0]["span"].outputs["status"] == result.status.value
+
+
+async def test_a_failed_run_still_closes_its_span(config, runtime, monkeypatch, blueprint):
+    """A failure must not leave the span open, or the trace never resolves."""
+    spans: list = []
+
+    class FakeSpan:
+        def __init__(self):
+            self.outputs = None
+
+        def end(self, outputs=None):
+            self.outputs = outputs
+
+    class fake_trace:
+        def __init__(self, **kwargs):
+            self.span = FakeSpan()
+
+        def __enter__(self):
+            spans.append(self.span)
+            return self.span
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(orchestrator_module, "trace", fake_trace)
+    _, fake_compile = patch_pipeline(monkeypatch, blueprint)
+    empty = TargetItem(location=Location(name="ghost", module_path="Mod"))
+
+    result = await run(config, runtime, empty, monkeypatch, fake_compile)
+
+    assert result.status is RunStatus.FAILED
+    assert len(spans) == 1
+    assert spans[0].outputs is not None, "the span must be closed even on failure"
+    assert spans[0].outputs["status"] == "failed"

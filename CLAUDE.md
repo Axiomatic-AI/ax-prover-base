@@ -248,6 +248,19 @@ refinement preserves every stored proof.
 - `experiment` (`src/ax_prover/commands/experiment.py`): Run batch experiments on LangSmith datasets with evaluation metrics
 - `configure` (`src/ax_prover/commands/configure.py`): Interactive setup for API keys (writes to platform config dir via `platformdirs`)
 
+### Blueprint tracing
+
+A blueprint run is one traced span, opened in `BlueprintOrchestrator.prove`. The experiment
+runner supplies its own parent via `aevaluate`, but `prove` has none, so without this a
+single-target run emitted no trace at all and was the one path that could not be debugged
+from LangSmith.
+
+Where to look matters: `aevaluate` routes child spans into the **experiment session**
+(`<prefix>-<hash>`), not `LANGSMITH_PROJECT`, and the experiment comparison table only
+populates when an example returns. Use the session's Traces view for live activity. A
+`prove` run instead traces into `LANGSMITH_PROJECT` as a single tree, which is the better
+path for debugging one target.
+
 ### LangSmith Integration
 
 Agent runs include LangSmith metadata for tracing:
