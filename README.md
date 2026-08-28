@@ -159,9 +159,10 @@ ax-prover --config blueprint.yaml prove MyModule:theorem_name --blueprint \
 ```
 
 Model-side and Lean-side concurrency are separate. `--max-node-agents` controls how many
-node agents reason and search at once; `--max-lean-compiles` (default 1) controls how many
-Lean compilations run at once. Each concurrent Mathlib environment needs roughly 2GB
-resident, so raise the latter only on a machine with memory to spare.
+node agents reason and search at once; `--max-lean-compiles` (default 1) is the number of
+warm Lean servers, which is also how many compilations run at once. One server serializes
+internally, so Lean parallelism comes from more servers. Each needs roughly 2GB resident,
+so budget about one per 4GB of spare RAM: 1 on a laptop, 8-16 on a large host.
 
 The bundled `blueprint.yaml` runs all three roles on DeepSeek through OpenRouter, which
 needs `OPENROUTER_API_KEY`. Each role is configured independently, so you can pair an

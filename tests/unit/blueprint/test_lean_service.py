@@ -205,7 +205,7 @@ async def test_invalidation_forces_a_rewarm(ok_response):
     await service.aclose()
 
 
-async def test_compiles_are_serialized_by_default(ok_response):
+async def test_compiles_are_serialized_on_a_single_server(ok_response):
     server = FakeServer(ok_response, delay=0.01)
     service = await service_for(server, max_lean_compiles=1)
 
@@ -215,13 +215,76 @@ async def test_compiles_are_serialized_by_default(ok_response):
     await service.aclose()
 
 
-async def test_the_lean_limit_can_be_raised(ok_response):
-    server = FakeServer(ok_response, delay=0.02)
-    service = await service_for(server, max_lean_compiles=3)
+async def test_several_servers_compile_in_parallel(ok_response):
+    """Parallelism comes from more servers, not more workers on one server."""
+    servers = [FakeServer(ok_response, delay=0.02) for _ in range(3)]
+    service = await service_for(servers)
 
-    await asyncio.gather(*(service.compile(f"c{i}") for i in range(6)))
+    # Distinct node ids, so leases spread across the pool.
+    await asyncio.gather(*(service.compile(f"c{i}", node_id=f"n{i}") for i in range(6)))
 
-    assert server.peak_concurrent > 1
+    assert service.max_lean_compiles == 3
+    assert sum(1 for s in servers if s.commands) > 1, "work should span several servers"
+    for s in servers:
+        assert s.peak_concurrent <= 1, "each server still runs one compile at a time"
+    await service.aclose()
+
+
+async def test_a_nodes_attempts_stay_on_one_server(ok_response):
+    """Sticky leasing keeps a node's own incremental cache branch reusable."""
+    servers = [FakeServer(ok_response) for _ in range(3)]
+    service = await service_for(servers)
+
+    for _ in range(4):
+        await service.compile("body", node_id="sticky")
+
+    busy = [i for i, s in enumerate(servers) if s.commands]
+    assert len(busy) == 1
+    assert len(servers[busy[0]].commands) == 4
+    await service.aclose()
+
+
+async def test_releasing_a_lease_frees_the_node(ok_response):
+    servers = [FakeServer(ok_response) for _ in range(2)]
+    service = await service_for(servers)
+
+    first = service.lease("n1")
+    service.release("n1")
+    service._inflight[first] = 99  # make the old server the least attractive
+
+    assert service.lease("n1") != first
+    await service.aclose()
+
+
+async def test_extra_workers_on_one_server_are_not_created(ok_response):
+    """One server serializes internally, so the pool size caps the worker count."""
+    service = await service_for(FakeServer(ok_response), max_lean_compiles=8)
+
+    assert service.max_lean_compiles == 1
+    await service.aclose()
+
+
+async def test_warm_all_warms_every_server(ok_response):
+    servers = [FakeServer(ok_response) for _ in range(3)]
+    service = await service_for(servers)
+
+    await service.warm_all("import Mathlib\n")
+
+    assert all(s.session_cached == ["import Mathlib\n"] for s in servers)
+    assert service.stats.warmups == 3
+    await service.aclose()
+
+
+async def test_invalidation_clears_leases_and_warm_state(ok_response):
+    servers = [FakeServer(ok_response) for _ in range(2)]
+    service = await service_for(servers)
+    await service.warm_all("import Mathlib\n")
+    service.lease("n1")
+
+    service.invalidate("imports changed")
+    await service.warm_all("import Mathlib\n")
+
+    assert service.stats.warmups == 4
     await service.aclose()
 
 

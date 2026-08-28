@@ -38,8 +38,11 @@ blueprint:
     max_attempts: 4
     max_tool_iterations: 8
   max_refinement_rounds: 8
-  # Model-side concurrency is independent of Lean-side concurrency. Raise
-  # max_lean_compiles only where there is RAM for several Mathlib environments.
+  # Model-side concurrency is independent of Lean-side concurrency.
+  # max_lean_compiles is the number of warm Lean servers, which is also the number of
+  # concurrent compilations: one server serializes internally on a lock, so extra workers
+  # per server only contend. Each warm Mathlib environment needs ~2GB resident, so budget
+  # roughly one server per 4GB of spare RAM. 1 suits a laptop; a 128GB host can run 8-16.
   max_node_agents: 4
   max_lean_compiles: 1
   checkpoint_dir: ".axiomatic/blueprint"

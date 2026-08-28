@@ -53,9 +53,10 @@ async def run_schedule(
     service = getattr(workspace, "compile_service", None)
 
     def service_cancel(node_id: str) -> None:
-        """Drop a solved node's queued compilations, if a compile service is in use."""
+        """Drop a finished node's queued compiles and free its server lease."""
         if service is not None:
             service.cancel_node(node_id)
+            service.release(node_id)
 
     # Bounds concurrent model agents only. Their Lean compilations are serialized
     # independently by the compile service.

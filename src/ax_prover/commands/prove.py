@@ -176,7 +176,7 @@ async def _prove_item_blueprint(
     if result.is_success:
         logger.info(f"✓ {result.status}: {result.target} (comparator: {result.comparator_status})")
     else:
-        logger.warning(f"✗ {result.status}: {result.target} — {result.error}")
+        logger.warning(f"✗ {result.status}: {result.target}: {result.error}")
 
     return ProverOutput(
         success=result.is_success,

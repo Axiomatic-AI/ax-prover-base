@@ -54,8 +54,9 @@ def _add_blueprint_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="N",
         help=(
-            "Maximum concurrent Lean compilations (default: 1). Raise only on a machine "
-            "with memory headroom for several Mathlib environments."
+            "Number of warm Lean servers, which is also the maximum concurrent Lean "
+            "compilations (default: 1). Each needs ~2GB resident, so budget about one per "
+            "4GB of spare RAM; a large host can run 8-16."
         ),
     )
     group.add_argument(

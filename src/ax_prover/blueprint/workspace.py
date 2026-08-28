@@ -233,7 +233,10 @@ class BlueprintWorkspace:
         if self.compile_service is None:
             return await self.compile_source(source, label=label)
 
-        await self.compile_service.warm(self.stable_prefix)
+        # Warm only the server this request will land on; the pool leases stickily.
+        await self.compile_service.warm(
+            self.stable_prefix, index=self.compile_service.lease(node_id)
+        )
         outcome = await self.compile_service.compile(
             source,
             node_id=node_id,

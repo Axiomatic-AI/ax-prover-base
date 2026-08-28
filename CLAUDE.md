@@ -134,12 +134,17 @@ the elaborated state at the longest matching command prefix. Consequences to res
 
 - Always submit the **complete** module source. LeanInteract finds the reuse point itself;
   splitting imports from the proof defeats it.
-- `max_node_agents` (default 4) bounds concurrent model agents; `max_lean_compiles`
-  (default 1) bounds concurrent compilations. They are deliberately independent: agents
-  reason, search, and wait on the provider in parallel while their `lean_compile` calls
-  serialize through one server. Competing Mathlib environments each need ~2GB resident, and
-  a server restart costs a full 25-134s re-elaboration, so raise `max_lean_compiles` only
-  where there is memory headroom.
+- `max_node_agents` (default 4) bounds concurrent model agents. `max_lean_compiles`
+  (default 1) is the **number of warm Lean servers**, which is also the concurrent-compile
+  limit: `AutoLeanServer.run` holds a `threading.Lock` around the whole stdin/stdout
+  exchange, so extra workers on one server contend rather than parallelize. Real Lean
+  parallelism needs more servers. Each warm Mathlib environment needs ~2GB resident and a
+  restart costs a full 25-134s re-elaboration, so budget roughly one server per 4GB of
+  spare RAM.
+- Leases are **sticky**: a node's attempts all run on one server, so its node-specific cache
+  branch is reused instead of re-elaborated elsewhere. `release(node_id)` frees the lease
+  when the node finishes. Slot 0 is the runtime's own server, so the single-server default
+  behaves exactly as before rather than doubling memory use.
 - Only the **stable prefix** (imports, options, trusted context) is warmed with
   `add_to_session_cache=True`, so a crash replays the shared environment rather than a pile
   of obsolete graph branches. Per-node parent signatures are excluded by design.

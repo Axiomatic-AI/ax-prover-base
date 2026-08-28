@@ -16,6 +16,7 @@ from ..config import BlueprintConfig
 from ..models.proving import TargetItem
 from ..runtime import Runtime
 from ..utils.build import LeanBuildError
+from ..utils.lean_interact import LeanInteractServer
 from ..utils.lean_parsing import find_declaration_by_name
 from ..utils.llm import LLMClient
 from ..utils.logging import get_logger
@@ -112,25 +113,48 @@ class BlueprintOrchestrator:
             )
 
     async def _prove(self, item: TargetItem, options: BlueprintOptions) -> BlueprintRunResult:
-        # One warm REPL for the whole run. Candidate compiles reuse the elaborated prefix
-        # instead of paying a fresh Mathlib elaboration per attempt.
-        service = LeanCompileService(
-            self.runtime.lean_interact_server,
-            max_lean_compiles=self.config.max_lean_compiles,
-        )
+        # A pool of warm REPLs for the whole run. Candidate compiles reuse an elaborated
+        # prefix instead of paying a fresh Mathlib elaboration per attempt, and a node's
+        # attempts stay on one server so its own cache branch is reused too.
+        servers, extras = self._build_server_pool()
+        service = LeanCompileService(servers)
         try:
             return await self._prove_with_service(item, options, service)
         finally:
             self._compile_stats = service.stats.as_dict()
             await service.aclose()
+            for extra in extras:
+                await extra.aclose()
+
+    def _build_server_pool(self) -> tuple[list[LeanInteractServer], list[LeanInteractServer]]:
+        """Build the Lean server pool, reusing the runtime's server as the first slot.
+
+        Returns the full pool and just the servers this run created, which are the ones it
+        must close. Reusing the runtime's server keeps the single-server default identical
+        to before, rather than silently doubling memory use.
+        """
+        size = max(1, self.config.max_lean_compiles)
+        extras = [
+            LeanInteractServer(self.runtime.base_folder, self.runtime.config.lean_interact)
+            for _ in range(size - 1)
+        ]
+        if extras:
+            logger.info(f"Using a pool of {size} Lean servers ({len(extras)} additional)")
+        return [self.runtime.lean_interact_server, *extras], extras
 
     async def _prove_with_service(
         self, item: TargetItem, options: BlueprintOptions, service: LeanCompileService
     ) -> BlueprintRunResult:
         target = item.location.formatted_context
-        # The prefix is warmed lazily on the first candidate compile, so a run that never
-        # reaches Lean (a resume with every proof already stored) pays nothing for it.
         workspace = self._open_workspace(item, service)
+
+        if len(service.servers) > 1:
+            # Warm every server up front and in parallel: otherwise the first node to land
+            # on a cold server pays a full Mathlib elaboration mid-round. A single server
+            # is still warmed lazily, so a fully resumed run pays nothing.
+            elapsed = await service.warm_all(workspace.stable_prefix)
+            if elapsed:
+                logger.info(f"Warmed {len(service.servers)} Lean servers in {elapsed:.1f}s")
 
         store = ProofStore.open(
             self.config.checkpoint_dir,

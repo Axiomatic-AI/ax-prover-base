@@ -417,3 +417,61 @@ async def test_a_target_may_depend_on_placeholder_parent_axioms(blueprint_worksp
     finally:
         await service.aclose()
         workspace.compile_service = None
+
+
+async def test_a_server_pool_compiles_in_parallel(lean_blueprint_project):
+    """Two real servers must overlap; one server serializes on its own lock."""
+    import asyncio
+    import time
+
+    from ax_prover.blueprint.lean_service import LeanCompileService
+    from ax_prover.config import LeanInteractConfig, RuntimeConfig
+    from ax_prover.runtime import Runtime
+    from ax_prover.utils.lean_interact import LeanInteractServer
+
+    async with Runtime.open(RuntimeConfig(), lean_blueprint_project) as rt:
+        extra = LeanInteractServer(lean_blueprint_project, LeanInteractConfig())
+        service = LeanCompileService([rt.lean_interact_server, extra])
+        try:
+            await service.warm_all("set_option maxHeartbeats 400000\n")
+
+            sources = [
+                f"theorem pool_probe_{i} (n : Nat) : n + 0 = n := by simp\n" for i in range(4)
+            ]
+            start = time.monotonic()
+            outcomes = await asyncio.gather(
+                *(service.compile(src, node_id=f"pool_node_{i}") for i, src in enumerate(sources))
+            )
+            elapsed = time.monotonic() - start
+
+            assert all(o.success for o in outcomes), [o.output for o in outcomes]
+            assert service.stats.servers == 2
+            # Leases spread across both servers rather than piling onto one.
+            assert len(service.stats.per_worker) == 2
+            assert elapsed < 60
+        finally:
+            await service.aclose()
+            await extra.aclose()
+
+
+async def test_sticky_leases_keep_a_node_on_one_server(lean_blueprint_project):
+    from ax_prover.blueprint.lean_service import LeanCompileService
+    from ax_prover.config import LeanInteractConfig, RuntimeConfig
+    from ax_prover.runtime import Runtime
+    from ax_prover.utils.lean_interact import LeanInteractServer
+
+    async with Runtime.open(RuntimeConfig(), lean_blueprint_project) as rt:
+        extra = LeanInteractServer(lean_blueprint_project, LeanInteractConfig())
+        service = LeanCompileService([rt.lean_interact_server, extra])
+        try:
+            leased = service.lease("one_node")
+            for i in range(3):
+                await service.compile(f"theorem sticky_{i} : True := trivial\n", node_id="one_node")
+
+            assert service.stats.per_worker == {leased: 3}
+
+            service.release("one_node")
+            assert "one_node" not in service._leases
+        finally:
+            await service.aclose()
+            await extra.aclose()

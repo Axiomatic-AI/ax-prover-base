@@ -185,9 +185,12 @@ class BlueprintConfig:
     prover_tools: dict[str, dict[str, Any] | None] = field(default_factory=dict)
     max_refinement_rounds: int = 8
     # Node agents reason, search, and wait on the model concurrently; their Lean
-    # compilations are serialized separately. Competing Mathlib environments each need
-    # ~2GB resident and a restart costs a full re-elaboration, so the Lean limit is 1.
+    # compilations run on a separate pool of warm servers.
     max_node_agents: int = 4
+    # Number of Lean servers, which is also the number of concurrent compilations: one
+    # server serializes internally on a lock, so extra workers per server only contend.
+    # Each warm Mathlib environment needs ~2GB resident, so 1 suits a small machine and a
+    # large host should raise this (roughly one server per 4GB of spare RAM).
     max_lean_compiles: int = 1
     checkpoint_dir: str = ".axiomatic/blueprint"
     artifacts_dir: str = ".axiomatic/blueprint/artifacts"

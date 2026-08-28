@@ -85,6 +85,8 @@ class CompileStats:
     warmups: int = 0
     warmup_seconds: float = 0.0
     per_node: dict[str, int] = field(default_factory=dict)
+    per_worker: dict[int, int] = field(default_factory=dict)
+    servers: int = 1
 
     @property
     def mean_warm_seconds(self) -> float:
@@ -102,7 +104,9 @@ class CompileStats:
             "total_seconds": round(self.total_seconds, 1),
             "warmups": self.warmups,
             "warmup_seconds": round(self.warmup_seconds, 1),
+            "servers": self.servers,
             "per_node": dict(self.per_node),
+            "per_worker": dict(self.per_worker),
         }
 
 
@@ -138,38 +142,64 @@ def split_messages(response: CommandResponse) -> tuple[tuple[str, ...], tuple[st
 
 
 class LeanCompileService:
-    """A fair, serialized compile queue over one warm LeanInteract server.
+    """A fair compile queue over a pool of warm LeanInteract servers.
 
-    The stable prefix is warmed once and marked for replay, so a restart restores the
-    common environment rather than a pile of obsolete graph branches.
+    One server serializes internally: `AutoLeanServer.run` holds a `threading.Lock` around
+    the whole stdin/stdout exchange, so extra queue workers on a single server contend
+    rather than parallelize. Real Lean parallelism therefore needs several servers, which is
+    what this pool provides - one worker bound to one server.
+
+    Leases are sticky: a node's attempts all run on the same server, so its node-specific
+    branch of the incremental cache is reused rather than re-elaborated elsewhere. Each
+    server warms the shared stable prefix once, into its own crash-replay session cache.
+
+    Sizing is a memory question. Each warm Mathlib environment needs roughly 2GB resident,
+    and a restart costs a full re-elaboration, so the default of one server suits a small
+    machine; a large host should raise it.
     """
 
     def __init__(
         self,
-        server: LeanInteractServer,
-        max_lean_compiles: int = 1,
+        servers: LeanInteractServer | list[LeanInteractServer],
+        max_lean_compiles: int | None = None,
         timeout: float | None = None,
     ):
-        self.server = server
-        self.max_lean_compiles = max(1, max_lean_compiles)
-        self.timeout = timeout
-        self.stats = CompileStats()
+        # Duck-typed on purpose: anything with `.run` is a usable server.
+        pool = list(servers) if isinstance(servers, list | tuple) else [servers]
+        if not pool:
+            raise ValueError("LeanCompileService needs at least one Lean server")
 
-        self._queue: asyncio.PriorityQueue[_Request] = asyncio.PriorityQueue()
+        # One worker per server: more workers would only contend on that server's lock.
+        if max_lean_compiles is not None:
+            pool = pool[: max(1, max_lean_compiles)]
+
+        self.servers = pool
+        self.max_lean_compiles = len(pool)
+        self.timeout = timeout
+        self.stats = CompileStats(servers=len(pool))
+
+        self._queues: list[asyncio.PriorityQueue[_Request]] = [
+            asyncio.PriorityQueue() for _ in pool
+        ]
         self._sequence = itertools.count()
         self._workers: list[asyncio.Task] = []
         self._cancelled_nodes: set[str] = set()
-        self._warmed_prefix: str | None = None
+        self._leases: dict[str, int] = {}
+        self._inflight: list[int] = [0] * len(pool)
+        self._warmed_prefix: list[str | None] = [None] * len(pool)
         self._started = False
 
+    @property
+    def server(self) -> LeanInteractServer:
+        """The primary server, used when no node-specific lease applies."""
+        return self.servers[0]
+
     async def start(self) -> None:
-        """Start the worker tasks that drain the queue."""
+        """Start one worker task per server."""
         if self._started:
             return
         self._started = True
-        self._workers = [
-            asyncio.create_task(self._worker(i)) for i in range(self.max_lean_compiles)
-        ]
+        self._workers = [asyncio.create_task(self._worker(i)) for i in range(len(self.servers))]
 
     async def aclose(self) -> None:
         """Stop the workers, failing anything still queued."""
@@ -183,33 +213,68 @@ class LeanCompileService:
         self._workers = []
         self._started = False
 
-    async def warm(self, stable_prefix: str) -> float:
-        """Elaborate the stable prefix once and mark it for replay after a restart.
+    def lease(self, node_id: str, priority: int = int(CompilePriority.NODE)) -> int:
+        """Return the server index a request should run on, creating a sticky lease.
 
-        Only this common environment enters the session cache; candidate commands never do.
-        Re-warming a prefix that is already current is a no-op.
+        A node keeps its server for its whole attempt sequence. Structural work has no node
+        of its own, so it goes wherever there is least queued.
         """
-        if self._warmed_prefix == stable_prefix:
+        if node_id and node_id in self._leases:
+            return self._leases[node_id]
+
+        index = min(range(len(self.servers)), key=lambda i: self._inflight[i])
+        if node_id:
+            self._leases[node_id] = index
+        del priority
+        return index
+
+    def release(self, node_id: str) -> None:
+        """Drop a node's lease once it is solved or abandoned."""
+        self._leases.pop(node_id, None)
+
+    async def warm(self, stable_prefix: str, index: int | None = None) -> float:
+        """Elaborate the stable prefix on one server, or on all of them.
+
+        Only this shared environment enters the replay cache; candidate commands never do,
+        so a restart restores the common context rather than obsolete graph branches.
+        """
+        targets = range(len(self.servers)) if index is None else [index]
+        total = 0.0
+
+        for i in targets:
+            if self._warmed_prefix[i] == stable_prefix:
+                continue
+            start = time.monotonic()
+            await self.servers[i].run(Command(cmd=stable_prefix), add_to_session_cache=True)
+            elapsed = time.monotonic() - start
+            total += elapsed
+
+            self._warmed_prefix[i] = stable_prefix
+            self.stats.warmups += 1
+            self.stats.warmup_seconds += elapsed
+            logger.info(f"Warmed Lean server {i} in {elapsed:.1f}s")
+
+        return total
+
+    async def warm_all(self, stable_prefix: str) -> float:
+        """Warm every server concurrently, so pool start-up is one elaboration wide."""
+        pending = [i for i in range(len(self.servers)) if self._warmed_prefix[i] != stable_prefix]
+        if not pending:
             return 0.0
 
         start = time.monotonic()
-        await self.server.run(Command(cmd=stable_prefix), add_to_session_cache=True)
-        elapsed = time.monotonic() - start
-
-        self._warmed_prefix = stable_prefix
-        self.stats.warmups += 1
-        self.stats.warmup_seconds += elapsed
-        logger.info(f"Warmed the Lean environment in {elapsed:.1f}s")
-        return elapsed
+        await asyncio.gather(*(self.warm(stable_prefix, index=i) for i in pending))
+        return time.monotonic() - start
 
     def invalidate(self, reason: str) -> None:
-        """Drop the warm prefix when the trusted environment changes.
+        """Drop every warm prefix when the trusted environment changes.
 
         Imports, toolchain, lake options, the original context, and parent signatures all
         invalidate reuse. A changed proof body does not.
         """
         logger.info(f"Invalidating the warm Lean environment: {reason}")
-        self._warmed_prefix = None
+        self._warmed_prefix = [None] * len(self.servers)
+        self._leases.clear()
 
     def cancel_node(self, node_id: str) -> None:
         """Cancel a node's queued compilations, once it is solved or invalidated."""
@@ -259,17 +324,23 @@ class LeanCompileService:
             future=asyncio.get_running_loop().create_future(),
         )
 
+        index = self.lease(node_id, int(priority))
         self.stats.submitted += 1
+        self.stats.per_worker[index] = self.stats.per_worker.get(index, 0) + 1
         if node_id:
             self.stats.per_node[node_id] = self.stats.per_node.get(node_id, 0) + 1
 
-        await self._queue.put(request)
-        return await request.future
+        self._inflight[index] += 1
+        await self._queues[index].put(request)
+        try:
+            return await request.future
+        finally:
+            self._inflight[index] -= 1
 
     async def _worker(self, index: int) -> None:
-        """Drain the queue, one compilation at a time per worker."""
+        """Drain this worker's queue against its own server, one compile at a time."""
         while True:
-            request = await self._queue.get()
+            request = await self._queues[index].get()
             try:
                 if request.node_id and request.node_id in self._cancelled_nodes:
                     self.stats.cancelled += 1
@@ -278,7 +349,7 @@ class LeanCompileService:
                     )
                     continue
 
-                outcome = await self._run(request)
+                outcome = await self._run(request, index)
                 self.stats.completed += 1
                 if not request.future.done():
                     request.future.set_result(outcome)
@@ -293,16 +364,16 @@ class LeanCompileService:
                 if not request.future.done():
                     request.future.set_exception(e)
             finally:
-                self._queue.task_done()
+                self._queues[index].task_done()
 
-    async def _run(self, request: _Request) -> CompileOutcome:
-        """Compile one request, harvesting everything from a single response."""
+    async def _run(self, request: _Request, index: int = 0) -> CompileOutcome:
+        """Compile one request on server `index`, harvesting all of it from one response."""
         source = request.source
         if request.check_axioms_of:
             source = f"{source.rstrip()}\n\n#print axioms {request.check_axioms_of}\n"
 
         start = time.monotonic()
-        response = await self.server.run(
+        response = await self.servers[index].run(
             Command(cmd=source, declarations=True, all_tactics=True), timeout=self.timeout
         )
         elapsed = time.monotonic() - start

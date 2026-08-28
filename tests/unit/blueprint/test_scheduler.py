@@ -222,9 +222,14 @@ async def test_solving_a_node_cancels_its_queued_compiles(
 ):
     cancelled: list[str] = []
 
+    released: list[str] = []
+
     class FakeService:
         def cancel_node(self, node_id):
             cancelled.append(node_id)
+
+        def release(self, node_id):
+            released.append(node_id)
 
     workspace.compile_service = FakeService()
     monkeypatch.setattr(scheduler, "prove_node", fake_prover({}))
@@ -235,3 +240,4 @@ async def test_solving_a_node_cancels_its_queued_compiles(
         workspace.compile_service = None
 
     assert set(cancelled) == {"left", "right", "target"}
+    assert set(released) == {"left", "right", "target"}
