@@ -112,7 +112,9 @@ def _check_edges(nodes: tuple[BlueprintNode, ...]) -> list[str]:
     known = {node.id for node in nodes}
 
     for node in nodes:
-        for parent in node.parents:
+        # Only declared parents can be wrong: statement parents are resolved from
+        # elaborated types, so they always name a real node and never the node itself.
+        for parent in node.declared_parents:
             if parent == node.id:
                 problems.append(f"node {node.id!r} declares itself as a parent")
             elif parent not in known:

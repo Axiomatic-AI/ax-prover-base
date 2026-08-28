@@ -128,6 +128,7 @@ def extract_nodes(
         nodes.append(
             BlueprintNode(
                 id=metadata.id,
+                declared_parents=metadata.parents,
                 parents=metadata.parents,
                 lean_name=info.full_name,
                 kind=info.kind,
@@ -146,7 +147,41 @@ def extract_nodes(
     if problems:
         raise BlueprintValidationError(problems)
 
-    return nodes
+    return resolve_effective_parents(nodes)
+
+
+def resolve_effective_parents(nodes: list[BlueprintNode]) -> list[BlueprintNode]:
+    """Add statement parents from `typeDeps` and union them with the declared parents.
+
+    A node whose *statement* mentions a generated sibling cannot elaborate without it, so
+    that sibling is a real dependency regardless of what the docstring declared. Missing it
+    is not caught by compiling the whole skeleton, where every declaration is present: it
+    shows up only in the node's isolated module, where the undeclared sibling is absent and
+    even the statement fails to elaborate.
+
+    `valueDeps` are deliberately ignored. Bodies are `by sorry` at this stage, so intended
+    proof dependencies are unavailable by construction and only the declared parents carry
+    that intent.
+    """
+    by_lean_name = {node.lean_name: node.id for node in nodes}
+    resolved = []
+
+    for node in nodes:
+        statement = tuple(
+            sorted(
+                {
+                    by_lean_name[dep]
+                    for dep in node.type_deps
+                    if dep in by_lean_name and by_lean_name[dep] != node.id
+                }
+            )
+        )
+        effective = tuple(dict.fromkeys([*node.declared_parents, *statement]))
+        resolved.append(
+            node.model_copy(update={"statement_parents": statement, "parents": effective})
+        )
+
+    return resolved
 
 
 def target_signature(declarations: list[Declaration], target_lean_name: str) -> str:

@@ -54,7 +54,21 @@ class BlueprintNode(BaseModel, frozen=True):
     """
 
     id: str
-    parents: tuple[str, ...] = ()
+    declared_parents: tuple[str, ...] = Field(
+        default=(), description="Proof parents the docstring metadata declares"
+    )
+    statement_parents: tuple[str, ...] = Field(
+        default=(),
+        description="Generated nodes the elaborated type depends on, from typeDeps",
+    )
+    parents: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Effective parents: declared proof parents united with statement parents. "
+            "Scheduling and isolation use these, because a node whose statement mentions a "
+            "sibling cannot even elaborate without it, whether or not it was declared."
+        ),
+    )
     lean_name: str = Field(description="Fully qualified Lean declaration name")
     kind: str = Field(description="Lean declaration kind, e.g. 'theorem'")
     signature: str = Field(description="Pretty-printed elaborated signature")
@@ -66,6 +80,16 @@ class BlueprintNode(BaseModel, frozen=True):
     value_deps: tuple[str, ...] = ()
     start_line: int = 0
     is_target: bool = False
+
+    @property
+    def undeclared_statement_parents(self) -> tuple[str, ...]:
+        """Statement dependencies the architect failed to declare.
+
+        Not an error: the harness schedules on effective parents so the node still works.
+        It is reported to the refiner, since an undeclared dependency usually means the
+        decomposition is not what the architect intended.
+        """
+        return tuple(p for p in self.statement_parents if p not in self.declared_parents)
 
     @property
     def short_name(self) -> str:

@@ -168,6 +168,23 @@ with **no error** when `simp` alone closes the goal, because `simpa` discards th
 term. Verified sound via `#print axioms` (only `propext`), so it is misleading rather than
 unsound.
 
+**Effective parents.** A node's dependencies come from two sources, and scheduling uses
+the union:
+
+- **declared** proof parents, from the docstring `parents` field;
+- **statement** parents, resolved from the elaborated `typeDeps` to generated nodes.
+
+A node whose *statement* mentions a generated sibling cannot elaborate without it, declared
+or not. Compiling the whole skeleton never catches a missing declaration, because every
+declaration is present there; it surfaces only in the node's isolated module. So
+`resolve_effective_parents` unions the two, `undeclared_statement_parents` reports the
+discrepancy to the refiner, and validation faults only *declared* parents, since statement
+parents are resolved from real types and cannot be unknown or self-referential.
+
+`valueDeps` are deliberately unused for this. Bodies are `by sorry` at extraction time, so
+intended proof dependencies are unavailable by construction and only the declared parents
+carry that intent.
+
 **Extraction backend:** `extraction.py` is an adapter over `lean_interact`, whose
 `DeclarationInfo` already carries every canonical field the design calls for (`full_name`,
 `kind`, elaborated `signature`/`type` pretty-printing, docstring, source range, and

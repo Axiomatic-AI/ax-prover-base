@@ -48,9 +48,17 @@ depend on their node encoding:
 
 - **No definition nodes.** A decomposition needing a helper `def` cannot be expressed, so
   such problems are out of reach. This is the largest gap.
-- **Dependency graph is declared, not Lean-verified.** A node may cite a parent it does not
-  use, or use a sibling it did not declare; isolation is enforced by scratch-module
-  construction instead.
+- **Dependency graph is partly Lean-verified.** Statement dependencies are recovered from
+  elaborated `typeDeps` and unioned with the declared parents, so a node that *uses* a
+  sibling in its statement is scheduled after it even when the architect forgot to declare
+  it. Intended *proof* dependencies remain declared-only, because `by sorry` bodies carry
+  no `valueDeps` — the gap the paper closes with its `sorry_using` elaborator.
+- **`lean-extract` is not the authority.** `lean_interact` provides the same canonical
+  fields and backs the hot path. The intended next step is lean-extract at structural
+  checkpoints only: run it on an accepted architect or refiner revision before it becomes
+  the active graph, and again after the final build, comparing against the provisional
+  graph. Its Lean-side internal/private detection and `kindFlags` would also replace the
+  hand-maintained name heuristics in `_is_lean_generated`.
 - **User prompts are ours.** Appendix C omits theirs, so the problem-specific inputs are
   independently written and untested against theirs.
 - **Prompts are unmeasured.** No A/B against the previous wording, so any solve rate is a

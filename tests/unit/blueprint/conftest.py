@@ -122,6 +122,7 @@ def make_node(
     statement = f"theorem {lean_name.rsplit('.', 1)[-1]} {signature} "
     return BlueprintNode(
         id=node_id,
+        declared_parents=parents,
         parents=parents,
         lean_name=lean_name,
         kind=kind,

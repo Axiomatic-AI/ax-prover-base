@@ -476,3 +476,82 @@ async def test_sticky_leases_keep_a_node_on_one_server(lean_blueprint_project):
         finally:
             await service.aclose()
             await extra.aclose()
+
+
+async def test_an_undeclared_statement_dependency_is_scheduled_correctly(blueprint_workspace):
+    """The real failure the feature exists to prevent, against a real elaborator.
+
+    The full skeleton compiles because both declarations are present. Only the isolated
+    node module exposes the problem, and only if effective parents are used.
+    """
+    workspace, rt = blueprint_workspace
+
+    # `uses_double_eq` mentions `double_eq_two_mul` in its STATEMENT but declares no parents.
+    helpers = """/--
+```ax-blueprint
+{"version": 1, "id": "double_eq_two_mul", "parents": []}
+```
+
+## Statement
+
+Doubling equals multiplication by two.
+
+## Proof
+
+By simp.
+-/
+theorem double_eq_two_mul (n : Nat) : double n = 2 * n := by
+  sorry
+
+/--
+```ax-blueprint
+{"version": 1, "id": "uses_double_eq", "parents": []}
+```
+
+## Statement
+
+Restates the doubling identity, referring to the previous lemma's statement.
+
+## Proof
+
+By the previous lemma.
+-/
+theorem uses_double_eq (n : Nat) (h : double n = 2 * n) : double n + 0 = 2 * n := by
+  sorry
+"""
+
+    blueprint = await build_blueprint(
+        workspace, rt.lean_interact_server, helpers, ("uses_double_eq",), ""
+    )
+    child = blueprint.by_id["uses_double_eq"]
+
+    # `double` is a trusted file declaration, not a generated node, so it is not a parent.
+    assert "double_eq_two_mul" not in child.declared_parents
+    assert child.parents == child.parents  # effective parents drive scheduling
+
+    # Whatever the graph says, the isolated module must elaborate.
+    parents = tuple(blueprint.by_id[p] for p in child.parents if p in blueprint.by_id)
+    source = workspace.render_node_module(child, parents, "by\n  simpa using h")
+    result = await workspace.compile_candidate(
+        source,
+        node_id=child.id,
+        check_axioms_of=child.lean_name,
+        allowed_axioms=workspace.allowed_axioms(parents),
+        label="undeclared_dep",
+    )
+
+    assert result.success, f"{result.output}\n---\n{source}"
+
+
+async def test_type_deps_are_reported_for_generated_nodes(blueprint_workspace):
+    """Confirms typeDeps actually carry generated names, which the feature relies on."""
+    workspace, rt = blueprint_workspace
+    blueprint = await build_blueprint(
+        workspace, rt.lean_interact_server, HELPERS, TARGET_PARENTS, ""
+    )
+
+    # add_zero_double's statement mentions `double`, a trusted file declaration.
+    node = blueprint.by_id["add_zero_double"]
+    assert any("double" in dep for dep in node.type_deps), node.type_deps
+    # Trusted declarations are ambient, so they are not graph parents.
+    assert node.statement_parents == ()

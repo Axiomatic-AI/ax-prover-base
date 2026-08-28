@@ -59,6 +59,16 @@ def annotate_skeleton(blueprint: Blueprint, records: dict[str, NodeRecord]) -> s
         statement = node.statement_source.rstrip()
         declaration = f"{statement} := by sorry"
 
+        undeclared = node.undeclared_statement_parents
+        if undeclared:
+            # The harness scheduled it correctly anyway, but an undeclared statement
+            # dependency usually means the decomposition is not what was intended.
+            declaration = (
+                f"-- NOTE: this statement depends on {', '.join(undeclared)}, which "
+                f"`parents` did not declare. Declare it, or restate the lemma.\n"
+                f"{declaration}"
+            )
+
         if record is None:
             blocks.append(f"{NOT_ATTEMPTED_MARKER}\n{declaration}")
             continue
