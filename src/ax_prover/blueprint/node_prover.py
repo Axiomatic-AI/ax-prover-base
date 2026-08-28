@@ -164,7 +164,13 @@ async def prove_node(
 
         try:
             turn = await run_turn(
-                client, messages, tools, NodeProposal, role.max_tool_iterations, budget
+                client,
+                messages,
+                tools,
+                NodeProposal,
+                role.max_tool_iterations,
+                budget,
+                search_budget=role.max_searches,
             )
         except LeanBuildError as e:
             logger.error(f"Node {node.id!r}: Lean infrastructure failure: {e}")
@@ -175,6 +181,21 @@ async def prove_node(
                     outcome=NodeOutcome.INFRASTRUCTURE_ERROR, detail=str(e), last_error=last_error
                 ),
                 transcript=history,
+            )
+
+        compiles = turn.tool_calls.get("lean_compile", 0)
+        searches = turn.tool_calls.get("mathlib_search", 0)
+        logger.debug(
+            f"Node {node.id!r} attempt {attempt}: {turn.turns} turn(s), "
+            f"{compiles} compile(s), {searches} search(es)"
+            + (", search budget spent" if turn.tools_exhausted else "")
+        )
+        if compiles == 0:
+            # The harness verifies every returned body anyway, so this is wasted effort
+            # rather than a soundness risk, but it is the cheapest attempt to lose.
+            logger.warning(
+                f"Node {node.id!r} attempt {attempt} answered without compiling "
+                f"({searches} search(es) in {turn.turns} turn(s))"
             )
 
         proposal = parse_proposal(turn, NodeProposal)

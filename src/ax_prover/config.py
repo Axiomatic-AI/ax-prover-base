@@ -150,6 +150,11 @@ class BlueprintRoleConfig:
     max_total_tokens: int = 2_000_000
     max_attempts: int = 8
     max_tool_iterations: int = 8
+    # `mathlib_search` calls allowed per attempt before the tool is withdrawn, leaving only
+    # `lean_compile`. A turn may batch many tool calls, so `max_tool_iterations` bounds
+    # turns rather than calls and cannot stop a model spending every turn searching and
+    # never compiling. 0 disables the cap.
+    max_searches: int = 0
 
 
 @dataclass
@@ -177,7 +182,9 @@ class BlueprintConfig:
         default_factory=lambda: BlueprintRoleConfig(max_total_tokens=2_000_000, max_attempts=8)
     )
     prover: BlueprintRoleConfig = field(
-        default_factory=lambda: BlueprintRoleConfig(max_total_tokens=1_000_000, max_attempts=4)
+        default_factory=lambda: BlueprintRoleConfig(
+            max_total_tokens=1_000_000, max_attempts=4, max_searches=6
+        )
     )
     refiner: BlueprintRoleConfig = field(
         default_factory=lambda: BlueprintRoleConfig(max_total_tokens=2_000_000, max_attempts=4)

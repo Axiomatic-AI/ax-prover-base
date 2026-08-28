@@ -33,6 +33,10 @@ blueprint:
     max_total_tokens: 1000000
     max_attempts: 4
     max_tool_iterations: 8
+    # Searches per attempt before mathlib_search is withdrawn, leaving only lean_compile.
+    # One turn can batch many searches, so the iteration cap alone cannot prevent an
+    # attempt spending every turn searching and never compiling. 0 disables.
+    max_searches: 6
   refiner:
     max_total_tokens: 2000000
     max_attempts: 4

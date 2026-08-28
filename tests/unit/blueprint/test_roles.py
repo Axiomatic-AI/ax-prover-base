@@ -169,10 +169,13 @@ async def test_the_last_tool_iteration_forbids_further_calls():
 async def test_an_unknown_tool_is_reported_back_to_the_model():
     from ax_prover.blueprint.roles import execute_tool_calls
 
-    results = await execute_tool_calls([echo_tool([])], [{"name": "ghost", "args": {}, "id": "1"}])
+    results, executed = await execute_tool_calls(
+        [echo_tool([])], [{"name": "ghost", "args": {}, "id": "1"}]
+    )
 
     assert "Unknown tool 'ghost'" in results[0].content
     assert "echo" in results[0].content
+    assert executed == {}, "a refused call is not usage"
 
 
 async def test_a_raising_tool_is_reported_back_to_the_model():
@@ -183,11 +186,12 @@ async def test_a_raising_tool_is_reported_back_to_the_model():
 
     exploding = StructuredTool(name="echo", description="d", coroutine=boom, args_schema=EchoInput)
 
-    results = await execute_tool_calls(
-        exploding and [exploding], [{"name": "echo", "args": {"text": "x"}, "id": "1"}]
+    results, executed = await execute_tool_calls(
+        [exploding], [{"name": "echo", "args": {"text": "x"}, "id": "1"}]
     )
 
     assert "the compiler died" in results[0].content
+    assert executed == {}, "a raising call is not usage"
 
 
 def test_parse_proposal_returns_none_for_malformed_output():
@@ -196,3 +200,107 @@ def test_parse_proposal_returns_none_for_malformed_output():
     turn = RoleTurn(response=AIMessage(content="not json"))
 
     assert parse_proposal(turn, Answer) is None
+
+
+def search_tool(calls: list[str]) -> StructuredTool:
+    async def search(query: str) -> str:
+        calls.append(query)
+        return "6 matches"
+
+    return StructuredTool(
+        name="mathlib_search", description="search", coroutine=search, args_schema=SearchInput
+    )
+
+
+class SearchInput(BaseModel):
+    query: str
+
+
+class BatchingClient:
+    """Emits several search calls per turn, the way the real model does."""
+
+    def __init__(self, searches_per_turn: int, turns: int):
+        self.searches_per_turn = searches_per_turn
+        self.turns = turns
+        self.offered: list[list[str]] = []
+
+    async def ainvoke(self, messages, tools=None, output_schema=None, retry_config=None):
+        self.offered.append(sorted(t.name for t in (tools or [])))
+        if output_schema is not None:
+            return AIMessage(content=json.dumps({"value": "done"}), usage_metadata=None)
+        if self.turns <= 0:
+            return AIMessage(content="no more tools", usage_metadata=None)
+        self.turns -= 1
+        return AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "mathlib_search", "args": {"query": f"q{i}"}, "id": str(i)}
+                for i in range(self.searches_per_turn)
+            ],
+            usage_metadata=None,
+        )
+
+
+async def test_search_budget_withdraws_the_tool_so_turns_can_compile():
+    """A turn batches many calls, so the iteration cap alone cannot stop over-searching."""
+    searches: list[str] = []
+    client = BatchingClient(searches_per_turn=4, turns=6)
+    tools = [echo_tool([]), search_tool(searches)]
+
+    turn = await run_turn(
+        client, [HumanMessage(content="go")], tools, Answer, 6, TokenBudget(0), search_budget=6
+    )
+
+    assert len(searches) <= 8, "the cap bounds searching within a turn's batch"
+    assert turn.tools_exhausted
+    # Once spent, later turns are offered lean_compile only.
+    assert any("mathlib_search" not in offered for offered in client.offered[1:])
+    # Counts cover executed calls only, so refused ones do not inflate usage.
+    assert turn.tool_calls["mathlib_search"] == len(searches)
+
+
+async def test_zero_search_budget_leaves_the_tool_available():
+    searches: list[str] = []
+    client = BatchingClient(searches_per_turn=3, turns=2)
+    tools = [echo_tool([]), search_tool(searches)]
+
+    turn = await run_turn(
+        client, [HumanMessage(content="go")], tools, Answer, 4, TokenBudget(0), search_budget=0
+    )
+
+    assert not turn.tools_exhausted
+    assert all("mathlib_search" in o for o in client.offered if o)
+
+
+async def test_turn_reports_its_tool_usage():
+    calls: list[str] = []
+    client = ScriptedClient(
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "echo", "args": {"text": "x"}, "id": "1"}],
+            usage_metadata=None,
+        ),
+        AIMessage(content="done", usage_metadata=None),
+        AIMessage(content=json.dumps({"value": "ok"}), usage_metadata=None),
+    )
+
+    turn = await run_turn(
+        client, [HumanMessage(content="go")], [echo_tool(calls)], Answer, 4, TokenBudget(0)
+    )
+
+    assert turn.tool_calls == {"echo": 1}
+    assert turn.turns == 2
+
+
+async def test_a_withdrawn_tool_explains_itself_rather_than_reading_as_unknown():
+    from ax_prover.blueprint.roles import execute_tool_calls
+
+    results, executed = await execute_tool_calls(
+        [echo_tool([])],
+        [{"name": "mathlib_search", "args": {"query": "x"}, "id": "1"}],
+        {"mathlib_search": "Search budget spent (6 queries). Use `lean_compile`."},
+    )
+
+    assert "Search budget spent" in results[0].content
+    assert "Unknown tool" not in results[0].content
+    assert executed == {}
