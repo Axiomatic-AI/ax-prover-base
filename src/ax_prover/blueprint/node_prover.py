@@ -6,6 +6,7 @@ parent's proof body, and it can only ever return a proof body: the harness const
 every module it compiles.
 """
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 from typing import Literal
@@ -66,6 +67,17 @@ class NodeTriage(BaseModel):
             "PROOF_TOO_HARD, a helper-lemma decomposition that bridges the gap."
         ),
     )
+
+
+@dataclass
+class _Attempt:
+    """One independent attempt's outcome, before the wave picks a winner."""
+
+    index: int
+    body: str = ""
+    error: str = ""
+    solved: bool = False
+    infrastructure: str = ""
 
 
 @dataclass
@@ -148,20 +160,11 @@ async def prove_node(
     attempts = 0
     last_error = ""
     starved = False
+    infrastructure: NodeDiagnosis | None = None
 
-    for attempt in range(1, role.max_attempts + 1):
-        if budget.exhausted:
-            logger.warning(
-                f"Node {node.id!r}: token budget exhausted after {attempts}/"
-                f"{role.max_attempts} attempts ({budget.spent} tokens). Raise "
-                "blueprint.prover.max_total_tokens; this is starvation, not difficulty."
-            )
-            starved = attempts < role.max_attempts
-            break
-
-        attempts = attempt
-        messages = _build_messages(node, parents, history)
-
+    async def one_attempt(index: int, replay: list[str]) -> _Attempt:
+        """Run a single independent attempt against the node's statement."""
+        messages = _build_messages(node, parents, replay)
         try:
             turn = await run_turn(
                 client,
@@ -173,20 +176,12 @@ async def prove_node(
                 search_budget=role.max_searches,
             )
         except LeanBuildError as e:
-            logger.error(f"Node {node.id!r}: Lean infrastructure failure: {e}")
-            return NodeAttemptResult(
-                outcome=NodeOutcome.INFRASTRUCTURE_ERROR,
-                attempts=attempts,
-                diagnosis=NodeDiagnosis(
-                    outcome=NodeOutcome.INFRASTRUCTURE_ERROR, detail=str(e), last_error=last_error
-                ),
-                transcript=history,
-            )
+            return _Attempt(index=index, infrastructure=str(e))
 
         compiles = turn.tool_calls.get("lean_compile", 0)
         searches = turn.tool_calls.get("mathlib_search", 0)
         logger.debug(
-            f"Node {node.id!r} attempt {attempt}: {turn.turns} turn(s), "
+            f"Node {node.id!r} attempt {index}: {turn.turns} turn(s), "
             f"{compiles} compile(s), {searches} search(es)"
             + (", search budget spent" if turn.tools_exhausted else "")
         )
@@ -194,30 +189,31 @@ async def prove_node(
             # The harness verifies every returned body anyway, so this is wasted effort
             # rather than a soundness risk, but it is the cheapest attempt to lose.
             logger.warning(
-                f"Node {node.id!r} attempt {attempt} answered without compiling "
+                f"Node {node.id!r} attempt {index} answered without compiling "
                 f"({searches} search(es) in {turn.turns} turn(s))"
             )
 
         proposal = parse_proposal(turn, NodeProposal)
         if proposal is None:
-            last_error = "the response was not valid structured output"
-            history.append(_format_attempt(attempt, "(unparseable response)", last_error))
-            continue
+            return _Attempt(
+                index,
+                error="the response was not valid structured output",
+                body="(unparseable response)",
+            )
 
         body, notes = normalize_proof_body(proposal.proof_body)
         if notes:
             logger.debug(f"Node {node.id!r}: normalized proposal ({'; '.join(notes)})")
-
         if not body:
-            last_error = "the proof body was empty"
-            history.append(_format_attempt(attempt, proposal.proof_body, last_error))
-            continue
+            return _Attempt(index, error="the proof body was empty", body=proposal.proof_body)
 
         forbidden = FORBIDDEN_IN_BODY.search(body)
         if forbidden:
-            last_error = f"the proof body uses {forbidden.group(1)!r}, which is not allowed"
-            history.append(_format_attempt(attempt, body, last_error))
-            continue
+            return _Attempt(
+                index,
+                error=f"the proof body uses {forbidden.group(1)!r}, which is not allowed",
+                body=body,
+            )
 
         source = workspace.render_node_module(node, parents, body)
         try:
@@ -231,25 +227,63 @@ async def prove_node(
                 label=f"verify_{node.id}",
             )
         except LeanBuildError as e:
-            logger.error(f"Node {node.id!r}: verification compile failed: {e}")
-            return NodeAttemptResult(
-                outcome=NodeOutcome.INFRASTRUCTURE_ERROR,
-                attempts=attempts,
-                diagnosis=NodeDiagnosis(outcome=NodeOutcome.INFRASTRUCTURE_ERROR, detail=str(e)),
-                transcript=history,
-            )
+            return _Attempt(index=index, infrastructure=str(e))
 
         if result.success:
+            return _Attempt(index, body=body, solved=True)
+        return _Attempt(index, error=result.output, body=body)
+
+    # Attempts run in waves: parallel within a wave, so a node needing several tries does
+    # not pay a full round-trip for each, and sequential across waves, so every later
+    # attempt still sees the earlier failures.
+    wave_size = max(1, role.attempt_concurrency)
+
+    while attempts < role.max_attempts:
+        if budget.exhausted:
+            logger.warning(
+                f"Node {node.id!r}: token budget exhausted after {attempts}/"
+                f"{role.max_attempts} attempts ({budget.spent} tokens). Raise "
+                "blueprint.prover.max_total_tokens; this is starvation, not difficulty."
+            )
+            starved = attempts < role.max_attempts
+            break
+
+        size = min(wave_size, role.max_attempts - attempts)
+        replay = list(history)
+        wave = await asyncio.gather(*(one_attempt(attempts + i + 1, replay) for i in range(size)))
+        attempts += size
+
+        solved = next((a for a in wave if a.solved), None)
+        if solved is not None:
             logger.info(f"Node {node.id!r}: solved in {attempts} attempt(s)")
             return NodeAttemptResult(
                 outcome=NodeOutcome.SOLVED,
-                proof_body=body,
+                proof_body=solved.body,
                 attempts=attempts,
                 transcript=history,
             )
 
-        last_error = result.output
-        history.append(_format_attempt(attempt, body, last_error))
+        broken = next((a for a in wave if a.infrastructure), None)
+        if broken is not None:
+            logger.error(f"Node {node.id!r}: Lean infrastructure failure: {broken.infrastructure}")
+            infrastructure = NodeDiagnosis(
+                outcome=NodeOutcome.INFRASTRUCTURE_ERROR,
+                detail=broken.infrastructure,
+                last_error=last_error,
+            )
+            break
+
+        for a in wave:
+            last_error = a.error or last_error
+            history.append(_format_attempt(a.index, a.body, a.error))
+
+    if infrastructure is not None:
+        return NodeAttemptResult(
+            outcome=NodeOutcome.INFRASTRUCTURE_ERROR,
+            attempts=attempts,
+            diagnosis=infrastructure,
+            transcript=history,
+        )
 
     if starved:
         # Triage here would be both misleading and self-defeating: the statement was never

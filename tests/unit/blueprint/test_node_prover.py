@@ -1,5 +1,6 @@
 """Node prover isolation, the proof-body contract, and harness verification."""
 
+import asyncio
 import json
 
 from langchain_core.messages import AIMessage
@@ -15,7 +16,11 @@ from ax_prover.config import BlueprintRoleConfig
 
 from .conftest import make_blueprint, make_node
 
-ROLE = BlueprintRoleConfig(max_total_tokens=0, max_attempts=2, max_tool_iterations=0)
+# attempt_concurrency=1 keeps these tests deterministic: they assert on attempt counts and
+# on which canned response was consumed, which a parallel wave would reorder.
+ROLE = BlueprintRoleConfig(
+    max_total_tokens=0, max_attempts=2, max_tool_iterations=0, attempt_concurrency=1
+)
 
 
 class FakeClient:
@@ -223,3 +228,80 @@ async def test_using_every_attempt_still_reports_a_real_diagnosis(workspace, mon
 
     assert result.outcome is NodeOutcome.PROOF_TOO_HARD
     assert result.diagnosis.detail == "genuinely hard"
+
+
+async def test_attempts_run_in_parallel_waves(workspace, monkeypatch):
+    """Sequential attempts made a 3-try node pay three full round-trips."""
+    node = make_node("helper", signature=": True")
+    blueprint = make_blueprint(node)
+    running = 0
+    peak = 0
+
+    async def slow_compile(source, label="scratch", **kwargs):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0.01)
+        running -= 1
+        return type("R", (), {"success": False, "output": "unsolved goals", "source": source})()
+
+    monkeypatch.setattr(workspace, "compile_candidate", slow_compile)
+    role = BlueprintRoleConfig(
+        max_total_tokens=0, max_attempts=4, max_tool_iterations=0, attempt_concurrency=2
+    )
+    client = FakeClient(*[proposal("by simp")] * 4, {"outcome": "PROOF_TOO_HARD", "detail": "x"})
+
+    result = await prove_node(workspace, blueprint, node, client, role)
+
+    assert peak == 2, "two attempts should be in flight per wave"
+    assert result.attempts == 4
+    assert result.outcome is NodeOutcome.PROOF_TOO_HARD
+
+
+async def test_a_wave_returns_the_first_success_and_stops(workspace, monkeypatch):
+    node = make_node("helper", signature=": True")
+    blueprint = make_blueprint(node)
+    calls = {"n": 0}
+
+    async def compile_second_ok(source, label="scratch", **kwargs):
+        calls["n"] += 1
+        ok = calls["n"] == 2
+        return type("R", (), {"success": ok, "output": "" if ok else "no", "source": source})()
+
+    monkeypatch.setattr(workspace, "compile_candidate", compile_second_ok)
+    role = BlueprintRoleConfig(
+        max_total_tokens=0, max_attempts=4, max_tool_iterations=0, attempt_concurrency=2
+    )
+    client = FakeClient(*[proposal("by simp")] * 4)
+
+    result = await prove_node(workspace, blueprint, node, client, role)
+
+    assert result.outcome is NodeOutcome.SOLVED
+    assert result.attempts == 2, "the wave that succeeded ends the node"
+
+
+async def test_later_waves_see_every_earlier_failure(workspace, monkeypatch):
+    """Parallelism must not cost the feedback loop."""
+    node = make_node("helper", signature=": True")
+    blueprint = make_blueprint(node)
+    prompts: list[str] = []
+
+    async def failing(source, label="scratch", **kwargs):
+        return type("R", (), {"success": False, "output": "unsolved goals", "source": source})()
+
+    monkeypatch.setattr(workspace, "compile_candidate", failing)
+
+    class Recorder(FakeClient):
+        async def ainvoke(self, messages, tools=None, output_schema=None, retry_config=None):
+            prompts.append("\n".join(str(getattr(m, "content", m)) for m in messages))
+            return await super().ainvoke(messages, tools, output_schema, retry_config)
+
+    role = BlueprintRoleConfig(
+        max_total_tokens=0, max_attempts=4, max_tool_iterations=0, attempt_concurrency=2
+    )
+    client = Recorder(*[proposal("by simp")] * 4, {"outcome": "PROOF_TOO_HARD", "detail": "x"})
+
+    await prove_node(workspace, blueprint, node, client, role)
+
+    # The second wave's prompts replay the first wave's failures.
+    assert any("previous attempts failed" in p for p in prompts[2:])

@@ -52,7 +52,7 @@ async def test_nodes_are_proven_in_dependency_order(
     monkeypatch.setattr(scheduler, "prove_node", fake_prover({}, observed))
     store.reconcile(linear_blueprint, ENVIRONMENT)
 
-    report = await run_schedule(workspace, linear_blueprint, store, None, ROLE)
+    report = await run_schedule(workspace, linear_blueprint, store, None, ROLE, speculative=False)
 
     assert observed == ["base", "middle", "target"]
     assert report.rounds == 3
@@ -63,7 +63,7 @@ async def test_independent_nodes_share_one_round(workspace, store, wide_blueprin
     monkeypatch.setattr(scheduler, "prove_node", fake_prover({}))
     store.reconcile(wide_blueprint, ENVIRONMENT)
 
-    report = await run_schedule(workspace, wide_blueprint, store, None, ROLE)
+    report = await run_schedule(workspace, wide_blueprint, store, None, ROLE, speculative=False)
 
     assert report.rounds == 2
     assert set(report.solved) == {"left", "right", "target"}
@@ -103,7 +103,7 @@ async def test_a_failed_parent_blocks_its_children(workspace, store, linear_blue
     )
     store.reconcile(linear_blueprint, ENVIRONMENT)
 
-    report = await run_schedule(workspace, linear_blueprint, store, None, ROLE)
+    report = await run_schedule(workspace, linear_blueprint, store, None, ROLE, speculative=False)
 
     assert observed == ["base"]
     assert report.failed == ["base"]
@@ -326,3 +326,69 @@ async def test_a_cancelled_node_stays_pending_and_propagates(
     # Nothing is lost: the checkpoint still has the node pending, so resume retries it.
     resumed = ProofStore.open(store.path.parent, "Mod:my_target", resume=True)
     assert resumed.records["left"].status is NodeStatus.PENDING
+
+
+async def test_speculative_dispatch_sends_a_whole_chain_at_once(workspace, store, monkeypatch):
+    """A chain was proven one node per round, leaving the run at concurrency 1."""
+    blueprint = make_blueprint(
+        make_node("a"),
+        make_node("b", ("a",)),
+        make_node("c", ("b",)),
+        make_node("target", ("c",), is_target=True, lean_name="my_target"),
+    )
+    running = 0
+    peak = 0
+    seen: list[str] = []
+
+    async def prove_node(workspace, blueprint, node, client, role, search_tool=None):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        seen.append(node.id)
+        await asyncio.sleep(0.01)
+        running -= 1
+        return NodeAttemptResult(outcome=NodeOutcome.SOLVED, proof_body=f"by {node.id}", attempts=1)
+
+    monkeypatch.setattr(scheduler, "prove_node", prove_node)
+    store.reconcile(blueprint, ENVIRONMENT)
+
+    report = await run_schedule(
+        workspace, blueprint, store, None, ROLE, max_node_agents=12, speculative=True
+    )
+
+    assert peak == 4, "the whole chain should be in flight at once"
+    assert report.rounds == 1
+    assert set(seen) == {"a", "b", "c", "target"}
+    assert is_complete(blueprint, store)
+
+
+async def test_speculative_dispatch_still_skips_solved_and_dead_nodes(
+    workspace, store, monkeypatch
+):
+    blueprint = make_blueprint(
+        make_node("used"),
+        make_node("orphan"),
+        make_node("target", ("used",), is_target=True, lean_name="my_target"),
+    )
+    seen: list[str] = []
+    monkeypatch.setattr(scheduler, "prove_node", fake_prover({}, seen))
+    store.reconcile(blueprint, ENVIRONMENT)
+    store.mark_solved("used", "by used", attempts=1)
+
+    await run_schedule(workspace, blueprint, store, None, ROLE, speculative=True)
+
+    assert seen == ["target"], "solved and unreachable nodes stay out of the dispatch"
+
+
+async def test_dispatchable_selects_by_mode(wide_blueprint):
+    from ax_prover.blueprint.graph import required_nodes
+    from ax_prover.blueprint.scheduler import dispatchable
+
+    required = required_nodes(wide_blueprint)
+    statuses = dict.fromkeys(["left", "right", "target"], NodeStatus.PENDING)
+
+    frontier = dispatchable(wide_blueprint, statuses, required, speculative=False)
+    assert set(frontier) == {"left", "right"}, "target waits for its parents"
+
+    everything = dispatchable(wide_blueprint, statuses, required, speculative=True)
+    assert set(everything) == {"left", "right", "target"}

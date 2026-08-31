@@ -106,9 +106,17 @@ Pipeline (`orchestrator.py` is the state machine):
 2. **Canonicalization** (`extraction.py`, `graph.py`) — the skeleton is compiled, its
    declarations extracted, and the graph validated. The graph is derived from what Lean
    elaborated, never from parsing model text.
-3. **Scheduling** (`scheduler.py`) — nodes whose declared parents are solved run
-   concurrently. Node provers (`node_prover.py`) are isolated and return proof bodies only.
-   Model-side and Lean-side concurrency are separate limits (see below).
+3. **Scheduling** (`scheduler.py`) — by default every unsolved node is dispatched at once
+   (`speculative_nodes`), not just those whose parents are solved: a scratch module renders
+   parents as `axiom` declarations, so a proof never needs its parents' proofs. Waiting only
+   serializes the graph, and a measured run sat at concurrency 1 for 90% of its wall clock.
+   The trade, which plan section 19 declined, is that a later restated parent invalidates
+   children by fingerprint; measured reuse was 13 of 17 proofs across 2 rounds, so this is
+   much cheaper than the serialization. Node provers (`node_prover.py`) are isolated,
+   return proof bodies only, and run their attempts in parallel waves
+   (`attempt_concurrency`) so a node needing several tries does not pay a full round-trip
+   for each, while every later wave still sees the earlier failures. Model-side and
+   Lean-side concurrency are separate limits (see below).
 4. **Refinement** (`refinement.py`) — diagnoses drive a graph revision; `proof_store.py`
    reuses proofs whose interface fingerprint is unchanged.
 5. **Assembly** (`assembly.py`, `comparator.py`) — deterministic same-file rendering, full

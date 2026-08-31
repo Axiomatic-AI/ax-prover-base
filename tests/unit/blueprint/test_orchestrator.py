@@ -115,7 +115,14 @@ def patch_pipeline(
         return candidate
 
     async def fake_schedule(
-        workspace, bp, store, client, role, search_tool=None, max_node_agents=4
+        workspace,
+        bp,
+        store,
+        client,
+        role,
+        search_tool=None,
+        max_node_agents=12,
+        speculative=True,
     ):
         report = reports.pop(0) if len(reports) > 1 else reports[0]
         for node_id, body in proofs.items():

@@ -33,6 +33,10 @@ blueprint:
     max_total_tokens: 1000000
     max_attempts: 4
     max_tool_iterations: 8
+    # Attempts per wave. Sequential attempts made a node needing 3 tries pay 3 full
+    # round-trips; one measured node spent 18 minutes that way. Waves keep the feedback
+    # loop across waves while parallelizing within one.
+    attempt_concurrency: 2
     # Searches per attempt before mathlib_search is withdrawn, leaving only lean_compile.
     # One turn can batch many searches, so the iteration cap alone cannot prevent an
     # attempt spending every turn searching and never compiling. 0 disables.
@@ -50,6 +54,11 @@ blueprint:
   # Wide enough that measured frontiers (up to 9) are not throttled, while still capping
   # total concurrent provider requests. 0 = unbounded, as the paper describes.
   max_node_agents: 12
+  # Dispatch every unsolved node at once. Parents appear in a scratch module as `axiom`
+  # declarations, i.e. statements without proofs, so waiting for a parent's proof buys
+  # nothing but serialization: a measured run sat at concurrency 1 for 90% of its wall
+  # clock because its graph ended in a chain. Set false for the classic ready frontier.
+  speculative_nodes: true
   max_lean_compiles: 1
   checkpoint_dir: ".axiomatic/blueprint"
   artifacts_dir: ".axiomatic/blueprint/artifacts"

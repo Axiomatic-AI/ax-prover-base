@@ -24,6 +24,31 @@ from .workspace import BlueprintWorkspace
 logger = get_logger(__name__)
 
 
+def dispatchable(
+    blueprint: Blueprint,
+    statuses: dict[str, NodeStatus],
+    required: set[str],
+    speculative: bool,
+) -> tuple[str, ...]:
+    """Node ids to prove now.
+
+    Speculatively, every unsolved required node: a scratch module renders parents as
+    `axiom` declarations, so a node's proof never needs its parents' proofs and waiting for
+    them only serializes the graph. Otherwise the classic ready frontier, where a node waits
+    until every declared and statement parent is solved.
+    """
+    if not speculative:
+        return tuple(
+            node_id for node_id in ready_frontier(blueprint, statuses) if node_id in required
+        )
+
+    return tuple(
+        node.id
+        for node in blueprint.nodes
+        if node.id in required and statuses.get(node.id, NodeStatus.PENDING) is NodeStatus.PENDING
+    )
+
+
 @dataclass
 class ScheduleReport:
     """What one scheduling pass over a blueprint achieved."""
@@ -42,6 +67,7 @@ async def run_schedule(
     role: BlueprintRoleConfig,
     search_tool: BaseTool | None = None,
     max_node_agents: int = 12,
+    speculative: bool = True,
 ) -> ScheduleReport:
     """Prove the target's required nodes in dependency order until the frontier dries up.
 
@@ -73,9 +99,7 @@ async def run_schedule(
     report = ScheduleReport()
 
     while True:
-        frontier = tuple(
-            node_id for node_id in ready_frontier(blueprint, store.statuses) if node_id in required
-        )
+        frontier = dispatchable(blueprint, store.statuses, required, speculative)
         if not frontier:
             break
 

@@ -228,6 +228,7 @@ class BlueprintOrchestrator:
                 self.prover_role,
                 self.search_tool,
                 self.config.max_node_agents,
+                self.config.speculative_nodes,
             )
 
             if report.infrastructure_error:

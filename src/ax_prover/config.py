@@ -150,6 +150,11 @@ class BlueprintRoleConfig:
     max_total_tokens: int = 2_000_000
     max_attempts: int = 8
     max_tool_iterations: int = 8
+    # Attempts launched concurrently per wave. Attempts are otherwise strictly sequential,
+    # so a node needing 3 tries pays 3 full round-trips; a measured run spent 18 minutes on
+    # one such node. Waves keep the feedback loop - each wave sees every earlier failure -
+    # while parallelizing within a wave.
+    attempt_concurrency: int = 2
     # `mathlib_search` calls allowed per attempt before the tool is withdrawn, leaving only
     # `lean_compile`. A turn may batch many tool calls, so `max_tool_iterations` bounds
     # turns rather than calls and cannot stop a model spending every turn searching and
@@ -197,6 +202,17 @@ class BlueprintConfig:
     # The default throttles instead, because a provider rate limit, not the frontier, is
     # usually the binding constraint; measured frontiers reach 9, so 12 rarely throttles.
     max_node_agents: int = 12
+    # Dispatch every unsolved node at once rather than only those whose parents are solved.
+    # A node's scratch module renders its parents as `axiom` declarations, i.e. statements
+    # without proofs, so a proof never needs its parent's proof and the wait buys nothing
+    # but serialization. A measured run was at concurrency 1 for 90% of its wall clock
+    # because its graph ended in a chain.
+    #
+    # The trade the plan declined (section 19): if refinement later restates a parent, the
+    # children proved against the old statement are invalidated by fingerprint and reproved.
+    # Measured invalidation is low - one run reused 13 of 17 proofs across 2 rounds - so the
+    # wasted work is far cheaper than the serialization it removes.
+    speculative_nodes: bool = True
     # Number of Lean servers, which is also the number of concurrent compilations: one
     # server serializes internally on a lock, so extra workers per server only contend.
     # Each warm Mathlib environment needs ~2GB resident, so 1 suits a small machine and a
