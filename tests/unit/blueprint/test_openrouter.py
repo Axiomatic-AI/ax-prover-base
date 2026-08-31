@@ -22,35 +22,52 @@ def test_openrouter_model_becomes_an_openai_compatible_client(api_key):
     assert str(llm.openai_api_base) == DEFAULT_OPENROUTER_BASE_URL
 
 
-def test_provider_sort_is_lifted_into_openrouter_routing(api_key):
-    llm = create_llm(
-        LLMConfig(
-            model=DEEPSEEK,
-            provider_config={"provider_sort": "exacto", "reasoning_effort": "xhigh"},
-            retry_config={},
-        )
-    )
-
-    assert llm.extra_body == {"provider": {"sort": "exacto"}}
-    assert llm.reasoning_effort == "xhigh"
-
-
-def test_provider_sort_merges_with_an_existing_extra_body(api_key):
-    llm = create_llm(
-        LLMConfig(
-            model=DEEPSEEK,
-            provider_config={
-                "provider_sort": "throughput",
-                "extra_body": {"provider": {"order": ["a"]}, "transforms": []},
-            },
-            retry_config={},
-        )
-    )
-
-    assert llm.extra_body == {
-        "provider": {"order": ["a"], "sort": "throughput"},
-        "transforms": [],
+def test_extra_body_passes_through_verbatim(api_key):
+    """OpenRouter's controls live at the body root, so extra_body must not be rewritten."""
+    extra = {
+        "reasoning": {"effort": "high"},
+        "session_id": "ax-prover-blueprint",
+        "provider": {"only": ["deepseek/fp8", "coreweave/fp8"]},
     }
+    llm = create_llm(
+        LLMConfig(model=DEEPSEEK, provider_config={"extra_body": extra}, retry_config={})
+    )
+
+    assert llm.extra_body == extra
+
+
+def test_reasoning_effort_is_not_sent_as_a_kwarg(api_key):
+    """A `reasoning_effort` kwarg does not reach OpenRouter's unified reasoning control.
+
+    Effort belongs in `extra_body.reasoning.effort`; a kwarg leaves v4-flash at its HIGH
+    default, which silently invalidated a high-versus-xhigh comparison.
+    """
+    from ax_prover.config import Config
+    from ax_prover.utils import merge_configs
+
+    config = merge_configs([Config(), "default.yaml", "blueprint.yaml"])
+    provider_config = config.blueprint.llm.provider_config
+
+    assert "reasoning_effort" not in provider_config
+    assert provider_config["extra_body"]["reasoning"]["effort"] == "high"
+
+
+def test_routing_is_pinned_to_fp8_or_better(api_key):
+    """Mixing fp4, fp8 and unquantized upstreams puts a confound under every measurement."""
+    from ax_prover.config import Config
+    from ax_prover.utils import merge_configs
+
+    config = merge_configs([Config(), "default.yaml", "blueprint.yaml"])
+    extra = config.blueprint.llm.provider_config["extra_body"]
+
+    only = extra["provider"]["only"]
+    assert only, "routing must be restricted"
+    assert all(p == "deepseek" or p.endswith("/fp8") for p in only), only
+    # `order` would disable sticky routing, and a narrow list with fallbacks off 404s.
+    assert "order" not in extra["provider"]
+    assert extra["provider"].get("allow_fallbacks") is not False
+    # A stable session_id is what keeps the prompt cache warm across node attempts.
+    assert extra["session_id"]
 
 
 def test_base_url_can_be_overridden(api_key):

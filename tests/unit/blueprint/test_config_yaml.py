@@ -17,7 +17,7 @@ def test_blueprint_yaml_enables_the_mode_and_resolves_every_role():
 
     assert config.blueprint.enabled is True
     assert config.blueprint.llm.model == "openrouter:deepseek/deepseek-v4-flash-0731"
-    assert config.blueprint.llm.provider_config["provider_sort"] == "exacto"
+    assert config.blueprint.llm.provider_config["extra_body"]["reasoning"]["effort"] == "high"
 
     for role in ("architect", "prover", "refiner"):
         assert config.blueprint.role(role).llm is not None
