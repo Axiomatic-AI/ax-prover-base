@@ -92,25 +92,67 @@ llm_configs:
       base_url: "https://api.mulerouter.ai/vendors/openai/v1"
       model_provider: "openai"
 
-  # OpenRouter-hosted models. Requires OPENROUTER_API_KEY.
-  # `provider_sort` is lifted into OpenRouter's provider routing field.
-  # Reasoning effort is not a paper parameter; Appendix A discloses only token lengths and
-  # retry counts. Traces put 145 of 150 run-minutes in LLM calls (p90 103s, max 284s) versus
-  # 3 minutes in Lean, so effort dominates wall-clock. `high` is the starting point; raise to
-  # `xhigh` if solve rate suffers.
+  # DeepSeek V4 Flash via OpenRouter (needs OPENROUTER_API_KEY). Pinned to the 0731
+  # release rather than the bare slug, which resolves to the older, pricier 0423.
+  #
+  # This block mirrors the settings proven in ax-assistant's octo informalization, which
+  # documents three OpenRouter-specific hazards. All three bit us before this:
+  #
+  #  1. Reasoning effort must be sent as OpenRouter's unified `reasoning.effort`. A
+  #     `reasoning_effort` kwarg on the OpenAI-compatible client is not read, so v4-flash
+  #     keeps thinking at its HIGH default. Two runs intended as a high-versus-xhigh
+  #     comparison were therefore almost certainly both HIGH, which is why they measured
+  #     the same.
+  #  2. OpenRouter load-balances across ~30 upstreams serving this model at fp4, fp8 and
+  #     unquantized. Mixing precisions mid-run puts a confound underneath every
+  #     measurement, and the latency spread across providers is roughly 9x on an identical
+  #     prompt. Routing is restricted to fp8-or-better.
+  #  3. `session_id` is what keeps the prompt cache warm. Separate upstreams share no
+  #     cache, and OpenRouter identifies a conversation by hashing the first system and
+  #     first non-system message, which differ on every node here, so without it every
+  #     request routes independently. A stable value pins a run to one upstream and lets a
+  #     resumed run reuse a still-warm cache.
+  #
+  # Do NOT narrow routing to one provider with `allow_fallbacks: false`: with a single
+  # unavailable endpoint OpenRouter has nothing to fall back to and 404s every request.
+  # `provider.only` is used rather than `provider.order` because `order` disables sticky
+  # routing.
+  #
+  # The blueprint prompts resend a large, mostly constant prefix per attempt, so caching
+  # matters more here than in a single-shot informalization.
   deepseek_v4_flash:
     model: "openrouter:deepseek/deepseek-v4-flash-0731"
     provider_config:
-      temperature: null
+      temperature: null  # ignored in thinking mode
       max_tokens: null
-      reasoning_effort: "high"
-      provider_sort: "exacto"
+      extra_body:
+        reasoning:
+          effort: "high"
+        session_id: "ax-prover-blueprint"
+        provider:
+          only:
+            - "deepseek"
+            - "deepseek/fp8"
+            - "siliconflow/fp8"
+            - "parasail/fp8"
+            - "coreweave/fp8"
+            - "baseten/fp8"
 
-  # Kept for an effort A/B against the above.
+  # For a controlled effort comparison: identical routing, effort the only variable.
   deepseek_v4_flash_xhigh:
     model: "openrouter:deepseek/deepseek-v4-flash-0731"
     provider_config:
       temperature: null
       max_tokens: null
-      reasoning_effort: "xhigh"
-      provider_sort: "exacto"
+      extra_body:
+        reasoning:
+          effort: "xhigh"
+        session_id: "ax-prover-blueprint"
+        provider:
+          only:
+            - "deepseek"
+            - "deepseek/fp8"
+            - "siliconflow/fp8"
+            - "parasail/fp8"
+            - "coreweave/fp8"
+            - "baseten/fp8"

@@ -47,19 +47,16 @@ def create_llm(config: LLMConfig) -> BaseChatModel:
 def _create_openrouter_llm(config: LLMConfig) -> BaseChatModel:
     """Create a chat model backed by OpenRouter's OpenAI-compatible endpoint.
 
-    `provider_sort` is lifted into OpenRouter's `provider.sort` routing field; everything
-    else passes through to `ChatOpenAI` unchanged.
+    `extra_body` passes through verbatim and lands at the request body root, which is how
+    OpenRouter's own controls are reached: `reasoning.effort`, `provider.only`, and a
+    top-level `session_id`. Set them in the YAML rather than here, so routing is explicit
+    and reviewable per model.
+
+    Note that `reasoning_effort` as a `ChatOpenAI` kwarg is not a reliable way to reach
+    OpenRouter's unified reasoning control; prefer `extra_body.reasoning.effort`.
     """
     provider_config = dict(config.provider_config)
     base_url = provider_config.pop("base_url", DEFAULT_OPENROUTER_BASE_URL)
-    provider_sort = provider_config.pop("provider_sort", None)
-
-    if provider_sort:
-        extra_body = dict(provider_config.pop("extra_body", {}) or {})
-        provider_routing = dict(extra_body.get("provider", {}))
-        provider_routing["sort"] = provider_sort
-        extra_body["provider"] = provider_routing
-        provider_config["extra_body"] = extra_body
 
     return ChatOpenAI(
         model=config.model.removeprefix(OPENROUTER_PREFIX),
