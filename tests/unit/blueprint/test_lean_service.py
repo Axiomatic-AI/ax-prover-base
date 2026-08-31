@@ -458,3 +458,32 @@ async def test_two_groups_do_not_evict_each_others_warm_prefix(ok_response):
     assert service.stats.warmups == 2
     assert len(set(service._leases.values())) == 2
     await service.aclose()
+
+
+async def test_clear_cancellations_frees_every_node(ok_response):
+    """A refinement round clears cancellations without rebuilding qualified node keys."""
+    service = await service_for(FakeServer(ok_response))
+    service.cancel_node("target_a:n1")
+    service.cancel_node("target_a:n2")
+
+    service.clear_cancellations()
+
+    assert (await service.compile("body", node_id="target_a:n1")).success
+    assert (await service.compile("body", node_id="target_a:n2")).success
+    await service.aclose()
+
+
+async def test_resume_with_an_unqualified_key_does_not_free_a_qualified_one(ok_response):
+    """The bug that aborted a 19-node run: cancel qualified, resume bare, key leaks.
+
+    `scheduler` cancels with `workspace.node_key`, so resuming with the bare id silently
+    discards a key that was never added and the node can never compile again.
+    """
+    service = await service_for(FakeServer(ok_response))
+    service.cancel_node("target_a:n1")
+
+    service.resume_node("n1")
+
+    with pytest.raises(CompileCancelled):
+        await service.compile("body", node_id="target_a:n1")
+    await service.aclose()

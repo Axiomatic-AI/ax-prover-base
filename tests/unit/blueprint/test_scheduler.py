@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from ax_prover.blueprint import scheduler
+from ax_prover.blueprint.lean_service import CompileCancelled
 from ax_prover.blueprint.models import NodeDiagnosis, NodeOutcome, NodeStatus
 from ax_prover.blueprint.node_prover import NodeAttemptResult
 from ax_prover.blueprint.proof_store import ProofStore
@@ -392,3 +393,29 @@ async def test_dispatchable_selects_by_mode(wide_blueprint):
 
     everything = dispatchable(wide_blueprint, statuses, required, speculative=True)
     assert set(everything) == {"left", "right", "target"}
+
+
+async def test_a_leaked_compile_cancellation_does_not_abort_the_graph(
+    workspace, store, linear_blueprint, monkeypatch
+):
+    """A stale cancellation must cost one node, not the whole run.
+
+    Reported from a real 19-node run: a node solved in one round was invalidated by
+    refinement, its qualified cancellation key was never cleared, and every compile then
+    raised `CompileCancelled`. The scheduler reported that as an infrastructure error and
+    stopped, discarding 18 proven nodes.
+    """
+
+    async def cancelled(*args, **kwargs):
+        raise CompileCancelled("node 'my_target:base' was cancelled")
+
+    monkeypatch.setattr(scheduler, "prove_node", cancelled)
+    store.reconcile(linear_blueprint, ENVIRONMENT)
+
+    report = await run_schedule(workspace, linear_blueprint, store, None, ROLE)
+
+    # Recorded as an ordinary failure, so refinement gets a shot and the round terminates
+    # instead of re-dispatching a pending node forever.
+    assert report.infrastructure_error == ""
+    assert sorted(report.failed) == ["base", "middle", "target"]
+    assert all(store.statuses.get(node.id) is NodeStatus.FAILED for node in linear_blueprint.nodes)

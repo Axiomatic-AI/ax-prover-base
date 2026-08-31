@@ -280,16 +280,16 @@ class BlueprintOrchestrator:
                 )
 
             blueprint = candidate.blueprint
-            # Parent signatures may have moved, so any queued compile is stale. The shared
-            # prefix is unchanged, so the warm environment itself stays valid.
-            for node_id in blocked_nodes(blueprint, store):
-                service.cancel_node(node_id)
-                service.resume_node(node_id)
             store.state.refinement_rounds = round_number + 1
             store.remember_skeleton(
                 candidate.helpers, candidate.target_parents, candidate.target_proof_plan
             )
             reused = store.reconcile(blueprint, environment)
+            # After reconcile, so nodes it just invalidated are cleared too. Cancellations
+            # are keyed by `workspace.node_key`, and clearing the set avoids having to
+            # rebuild those keys here. The shared prefix is unchanged, so the warm
+            # environment itself stays valid.
+            service.clear_cancellations()
 
         return await self._finalize(target, workspace, blueprint, store, reused)
 

@@ -289,6 +289,17 @@ class LeanCompileService:
         """Allow a previously cancelled node to queue work again."""
         self._cancelled_nodes.discard(node_id)
 
+    def clear_cancellations(self) -> None:
+        """Forget every cancellation, which is per-round bookkeeping only.
+
+        A cancellation exists to drop queued compiles for a node that just finished, so it
+        carries no meaning into the next round. Leaking one across rounds is fatal: a node
+        solved in one round and then invalidated by refinement would be dispatched again and
+        every compile would raise `CompileCancelled` before running, which the scheduler
+        reports as an infrastructure error and stops the whole run on.
+        """
+        self._cancelled_nodes.clear()
+
     async def compile(
         self,
         source: str,

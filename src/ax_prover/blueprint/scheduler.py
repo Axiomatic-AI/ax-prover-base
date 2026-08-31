@@ -16,6 +16,7 @@ from ..config import BlueprintRoleConfig
 from ..utils.llm import LLMClient
 from ..utils.logging import get_logger
 from .graph import ready_frontier, required_nodes
+from .lean_service import CompileCancelled
 from .models import Blueprint, NodeDiagnosis, NodeOutcome, NodeStatus
 from .node_prover import NodeAttemptResult, prove_node
 from .proof_store import ProofStore
@@ -126,6 +127,21 @@ async def run_schedule(
                     # nothing is lost; cancellation must keep propagating.
                     logger.warning(f"Node {node_id!r} cancelled; it stays pending")
                     raise
+                except CompileCancelled as e:
+                    # The node's compiles were dropped because it already finished, or a
+                    # cancellation leaked from an earlier round. Neither is an infrastructure
+                    # fault, and reporting it as one would abandon the whole graph over one
+                    # node. Record it as an ordinary failure so refinement can address it:
+                    # leaving it pending would have `dispatchable` re-select it every round
+                    # and never terminate.
+                    logger.warning(f"Node {node_id!r} had its compiles cancelled: {e}")
+                    result = NodeAttemptResult(
+                        outcome=NodeOutcome.PROOF_TOO_HARD,
+                        diagnosis=NodeDiagnosis(
+                            outcome=NodeOutcome.PROOF_TOO_HARD,
+                            detail=f"its queued compilations were cancelled ({e})",
+                        ),
+                    )
                 except Exception as e:  # noqa: BLE001 - reported as an infrastructure error
                     logger.exception(f"Node {node_id!r} raised an unexpected error")
                     result = NodeAttemptResult(
