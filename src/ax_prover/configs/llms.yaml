@@ -124,7 +124,13 @@ llm_configs:
     model: "openrouter:deepseek/deepseek-v4-flash-0731"
     provider_config:
       temperature: null  # ignored in thinking mode
-      max_tokens: null
+      # The model's ceiling is 943k output tokens, so an unbounded runaway can stream for
+      # hours at the measured 60-70 tok/s and stall a whole run. 64k is ~1.5x the largest
+      # useful response observed on a real blueprint run (43,772 tokens), so it bounds the
+      # tail without truncating legitimate work. Truncation is logged as a warning by
+      # `utils.llm._warn_if_truncated`; raise this if that warning starts firing on
+      # responses that were actually going somewhere.
+      max_tokens: 64000
       extra_body:
         reasoning:
           effort: "high"
@@ -143,7 +149,13 @@ llm_configs:
     model: "openrouter:deepseek/deepseek-v4-flash-0731"
     provider_config:
       temperature: null
-      max_tokens: null
+      # The model's ceiling is 943k output tokens, so an unbounded runaway can stream for
+      # hours at the measured 60-70 tok/s and stall a whole run. 64k is ~1.5x the largest
+      # useful response observed on a real blueprint run (43,772 tokens), so it bounds the
+      # tail without truncating legitimate work. Truncation is logged as a warning by
+      # `utils.llm._warn_if_truncated`; raise this if that warning starts firing on
+      # responses that were actually going somewhere.
+      max_tokens: 64000
       extra_body:
         reasoning:
           effort: "xhigh"

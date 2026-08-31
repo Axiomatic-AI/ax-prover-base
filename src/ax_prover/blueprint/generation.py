@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from ..config import BlueprintRoleConfig
 from ..utils.lean_interact import LeanInteractServer
-from ..utils.llm import LLMClient
+from ..utils.llm import LLMClient, was_truncated
 from ..utils.logging import get_logger
 from .extraction import extract_nodes
 from .graph import validate_blueprint
@@ -149,7 +149,15 @@ async def run_skeleton_loop(
         proposal = parse_proposal(turn, ArchitectProposal)
 
         if proposal is None:
-            problems = "- the response was not valid structured output"
+            if was_truncated(turn.response):
+                # Retrying blind would truncate again; say what went wrong.
+                problems = (
+                    "- your previous response was cut off at the output token limit before "
+                    "it produced a complete answer. Reason more briefly and keep the helper "
+                    "skeleton compact."
+                )
+            else:
+                problems = "- the response was not valid structured output"
             continue
 
         helpers, notes = strip_outer_fence(proposal.helpers)
