@@ -94,7 +94,9 @@ class ProverAgent:
         summary_llm_config = self.config.summarize_output.llm or self.config.prover_llm
         self.summary_llm_client = LLMClient(summary_llm_config)
 
-        self.max_input_tokens = self.llm_client.profile.get("max_input_tokens")
+        # Models missing from langchain's profile registry (e.g. claude-opus-5)
+        # return None here, which would crash the comparison below.
+        self.max_input_tokens = self.llm_client.profile.get("max_input_tokens") or 200000
         if self.max_input_tokens < 1000:
             self.logger.error("Error: max_input_tokens abnormally small")
 
