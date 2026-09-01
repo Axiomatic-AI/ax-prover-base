@@ -34,9 +34,10 @@ class LogLevel(StrEnum):
     CRITICAL = "CRITICAL"
 
 
+# Only transient failures (rate limits, server errors, connection loss) are retried;
+# permanent errors such as bad request parameters fail immediately. See LLMClient.
 DEFAULT_LLM_RETRY_CONFIG = {
     "stop_after_attempt": 10000,  # 10k attempts at 3s is about 8h 20min.
-    "wait_exponential_jitter": True,
     "exponential_jitter_params": {
         "initial": 0.5,
         "max": 3,

@@ -1,7 +1,10 @@
 """LLM factory functions."""
 
+import logging
 import os
 
+import anthropic
+import openai
 from anthropic import transform_schema
 from langchain.chat_models import init_chat_model
 from langchain_anthropic import ChatAnthropic
@@ -14,8 +17,17 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel
+from tenacity import (
+    AsyncRetrying,
+    before_sleep_log,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from ..config import LLMConfig
+
+logger = logging.getLogger(__name__)
 
 _PROVIDER_API_KEY_ENV = {
     "anthropic": "ANTHROPIC_API_KEY",
@@ -89,6 +101,27 @@ def get_reasoning(response: AIMessage) -> str:
     return reasoning
 
 
+_CONNECTION_ERRORS = (anthropic.APIConnectionError, openai.APIConnectionError)
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """Whether a failed LLM call is worth retrying.
+
+    Rate limits, server errors and connection failures are transient. Anything else --
+    bad request parameters, auth failures, client-side validation -- is permanent, and
+    retrying it only hides the error behind hours of silent backoff.
+    """
+    if isinstance(exc, _CONNECTION_ERRORS):
+        return True
+
+    # Provider SDKs expose the HTTP status as `status_code` (anthropic, openai) or `code` (google)
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    if not isinstance(status, int):
+        return False
+
+    return status == 429 or status >= 500
+
+
 class LLMClient:
     """Dynamically create a Runnable to invoke LLMs with structured output, tool calling and retry.
 
@@ -133,20 +166,32 @@ class LLMClient:
     ) -> AIMessage:
         """Invoke with optional tools, structured output, and retry."""
         effective_retry = retry_config or self._retry_config
-        runnable = self._get_runnable(
-            tools=tools, output_schema=output_schema, retry_config=effective_retry
-        )
-        return await runnable.ainvoke(messages)
+        runnable = self._get_runnable(tools=tools, output_schema=output_schema)
+
+        if not effective_retry:
+            return await runnable.ainvoke(messages)
+
+        jitter_params = effective_retry.get("exponential_jitter_params", {})
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception(_is_transient_error),
+            stop=stop_after_attempt(effective_retry["stop_after_attempt"]),
+            wait=wait_exponential_jitter(**jitter_params),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=True,
+        ):
+            with attempt:
+                return await runnable.ainvoke(messages)
+
+        raise AssertionError("unreachable: AsyncRetrying always returns or raises")
 
     def _get_runnable(
         self,
         tools: list[BaseTool] | None = None,
         output_schema: type[BaseModel] | None = None,
-        retry_config: dict | None = None,
     ) -> Runnable[LanguageModelInput, AIMessage]:
-        """Build a retryable Runnable that always returns AIMessage.
+        """Build a Runnable that always returns AIMessage.
 
-        Layers are applied in order: bind_tools → bind structured output → with_retry.
+        Layers are applied in order: bind_tools → bind structured output.
         """
         model: Runnable = self._base_llm
 
@@ -158,9 +203,6 @@ class LLMClient:
 
         if output_schema:
             model = model.bind(**self._structured_output_bind_kwargs(output_schema))
-
-        if retry_config:
-            model = model.with_retry(**retry_config)
 
         return model
 
@@ -175,8 +217,7 @@ class LLMClient:
         # LOOK AT WHAT IT NEED TO DO C'MONNNNN
 
         if isinstance(self._base_llm, ChatAnthropic):
-            model_name = getattr(self._base_llm, "model", "")  # Need to check 4.5 or 4.6+
-            return _anthropic_structured_kwargs(model_name, schema)
+            return _anthropic_structured_kwargs(schema)
 
         if isinstance(self._base_llm, ChatGoogleGenerativeAI):
             return _google_structured_kwargs(schema.model_json_schema())
@@ -189,20 +230,16 @@ class LLMClient:
         )
 
 
-def _anthropic_structured_kwargs(model_name: str, schema: type[BaseModel]) -> dict:
-    json_schema = schema.model_json_schema()
-    json_schema = transform_schema(json_schema)
+def _anthropic_structured_kwargs(schema: type[BaseModel]) -> dict:
+    """Constrain output to a JSON schema.
 
-    is_46 = "4-6" in model_name or "4.6" in model_name
+    `output_config.format` is the canonical parameter and is accepted by every Claude
+    model we use. The older `output_format` is deprecated and is removed in
+    langchain-anthropic 2.0.
+    """
+    json_schema = transform_schema(schema.model_json_schema())
 
-    schema_payload = {"type": "json_schema", "schema": json_schema}
-
-    if is_46:
-        # Claude 4.6+: output_config.format (output_format is deprecated)
-        return {"output_config": {"format": schema_payload}}
-    else:
-        # Claude 4.5 and earlier: output_format
-        return {"output_format": schema_payload}
+    return {"output_config": {"format": {"type": "json_schema", "schema": json_schema}}}
 
 
 def _google_structured_kwargs(schema: type[BaseModel]) -> dict:
