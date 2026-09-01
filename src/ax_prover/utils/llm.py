@@ -2,6 +2,8 @@
 
 import os
 
+import anthropic
+import openai
 from anthropic import transform_schema
 from langchain.chat_models import init_chat_model
 from langchain_anthropic import ChatAnthropic
@@ -42,6 +44,21 @@ DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 #: in a model's `max_tokens`, not here.
 REQUEST_TIMEOUT_SECONDS = 900.0
 MAX_REQUEST_RETRIES = 1
+
+
+#: Transient failures worth retrying; anything else fails fast. The default retry config
+#: allows 10k attempts, which is right for rate limits and flaky upstreams but disastrous
+#: for permanent errors: a routing 404 (a provider pin excluded by the account's
+#: OpenRouter data policy) was retried invisibly for 90 minutes. Client errors other than
+#: 429 will fail every time, so they fail once.
+RETRYABLE_LLM_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    openai.APIConnectionError,  # includes APITimeoutError
+    openai.RateLimitError,
+    openai.InternalServerError,
+    anthropic.APIConnectionError,
+    anthropic.RateLimitError,
+    anthropic.InternalServerError,
+)
 
 
 def create_llm(config: LLMConfig) -> BaseChatModel:
@@ -242,7 +259,12 @@ class LLMClient:
             model = model.bind(**self._structured_output_bind_kwargs(output_schema))
 
         if retry_config:
-            model = model.with_retry(**retry_config)
+            model = model.with_retry(
+                retry_if_exception_type=retry_config.get(
+                    "retry_if_exception_type", RETRYABLE_LLM_EXCEPTIONS
+                ),
+                **{k: v for k, v in retry_config.items() if k != "retry_if_exception_type"},
+            )
 
         return model
 

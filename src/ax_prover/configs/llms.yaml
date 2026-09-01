@@ -155,13 +155,14 @@ llm_configs:
           only:
             - "coreweave/fp8"
 
-  # First-party serving. CoreWeave's fp8 endpoint spliced garbage tokens in front of
+  # Full-precision serving. CoreWeave's fp8 endpoint spliced garbage tokens in front of
   # numerals in long skeleton generations (a known fp8-serving bug class, vllm#42265:
-  # "garbage tokens ... especially in front of numbers in the code"). The official API is
-  # slower (80 tok/s vs 162) and pricier ($0.22/$0.66 vs $0.130/$0.280 per M), but serves
-  # the native format on a first-party stack - the closest match to what the
-  # Goedel-Architect paper's results implicitly assume.
-  deepseek_v4_flash_official:
+  # "garbage tokens ... especially in front of numbers in the code"). Morph is the bf16
+  # endpoint: 119 tok/s vs CoreWeave's 162, marginally cheaper. The official `deepseek`
+  # provider would be the closest match to the paper's serving, but it trains on prompts
+  # and this account's OpenRouter data policy excludes such providers, so pinning it 404s
+  # every request ("No endpoints available matching your guardrail restrictions").
+  deepseek_v4_flash_bf16:
     model: "openrouter:deepseek/deepseek-v4-flash-0731"
     provider_config:
       temperature: null  # ignored in thinking mode
@@ -172,7 +173,7 @@ llm_configs:
         session_id: "ax-prover-blueprint"
         provider:
           only:
-            - "deepseek"
+            - "morph/bf16"
 
   # For a controlled effort comparison: identical routing, effort the only variable.
   deepseek_v4_flash_xhigh:
