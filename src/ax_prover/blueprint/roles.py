@@ -6,6 +6,7 @@ or a budget runs out. This module owns token accounting and the transcript-prese
 tool loop; the roles own their prompts and acceptance checks.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -115,12 +116,17 @@ async def run_turn(
     max_tool_iterations: int,
     budget: TokenBudget,
     search_budget: int = 0,
+    stop: Callable[[], bool] | None = None,
 ) -> RoleTurn:
     """Run one turn: let the model use its tools, then extract a structured proposal.
 
     `search_budget` caps `mathlib_search` calls within the turn. A single response may batch
     many tool calls, so `max_tool_iterations` bounds turns rather than calls and cannot on
     its own stop a model from spending every turn searching and never compiling.
+
+    `stop` is checked after each batch of tool calls; once true, the remaining iterations
+    are skipped and the answer is requested immediately. Callers use it to end the turn as
+    soon as a tool has verified a result, instead of letting the model drift away from it.
 
     The two phases are deliberately separate calls. Requesting a forced JSON schema and
     binding tools in the same request is mutually exclusive on OpenAI-compatible providers:
@@ -162,6 +168,9 @@ async def run_turn(
         for name, count in executed.items():
             used[name] = used.get(name, 0) + count
         transcript += tool_messages
+
+        if stop is not None and stop():
+            break
 
         if budget.exhausted:
             logger.debug(f"Token budget exhausted mid-turn ({budget.spent}/{budget.limit})")

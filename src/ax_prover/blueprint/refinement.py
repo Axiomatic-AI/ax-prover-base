@@ -15,7 +15,6 @@ from .generation import SkeletonCandidate, run_skeleton_loop, truncate_context
 from .graph import topological_order
 from .models import Blueprint, NodeDiagnosis, NodeRecord, NodeStatus
 from .prompts import BLUEPRINT_PROTOCOL, REFINER_SYSTEM_PROMPT, REFINER_USER_PROMPT
-from .tools import make_skeleton_compile_tool
 from .workspace import BlueprintWorkspace
 
 logger = get_logger(__name__)
@@ -117,6 +116,5 @@ async def refine_blueprint(
         client,
         role,
         base_messages=[SystemMessage(content=system), HumanMessage(content=user)],
-        tools=[make_skeleton_compile_tool(workspace)],
         label=f"refiner round {round_number}",
     )

@@ -322,3 +322,22 @@ async def test_a_withdrawn_tool_explains_itself_rather_than_reading_as_unknown()
     assert "Search budget spent" in results[0].content
     assert "Unknown tool" not in results[0].content
     assert executed == {}
+
+
+async def test_stop_ends_the_tool_loop_at_the_first_signal():
+    """Once a tool has verified a result, further iterations only drift away from it."""
+    client = BatchingClient(searches_per_turn=1, turns=10)
+    executed: list[str] = []
+
+    turn = await run_turn(
+        client,
+        [HumanMessage(content="go")],
+        [echo_tool(executed), search_tool([])],
+        Answer,
+        6,
+        TokenBudget(0),
+        stop=lambda: True,
+    )
+
+    assert turn.turns == 1
+    assert not turn.iterations_exhausted

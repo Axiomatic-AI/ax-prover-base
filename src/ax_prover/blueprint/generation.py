@@ -125,12 +125,17 @@ async def run_skeleton_loop(
     client: LLMClient,
     role: BlueprintRoleConfig,
     base_messages: list[BaseMessage],
-    tools: list[BaseTool],
     label: str,
 ) -> SkeletonCandidate:
     """Propose skeletons until one validates, feeding every problem back each round.
 
     Shared by the architect and the refiner, which differ only in their prompts.
+
+    The accepted source is what the compile tool verified, not what the model re-types.
+    The final structured answer re-emits the helpers from memory, and a measured run
+    reintroduced errors that way twice: six clean tool compiles in a round, then a
+    rejected submission. So the turn ends at the first successful tool compile, and a
+    submission that fails the gate falls back to the tool-verified source.
 
     Raises:
         BlueprintError: The budget ran out before a skeleton validated.
@@ -138,6 +143,14 @@ async def run_skeleton_loop(
     budget = TokenBudget(role.max_total_tokens)
     problems = ""
     rejected = ""
+    verified: list[str] = []
+
+    def record(helpers: str, success: bool, _output: str) -> None:
+        if success:
+            verified.clear()
+            verified.append(helpers)
+
+    tools: list[BaseTool] = [make_skeleton_compile_tool(workspace, on_result=record)]
 
     for attempt in range(1, role.max_attempts + 1):
         if budget.exhausted:
@@ -153,8 +166,15 @@ async def run_skeleton_loop(
                 repair += ARCHITECT_REPAIR_SOURCE.format(rejected=rejected)
             messages.append(HumanMessage(content=repair))
 
+        verified.clear()
         turn = await run_turn(
-            client, messages, tools, ArchitectProposal, role.max_tool_iterations, budget
+            client,
+            messages,
+            tools,
+            ArchitectProposal,
+            role.max_tool_iterations,
+            budget,
+            stop=lambda: bool(verified),
         )
         proposal = parse_proposal(turn, ArchitectProposal)
 
@@ -180,18 +200,35 @@ async def run_skeleton_loop(
             continue
 
         target_parents = tuple(dict.fromkeys(proposal.target_parents))
-        try:
-            blueprint = await build_blueprint(
-                workspace, server, helpers, target_parents, proposal.target_proof_plan
-            )
-        except BlueprintValidationError as e:
+
+        # The submitted helpers are a from-memory re-typing; the tool-verified source is
+        # the ground truth. Try the submission first in case the model improved it.
+        candidates = [helpers]
+        if verified and verified[0] != helpers:
+            candidates.append(verified[0])
+
+        blueprint: Blueprint | None = None
+        accepted = helpers
+        error: BlueprintValidationError | None = None
+        for candidate in candidates:
+            try:
+                blueprint = await build_blueprint(
+                    workspace, server, candidate, target_parents, proposal.target_proof_plan
+                )
+                accepted = candidate
+                break
+            except BlueprintValidationError as e:
+                # Feedback quotes the submitted version, so keep its report.
+                error = error or e
+
+        if blueprint is None:
             forced = turn.iterations_exhausted
             logger.info(
                 f"{label} round {attempt} rejected"
                 + (" (submission forced by the tool-iteration cap)" if forced else "")
-                + f": {e}"
+                + f": {error}"
             )
-            problems = e.report
+            problems = error.report
             if forced:
                 problems += (
                     "\n- you hit the tool-call limit and had to submit before `lean_compile` "
@@ -201,13 +238,18 @@ async def run_skeleton_loop(
             rejected = helpers
             continue
 
+        if accepted != helpers:
+            logger.info(
+                f"{label}: the submitted helpers failed the gate; accepted this round's "
+                "tool-verified skeleton instead"
+            )
         logger.info(
             f"{label}: accepted a blueprint with {len(blueprint.helpers)} helper(s) "
             f"in round {attempt}"
         )
         return SkeletonCandidate(
             blueprint=blueprint,
-            helpers=helpers,
+            helpers=accepted,
             target_parents=target_parents,
             target_proof_plan=proposal.target_proof_plan,
         )
@@ -279,6 +321,5 @@ async def generate_blueprint(
         client,
         role,
         base_messages=[SystemMessage(content=system), HumanMessage(content=user)],
-        tools=[make_skeleton_compile_tool(workspace)],
         label="architect",
     )

@@ -48,7 +48,7 @@ async def test_a_rejected_skeleton_is_shown_back_on_the_repair_round(workspace, 
     monkeypatch.setattr(generation, "build_blueprint", fake_build)
 
     candidate = await run_skeleton_loop(
-        workspace, None, None, BlueprintRoleConfig(), BASE, [], "refiner round 7"
+        workspace, None, None, BlueprintRoleConfig(), BASE, "refiner round 7"
     )
 
     assert candidate.helpers == SECOND
@@ -66,7 +66,7 @@ async def test_the_first_attempt_carries_no_repair_block(workspace, monkeypatch)
 
     monkeypatch.setattr(generation, "build_blueprint", fake_build)
 
-    await run_skeleton_loop(workspace, None, None, BlueprintRoleConfig(), BASE, [], "architect")
+    await run_skeleton_loop(workspace, None, None, BlueprintRoleConfig(), BASE, "architect")
 
     assert seen[0] == BASE
 
@@ -88,7 +88,7 @@ async def test_an_unparseable_response_repairs_without_a_source_block(workspace,
 
     monkeypatch.setattr(generation, "build_blueprint", fake_build)
 
-    await run_skeleton_loop(workspace, None, None, BlueprintRoleConfig(), BASE, [], "architect")
+    await run_skeleton_loop(workspace, None, None, BlueprintRoleConfig(), BASE, "architect")
 
     repair = seen[1][-1].content
     assert "not valid structured output" in repair
@@ -160,3 +160,69 @@ async def test_a_failed_informal_proof_proceeds_unguided(workspace, monkeypatch)
     )
 
     assert "Additional context" not in seen[0][-1].content
+
+
+VERIFIED = "theorem verified : True := by sorry"
+
+
+async def test_a_broken_submission_falls_back_to_the_tool_verified_source(workspace, monkeypatch):
+    """The final answer re-types the helpers from memory and can drift; the source the
+    compile tool verified mid-turn is the ground truth."""
+
+    async def fake_run_turn(client, messages, tools, *args, **kwargs):
+        # Simulate the model compiling a good skeleton through the tool mid-turn.
+        tools[0].metadata["on_result"](VERIFIED, True, "")
+        return RoleTurn(response=AIMessage(content="{}"))
+
+    def fake_tool(_workspace, on_result=None):
+        from langchain_core.tools import StructuredTool
+
+        async def noop(helpers: str) -> str:
+            return ""
+
+        tool = StructuredTool.from_function(coroutine=noop, name="lean_compile", description="x")
+        tool.metadata = {"on_result": on_result}
+        return tool
+
+    async def fake_build(_ws, _server, helpers, *args):
+        if helpers != VERIFIED:
+            raise BlueprintValidationError(["the assembled skeleton does not compile"])
+        return make_blueprint(make_node("a"))
+
+    monkeypatch.setattr(generation, "run_turn", fake_run_turn)
+    monkeypatch.setattr(generation, "parse_proposal", lambda t, s: ArchitectProposal(helpers=FIRST))
+    monkeypatch.setattr(generation, "make_skeleton_compile_tool", fake_tool)
+    monkeypatch.setattr(generation, "build_blueprint", fake_build)
+
+    candidate = await run_skeleton_loop(
+        workspace, None, None, BlueprintRoleConfig(), BASE, "architect"
+    )
+
+    assert candidate.helpers == VERIFIED
+
+
+async def test_without_a_verified_source_a_broken_submission_still_repairs(workspace, monkeypatch):
+    seen: list[list] = []
+    sources = iter([FIRST, SECOND])
+
+    async def fake_run_turn(client, messages, *args, **kwargs):
+        seen.append(messages)
+        return RoleTurn(response=AIMessage(content="{}"))
+
+    async def fake_build(_ws, _server, helpers, *args):
+        if helpers == FIRST:
+            raise BlueprintValidationError(["the assembled skeleton does not compile"])
+        return make_blueprint(make_node("a"))
+
+    monkeypatch.setattr(generation, "run_turn", fake_run_turn)
+    monkeypatch.setattr(
+        generation, "parse_proposal", lambda t, s: ArchitectProposal(helpers=next(sources))
+    )
+    monkeypatch.setattr(generation, "build_blueprint", fake_build)
+
+    candidate = await run_skeleton_loop(
+        workspace, None, None, BlueprintRoleConfig(), BASE, "architect"
+    )
+
+    assert candidate.helpers == SECOND
+    assert FIRST in seen[1][-1].content
