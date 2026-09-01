@@ -118,7 +118,14 @@ def _check_edges(nodes: tuple[BlueprintNode, ...]) -> list[str]:
             if parent == node.id:
                 problems.append(f"node {node.id!r} declares itself as a parent")
             elif parent not in known:
-                problems.append(f"node {node.id!r} declares unknown parent {parent!r}")
+                # Naming the two ways out matters: the usual cause is a helper the model
+                # meant to write and did not, and "unknown parent" alone reads as a typo.
+                problems.append(
+                    f"node {node.id!r} declares unknown parent {parent!r}, which no "
+                    f"generated helper defines. Either add a helper whose metadata `id` is "
+                    f"{parent!r}, or drop it from that node's `parents`. `parents` may only "
+                    f"name generated helper ids, never Mathlib lemmas."
+                )
 
     if not problems:
         cycle = find_cycle(nodes)

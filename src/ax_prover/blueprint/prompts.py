@@ -157,6 +157,21 @@ Your previous skeleton was rejected. Fix every problem below and return a comple
 """
 
 
+#: Appended to the repair prompt when the rejected source is available. Without it the model
+#: is told what was wrong but never shown what it wrote: the loop rebuilds the conversation
+#: from the base prompt each attempt, so it regenerates the same skeleton and earns the same
+#: rejection. A real run burned four rounds and ~25 minutes on one identical error this way.
+ARCHITECT_REPAIR_SOURCE = """\
+
+This is the `helpers` source you sent. Change exactly what the problems above name and keep
+everything else, including every docstring and its ```ax-blueprint metadata block.
+
+```lean
+{rejected}
+```
+"""
+
+
 NODE_PROVER_SYSTEM_PROMPT = """\
 ## Task
 

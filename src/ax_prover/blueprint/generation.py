@@ -21,6 +21,7 @@ from .lean_service import CompilePriority
 from .models import Blueprint, BlueprintError, BlueprintValidationError
 from .prompts import (
     ARCHITECT_REPAIR_PROMPT,
+    ARCHITECT_REPAIR_SOURCE,
     ARCHITECT_SYSTEM_PROMPT,
     ARCHITECT_USER_PROMPT,
     BLUEPRINT_PROTOCOL,
@@ -133,6 +134,7 @@ async def run_skeleton_loop(
     """
     budget = TokenBudget(role.max_total_tokens)
     problems = ""
+    rejected = ""
 
     for attempt in range(1, role.max_attempts + 1):
         if budget.exhausted:
@@ -141,7 +143,12 @@ async def run_skeleton_loop(
 
         messages = list(base_messages)
         if problems:
-            messages.append(HumanMessage(content=ARCHITECT_REPAIR_PROMPT.format(problems=problems)))
+            repair = ARCHITECT_REPAIR_PROMPT.format(problems=problems)
+            if rejected:
+                # Without the rejected source the model cannot see what it wrote, so it
+                # regenerates the same skeleton and earns the same rejection.
+                repair += ARCHITECT_REPAIR_SOURCE.format(rejected=rejected)
+            messages.append(HumanMessage(content=repair))
 
         turn = await run_turn(
             client, messages, tools, ArchitectProposal, role.max_tool_iterations, budget
@@ -166,6 +173,7 @@ async def run_skeleton_loop(
 
         if not helpers:
             problems = "- `helpers` was empty; the blueprint needs at least one helper lemma"
+            rejected = ""
             continue
 
         target_parents = tuple(dict.fromkeys(proposal.target_parents))
@@ -176,6 +184,7 @@ async def run_skeleton_loop(
         except BlueprintValidationError as e:
             logger.info(f"{label} round {attempt} rejected: {e}")
             problems = e.report
+            rejected = helpers
             continue
 
         logger.info(
