@@ -31,7 +31,7 @@ All results with Claude Opus 4.5, 50 iterations, pass@1. See our [paper](#citati
 
 The agent runs an iterative loop:
 
-1. **Proposer** — An LLM writes Lean 4 proof code, optionally using tools (LeanSearch, web search) to find relevant Mathlib lemmas
+1. **Proposer** — An LLM writes Lean 4 proof code, optionally using library-search tools (LeanSearch, LeanExplore, Loogle) and web search to find relevant Mathlib lemmas
 2. **Compiler** — Builds the code with `lake`; extracts goal states at `sorry` locations to provide structured feedback
 3. **Reviewer** — Verifies statement preservation and proof validity (no `sorry`, no cheating tactics)
 4. **Memory** — Summarizes lessons from failed attempts into a concise "lab notebook" to prevent repeating mistakes
@@ -114,6 +114,42 @@ ax-prover prove MyModule:theorem_name --skip-build
 # Save JSON output to file (for scripting/automation)
 ax-prover prove MyModule:theorem_name -o result.json
 ```
+
+### Library search tools
+
+The proposer can search Mathlib for relevant lemmas before writing a proof. Three
+search back-ends are supported, selected with the `--tools` preset (works on both
+`prove` and `experiment`):
+
+| Preset | Search tools | Setup |
+|--------|--------------|-------|
+| `default` | LeanSearch + web search | None (hosted API) |
+| `lean_explore` | LeanExplore + web search | `pip install 'lean-explore[local]'` |
+| `loogle` | Loogle + web search | Run a local Loogle server (see below) |
+| `all` | LeanSearch + LeanExplore + Loogle + web search | Both of the above |
+
+```bash
+# Swap in LeanExplore as the library-search tool
+ax-prover prove MyModule:theorem_name --tools lean_explore
+
+# Make all search tools available to the proposer
+ax-prover experiment dataset_name --tools all
+```
+
+- **LeanSearch** — embedding search over Mathlib via the hosted [leansearch.net](https://leansearch.net) API. No setup; used by `default`.
+- **LeanExplore** — semantic search (BM25 + FAISS + cross-encoder reranker) returning source and informal descriptions. Runs in-process; install with `pip install 'lean-explore[local]'`, which downloads a local index and reranker model (~1 GB) on first use. Searches are serialized internally because the FAISS/torch backend is not concurrency-safe.
+- **Loogle** — type/name/pattern search served by a local [Loogle](https://github.com/nomeata/loogle) instance. The tool expects an HTTP server at `http://localhost:8088` (override with `prover.proposer_tools.search_loogle.server_url`):
+
+  ```bash
+  git clone https://github.com/nomeata/loogle && cd loogle
+  lake exe cache get && lake build
+  pip install prometheus_client      # required by Loogle's server.py
+  python server.py                   # serves the /json endpoint on localhost:8088
+  ```
+
+  The Lean backend takes ~30s to warm up; until then queries return a "backend is starting up" message.
+
+Tool configurations live in `src/ax_prover/configs/tools.yaml`.
 
 ### Running experiments
 

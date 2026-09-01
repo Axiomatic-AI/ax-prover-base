@@ -38,3 +38,15 @@ tool_configs:
     timeout: 60
     max_retries: 3
     retry_delay: 2
+
+  search_lean_explore:
+    tool_type: search_lean_explore
+    max_results: 6
+    rerank_top: 50
+    packages: ["Mathlib"]
+
+  search_loogle:
+    tool_type: search_loogle
+    server_url: "http://localhost:8088"
+    max_results: 6
+    timeout: 60
