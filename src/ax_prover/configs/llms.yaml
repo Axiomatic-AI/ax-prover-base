@@ -12,6 +12,9 @@ llm_configs:
   claude_opus_5:
     model: "anthropic:claude-opus-5"
     provider_config:
+      max_tokens: 32000 # null defaults to 4096, too small for adaptive thinking
+      betas:
+        - "structured-outputs-2025-11-13"
       thinking:
         type: "adaptive"
         # Opus 5 omits reasoning text by default, which would leave get_reasoning empty
