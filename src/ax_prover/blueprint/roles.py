@@ -56,6 +56,7 @@ class RoleTurn:
     tool_calls: dict[str, int] = field(default_factory=dict)
     turns: int = 0
     tools_exhausted: bool = False
+    iterations_exhausted: bool = False
 
     @property
     def text(self) -> str:
@@ -132,6 +133,7 @@ async def run_turn(
     used: dict[str, int] = {}
     turns = 0
     exhausted = False
+    ran_out = False
 
     for iteration in range(max_tool_iterations):
         turns = iteration + 1
@@ -166,6 +168,9 @@ async def run_turn(
             break
 
         if iteration == max_tool_iterations - 1:
+            # The model still wanted tools when the cap cut it off, so the answer below
+            # is forced rather than chosen.
+            ran_out = True
             transcript.append(
                 HumanMessage(content="NO MORE TOOL CALLS ALLOWED. Return your answer now.")
             )
@@ -182,6 +187,7 @@ async def run_turn(
         tool_calls=used,
         turns=turns,
         tools_exhausted=exhausted,
+        iterations_exhausted=ran_out,
     )
 
 

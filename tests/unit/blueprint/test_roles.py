@@ -259,6 +259,24 @@ async def test_search_budget_withdraws_the_tool_so_turns_can_compile():
     assert turn.tool_calls["mathlib_search"] == len(searches)
 
 
+async def test_hitting_the_iteration_cap_marks_the_answer_as_forced():
+    client = BatchingClient(searches_per_turn=1, turns=10)
+    tools = [echo_tool([]), search_tool([])]
+
+    turn = await run_turn(client, [HumanMessage(content="go")], tools, Answer, 3, TokenBudget(0))
+
+    assert turn.iterations_exhausted
+
+
+async def test_stopping_early_is_not_a_forced_answer():
+    client = BatchingClient(searches_per_turn=1, turns=1)
+    tools = [echo_tool([]), search_tool([])]
+
+    turn = await run_turn(client, [HumanMessage(content="go")], tools, Answer, 4, TokenBudget(0))
+
+    assert not turn.iterations_exhausted
+
+
 async def test_zero_search_budget_leaves_the_tool_available():
     searches: list[str] = []
     client = BatchingClient(searches_per_turn=3, turns=2)

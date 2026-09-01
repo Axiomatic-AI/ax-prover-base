@@ -28,7 +28,10 @@ blueprint:
   architect:
     max_total_tokens: 2000000
     max_attempts: 8
-    max_tool_iterations: 8
+    # A measured run showed every failing attempt burning all its tool iterations and
+    # being forced to submit a broken skeleton, wasting a full outer attempt. Inner
+    # iterations are far cheaper than outer attempts, which rebuild the transcript.
+    max_tool_iterations: 16
   prover:
     max_total_tokens: 1000000
     max_attempts: 4
@@ -43,8 +46,10 @@ blueprint:
     max_searches: 6
   refiner:
     max_total_tokens: 2000000
-    max_attempts: 4
-    max_tool_iterations: 8
+    # 8 matches the paper (arXiv:2606.06468 Appendix A: "each refinement step retries
+    # up to 8 times"); a run died at exactly 4 with progress still being made.
+    max_attempts: 8
+    max_tool_iterations: 16
   max_refinement_rounds: 8
   # Model-side concurrency is independent of Lean-side concurrency.
   # max_lean_compiles is the number of warm Lean servers, which is also the number of

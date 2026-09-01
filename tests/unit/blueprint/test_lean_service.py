@@ -80,8 +80,27 @@ def test_split_messages_separates_severities():
         response(message("error", "boom"), message("warning", "meh"), message("info", "fyi"))
     )
 
-    assert errors == ("boom",)
-    assert warnings == ("meh",)
+    assert errors == ("line 1: boom",)
+    assert warnings == ("line 1: meh",)
+
+
+def test_split_messages_quotes_the_offending_source_line():
+    source = "import Mathlib\n\ntheorem foo : (1 : Nat) = 1) := rfl\n"
+    bad = Message(
+        start_pos=Pos(line=3, column=27), end_pos=None, severity="error", data="unexpected token"
+    )
+
+    errors, _ = split_messages(response(bad), source)
+
+    assert errors == ("line 3: unexpected token\n  | theorem foo : (1 : Nat) = 1) := rfl",)
+
+
+def test_split_messages_survives_a_position_past_the_source():
+    bad = Message(start_pos=Pos(line=99, column=0), end_pos=None, severity="error", data="boom")
+
+    errors, _ = split_messages(response(bad), "one line only")
+
+    assert errors == ("line 99: boom",)
 
 
 def test_diagnostics_explain_a_sorry_tainted_proof():
@@ -126,7 +145,7 @@ async def test_an_error_fails_the_compile():
     outcome = await service.compile("bad")
 
     assert not outcome.success
-    assert outcome.errors == ("unknown identifier",)
+    assert outcome.errors == ("line 1: unknown identifier\n  | bad",)
     await service.aclose()
 
 
@@ -152,7 +171,7 @@ async def test_warnings_alone_still_compile():
     outcome = await service.compile("theorem a : True := trivial")
 
     assert outcome.success
-    assert outcome.warnings == ("unused variable",)
+    assert outcome.warnings == ("line 1: unused variable\n  | theorem a : True := trivial",)
     await service.aclose()
 
 

@@ -133,11 +133,29 @@ def parse_axioms(response: CommandResponse) -> tuple[str, ...]:
     return ()
 
 
-def split_messages(response: CommandResponse) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Split a response's messages into errors and warnings."""
+def _render_message(message, source_lines: tuple[str, ...]) -> str:
+    """Tag a compiler message with its line and the offending source line.
+
+    Bare message text is useless against a multi-hundred-line module: a run showed the
+    architect receiving `expected token` nineteen times with no way to locate any of them.
+    """
+    pos = getattr(message, "start_pos", None)
+    if pos is None:
+        return message.data
+    rendered = f"line {pos.line}: {message.data}"
+    if 1 <= pos.line <= len(source_lines):
+        rendered += f"\n  | {source_lines[pos.line - 1].rstrip()}"
+    return rendered
+
+
+def split_messages(
+    response: CommandResponse, source: str = ""
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split a response's messages into errors and warnings, each tagged with its position."""
     messages = getattr(response, "messages", None) or []
-    errors = tuple(m.data for m in messages if m.severity == "error")
-    warnings = tuple(m.data for m in messages if m.severity == "warning")
+    lines = tuple(source.splitlines())
+    errors = tuple(_render_message(m, lines) for m in messages if m.severity == "error")
+    warnings = tuple(_render_message(m, lines) for m in messages if m.severity == "warning")
     return errors, warnings
 
 
@@ -409,7 +427,7 @@ class LeanCompileService:
                 elapsed_s=elapsed,
             )
 
-        errors, warnings = split_messages(response)
+        errors, warnings = split_messages(response, source)
         axioms = parse_axioms(response)
         declarations = tuple(
             _bundle_declarations(

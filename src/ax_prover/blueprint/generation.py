@@ -182,8 +182,19 @@ async def run_skeleton_loop(
                 workspace, server, helpers, target_parents, proposal.target_proof_plan
             )
         except BlueprintValidationError as e:
-            logger.info(f"{label} round {attempt} rejected: {e}")
+            forced = turn.iterations_exhausted
+            logger.info(
+                f"{label} round {attempt} rejected"
+                + (" (submission forced by the tool-iteration cap)" if forced else "")
+                + f": {e}"
+            )
             problems = e.report
+            if forced:
+                problems += (
+                    "\n- you hit the tool-call limit and had to submit before `lean_compile` "
+                    "ever reported success; fix the errors above and confirm a clean compile "
+                    "before answering"
+                )
             rejected = helpers
             continue
 
