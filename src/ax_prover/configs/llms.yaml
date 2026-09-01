@@ -135,14 +135,22 @@ llm_configs:
         reasoning:
           effort: "high"
         session_id: "ax-prover-blueprint"
+        # Measured throughput, 3 samples each, medians: coreweave 162, novita 139,
+        # morph 119, siliconflow 88 (77-190, wide), parasail 72. Parasail and DeepInfra
+        # sit at ~70 tok/s and were what production runs actually got, which is why
+        # measured latency looked like a flat 60-70 tok/s model limit; it was provider
+        # selection, not the model. Dropped: parasail (slowest), "deepseek/fp8" (404s,
+        # not a real slug), baseten (429s). Together medians 200 but reports unknown
+        # quantization, so it is left out of an fp8-or-better list.
         provider:
           only:
-            - "deepseek"
-            - "deepseek/fp8"
-            - "siliconflow/fp8"
-            - "parasail/fp8"
             - "coreweave/fp8"
-            - "baseten/fp8"
+            - "novita/fp8"
+            - "morph/bf16"
+            - "nextbit/fp8"
+            - "gmicloud/fp8"
+            - "siliconflow/fp8"
+            - "deepseek"
 
   # For a controlled effort comparison: identical routing, effort the only variable.
   deepseek_v4_flash_xhigh:
@@ -160,11 +168,19 @@ llm_configs:
         reasoning:
           effort: "xhigh"
         session_id: "ax-prover-blueprint"
+        # Measured throughput, 3 samples each, medians: coreweave 162, novita 139,
+        # morph 119, siliconflow 88 (77-190, wide), parasail 72. Parasail and DeepInfra
+        # sit at ~70 tok/s and were what production runs actually got, which is why
+        # measured latency looked like a flat 60-70 tok/s model limit; it was provider
+        # selection, not the model. Dropped: parasail (slowest), "deepseek/fp8" (404s,
+        # not a real slug), baseten (429s). Together medians 200 but reports unknown
+        # quantization, so it is left out of an fp8-or-better list.
         provider:
           only:
-            - "deepseek"
-            - "deepseek/fp8"
-            - "siliconflow/fp8"
-            - "parasail/fp8"
             - "coreweave/fp8"
-            - "baseten/fp8"
+            - "novita/fp8"
+            - "morph/bf16"
+            - "nextbit/fp8"
+            - "gmicloud/fp8"
+            - "siliconflow/fp8"
+            - "deepseek"

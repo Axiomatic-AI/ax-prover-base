@@ -62,7 +62,11 @@ def test_routing_is_pinned_to_fp8_or_better(api_key):
 
     only = extra["provider"]["only"]
     assert only, "routing must be restricted"
-    assert all(p == "deepseek" or p.endswith("/fp8") for p in only), only
+    # "or better" is the point: bf16 is higher precision than fp8, fp4 is lower. The
+    # unsuffixed first-party upstream is allowed because it is the reference deployment.
+    permitted = ("/fp8", "/bf16", "/fp16")
+    assert all(p == "deepseek" or p.endswith(permitted) for p in only), only
+    assert not any(p.endswith("/fp4") for p in only), only
     # `order` would disable sticky routing, and a narrow list with fallbacks off 404s.
     assert "order" not in extra["provider"]
     assert extra["provider"].get("allow_fallbacks") is not False
