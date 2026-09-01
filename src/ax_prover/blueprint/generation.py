@@ -25,6 +25,9 @@ from .prompts import (
     ARCHITECT_SYSTEM_PROMPT,
     ARCHITECT_USER_PROMPT,
     BLUEPRINT_PROTOCOL,
+    INFORMAL_PROOF_GUIDE,
+    INFORMAL_PROOF_SYSTEM_PROMPT,
+    INFORMAL_PROOF_USER_PROMPT,
 )
 from .roles import TokenBudget, parse_proposal, run_turn
 from .tools import make_skeleton_compile_tool, strip_outer_fence
@@ -214,6 +217,26 @@ async def run_skeleton_loop(
     )
 
 
+async def generate_informal_proof(client: LLMClient, workspace: BlueprintWorkspace) -> str:
+    """Produce a natural-language proof of the target to seed the architect.
+
+    The guide gives the architect real mathematical content to formalize; without one, an
+    architect that cannot elaborate its statements degenerates into compiling placeholders
+    (a measured run stubbed every helper to `(1 : ℝ) = (1 : ℝ)`).
+    """
+    response = await client.ainvoke(
+        [
+            SystemMessage(content=INFORMAL_PROOF_SYSTEM_PROMPT),
+            HumanMessage(
+                content=INFORMAL_PROOF_USER_PROMPT.format(
+                    target_statement=workspace.target_statement_with_doc
+                )
+            ),
+        ]
+    )
+    return response.text
+
+
 async def generate_blueprint(
     workspace: BlueprintWorkspace,
     server: LeanInteractServer,
@@ -223,9 +246,22 @@ async def generate_blueprint(
 ) -> SkeletonCandidate:
     """Generate and validate the initial blueprint for a target.
 
+    Without caller-supplied context, an informal proof is generated first and passed as a
+    structural guide, the remedy arXiv:2606.06468 measures at +13 points on PutnamBench.
+
     Raises:
         BlueprintError: No valid blueprint was produced within budget.
     """
+    if not extra_context:
+        try:
+            informal = await generate_informal_proof(client, workspace)
+        except Exception as e:  # noqa: BLE001 - the guide is optional; proceed unguided
+            logger.warning(f"Informal proof generation failed, proceeding unguided: {e}")
+            informal = ""
+        if informal:
+            logger.info(f"architect: seeded with an informal proof ({len(informal)} chars)")
+            extra_context = INFORMAL_PROOF_GUIDE.format(informal_proof=informal)
+
     system = ARCHITECT_SYSTEM_PROMPT.format(
         protocol=BLUEPRINT_PROTOCOL, namespace=workspace.namespace
     )

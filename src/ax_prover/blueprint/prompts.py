@@ -92,6 +92,10 @@ premises. If a step needs more, split it into intermediate lemmas -- use as many
 as the proof requires. Independent branches stay independent: if two parts of the proof do
 not share reasoning, their lemmas should not depend on each other.
 
+Every helper's statement must assert a real step of the argument. If a statement will not
+elaborate, fix or restate that step -- never weaken it to a placeholder: a helper that says
+nothing (`(1 : ℝ) = (1 : ℝ)`) compiles but leaves the target unprovable from its parents.
+
 {protocol}
 
 ## Your output
@@ -146,6 +150,38 @@ here are available to your helpers and cannot be changed.
 {file_context}
 ```
 {extra_context}
+"""
+
+
+#: The paper's remedy for weak decompositions (arXiv:2606.06468, 75.6% -> 88.8% on
+#: PutnamBench): seed the architect with an informal proof and let the graph mirror it.
+#: The guide is deliberately not Lean-aware, so any strong informal prover can produce it.
+INFORMAL_PROOF_SYSTEM_PROMPT = """\
+You are an expert mathematician. Write a complete, rigorous natural-language proof of the
+theorem below. Plain mathematical prose only: no Lean, no code, no formalization advice.
+
+Number the main steps. Each step should be one concrete mathematical claim, stated
+precisely enough to stand alone as a lemma, followed by its justification. Show every key
+equation; do not write "by algebra", "obviously", or "one can check".
+"""
+
+
+INFORMAL_PROOF_USER_PROMPT = """\
+The theorem, stated in Lean 4 (prove the mathematical content, ignore the syntax):
+
+```lean
+{target_statement}
+```
+"""
+
+
+INFORMAL_PROOF_GUIDE = """\
+An informal proof of the target, as a structural guide. Mirror this argument: each helper
+lemma should formalize one of its numbered steps (splitting a step is fine), and every
+helper's statement must carry that step's actual mathematical content. A helper whose
+statement does not assert anything from the argument does not help the target's proof.
+
+{informal_proof}
 """
 
 

@@ -93,3 +93,70 @@ async def test_an_unparseable_response_repairs_without_a_source_block(workspace,
     repair = seen[1][-1].content
     assert "not valid structured output" in repair
     assert "```lean" not in repair
+
+
+class InformalClient:
+    """Answers the informal-proof call; run_turn is stubbed so no other call happens."""
+
+    def __init__(self, proof="Step 1: n + 0 = n by the definition of addition.", fail=False):
+        self.proof = proof
+        self.fail = fail
+        self.calls = 0
+
+    async def ainvoke(self, messages, tools=None, output_schema=None, retry_config=None):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("provider down")
+        return AIMessage(content=self.proof)
+
+
+def stub_loop(monkeypatch, seen):
+    async def fake_run_turn(client, messages, *args, **kwargs):
+        seen.append(messages)
+        return RoleTurn(response=AIMessage(content="{}"))
+
+    async def fake_build(_ws, _server, helpers, *args):
+        return make_blueprint(make_node("a"))
+
+    monkeypatch.setattr(generation, "run_turn", fake_run_turn)
+    monkeypatch.setattr(
+        generation, "parse_proposal", lambda t, s: ArchitectProposal(helpers=SECOND)
+    )
+    monkeypatch.setattr(generation, "build_blueprint", fake_build)
+
+
+async def test_the_architect_is_seeded_with_an_informal_proof(workspace, monkeypatch):
+    seen: list[list] = []
+    stub_loop(monkeypatch, seen)
+    client = InformalClient()
+
+    await generation.generate_blueprint(workspace, None, client, BlueprintRoleConfig())
+
+    assert client.calls == 1
+    user_prompt = seen[0][-1].content
+    assert "informal proof" in user_prompt
+    assert "Step 1: n + 0 = n" in user_prompt
+
+
+async def test_caller_supplied_context_skips_the_informal_proof(workspace, monkeypatch):
+    seen: list[list] = []
+    stub_loop(monkeypatch, seen)
+    client = InformalClient()
+
+    await generation.generate_blueprint(
+        workspace, None, client, BlueprintRoleConfig(), extra_context="use the official solution"
+    )
+
+    assert client.calls == 0
+    assert "use the official solution" in seen[0][-1].content
+
+
+async def test_a_failed_informal_proof_proceeds_unguided(workspace, monkeypatch):
+    seen: list[list] = []
+    stub_loop(monkeypatch, seen)
+
+    await generation.generate_blueprint(
+        workspace, None, InformalClient(fail=True), BlueprintRoleConfig()
+    )
+
+    assert "Additional context" not in seen[0][-1].content
