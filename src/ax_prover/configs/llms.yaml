@@ -157,11 +157,14 @@ llm_configs:
 
   # Full-precision serving. CoreWeave's fp8 endpoint spliced garbage tokens in front of
   # numerals in long skeleton generations (a known fp8-serving bug class, vllm#42265:
-  # "garbage tokens ... especially in front of numbers in the code"). Morph is the bf16
-  # endpoint: 119 tok/s vs CoreWeave's 162, marginally cheaper. The official `deepseek`
-  # provider would be the closest match to the paper's serving, but it trains on prompts
-  # and this account's OpenRouter data policy excludes such providers, so pinning it 404s
-  # every request ("No endpoints available matching your guardrail restrictions").
+  # "garbage tokens ... especially in front of numbers in the code"). Morph is the ONLY
+  # bf16 endpoint for this model (119 tok/s vs CoreWeave's 162, marginally cheaper), so
+  # there is no like-for-like failover; DeepInfra is the second entry because a Morph
+  # rate-limit stalled a whole run, and deepinfra/fp8 served production for weeks
+  # (~70 tok/s) with no corruption ever observed. The official `deepseek` provider would
+  # be the closest match to the paper's serving, but it trains on prompts and this
+  # account's OpenRouter data policy excludes such providers, so pinning it 404s every
+  # request ("No endpoints available matching your guardrail restrictions").
   deepseek_v4_flash_bf16:
     model: "openrouter:deepseek/deepseek-v4-flash-0731"
     provider_config:
@@ -174,6 +177,7 @@ llm_configs:
         provider:
           only:
             - "morph/bf16"
+            - "deepinfra/fp8"
 
   # For a controlled effort comparison: identical routing, effort the only variable.
   deepseek_v4_flash_xhigh:
