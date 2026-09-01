@@ -15,7 +15,9 @@ import:
 
 blueprint:
   enabled: true
-  llm: ${llm_configs.deepseek_v4_flash}
+  # Official first-party serving for every role: the pinned coreweave/fp8 endpoint
+  # corrupted tokens in long generations (see llms.yaml deepseek_v4_flash_official).
+  llm: ${llm_configs.deepseek_v4_flash_official}
   openrouter:
     base_url: "https://openrouter.ai/api/v1"
     provider_sort: "exacto"
