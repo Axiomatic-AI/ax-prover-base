@@ -188,3 +188,28 @@ def test_target_signature_reads_the_original_declaration():
 def test_target_signature_reports_a_missing_declaration():
     with pytest.raises(BlueprintValidationError, match="not found"):
         target_signature([trusted_declaration()], "my_target")
+
+
+def test_authored_names_resembling_companions_are_kept():
+    """A substring match ate an authored helper named eq_of_padicValNat_eq (it contains
+    `.eq_`), so validation reported the model's own helper as missing for 8 rounds."""
+    from ax_prover.blueprint.extraction import _is_lean_generated
+
+    kept = [
+        f"{NAMESPACE}.eq_of_padicValNat_eq",
+        f"{NAMESPACE}.proof_by_induction_step",
+        f"{NAMESPACE}.match_lemma_helper",
+        f"{NAMESPACE}.eq_defs_agree",
+    ]
+    skipped = [
+        f"{NAMESPACE}.helper.match_1",
+        f"{NAMESPACE}.helper.eq_1",
+        f"{NAMESPACE}.helper.eq_def",
+        f"{NAMESPACE}.helper.proof_2",
+        f"{NAMESPACE}.helper._private_thing",
+        f"{NAMESPACE}.helper.sizeOf_spec",
+    ]
+    for name in kept:
+        assert not _is_lean_generated(name), name
+    for name in skipped:
+        assert _is_lean_generated(name), name

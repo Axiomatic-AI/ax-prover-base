@@ -20,16 +20,19 @@ from .models import BlueprintNode, BlueprintValidationError
 
 _LEADING_DOC = re.compile(r"^\s*/--.*?-/[ \t]*\n?", re.DOTALL)
 
-#: Suffixes Lean attaches to compiler-generated companions of a declaration. These are not
-#: authored by the architect, so they carry no blueprint metadata and are skipped.
-_LEAN_GENERATED_SUFFIXES = (".match_", ".eq_def", ".eq_", ".proof_", ".induct", ".sizeOf_spec")
+#: The last name component of a compiler-generated companion declaration. Anchored and
+#: exact on purpose: a substring-anywhere match ate an authored helper named
+#: `eq_of_padicValNat_eq` (it contains `.eq_`), so validation reported the model's own
+#: helper as missing for 8 straight repair rounds.
+_LEAN_GENERATED_LAST = re.compile(r"^(match_\d+|eq_\d+|eq_def|proof_\d+|induct|sizeOf_spec)$")
 
 
 def _is_lean_generated(full_name: str) -> bool:
     """True for a declaration Lean synthesized rather than one written in the source."""
-    if any(component.startswith("_") for component in full_name.split(".")):
+    components = full_name.split(".")
+    if any(component.startswith("_") for component in components):
         return True
-    return any(suffix in full_name for suffix in _LEAN_GENERATED_SUFFIXES)
+    return _LEAN_GENERATED_LAST.match(components[-1]) is not None
 
 
 async def extract_declarations(server: LeanInteractServer, file_path: str) -> list[Declaration]:
