@@ -223,8 +223,10 @@ signal source than search.
 
 Use `lean_compile` to compile a candidate proof body. Call it early, even with a partial
 proof: use `sorry` as a placeholder for sub-goals you cannot yet discharge, and iterate
-(compile -> read errors / open goals -> patch -> compile). A body containing `sorry` compiles
-for exploration but cannot register a solve, so finish by submitting a `sorry`-free body.
+(compile -> read errors / open goals -> patch -> compile). When a body containing `sorry`
+compiles, the tool returns the remaining goal state at each `sorry` -- use those goals to
+decide the next step. Such a body is exploration only and is never accepted, so finish by
+submitting a `sorry`-free body.
 
 The harness owns the theorem statement, the imports, and the file. Submit the proof body only
 -- the text that goes after `:=`. Examples of valid bodies:

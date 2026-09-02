@@ -6,6 +6,7 @@ from ax_prover.blueprint.tools import (
     LEAN_COMPILE_TOOL_NAME,
     MATHLIB_SEARCH_TOOL_NAME,
     format_compile_output,
+    format_exploratory_output,
     make_node_compile_tool,
     make_skeleton_compile_tool,
     normalize_proof_body,
@@ -93,6 +94,51 @@ async def test_node_compile_tool_only_compiles_the_normalized_body(workspace, mo
     assert "accepted" in message
     assert "theorem rogue" not in compiled[0]
     assert "import Mathlib\n" not in compiled[0].replace("import Mathlib.Tactic", "")
+
+
+def sorry_at(goal: str):
+    return type("Sorry", (), {"goal": goal})()
+
+
+def test_exploratory_output_is_not_accepted_and_carries_goals():
+    message = format_exploratory_output((sorry_at("⊢ 0 < x + 1"),))
+
+    assert "NOT accepted" in message
+    assert "⊢ 0 < x + 1" in message
+
+
+def test_exploratory_output_caps_rendered_goals():
+    message = format_exploratory_output(tuple(sorry_at(f"goal_{i}") for i in range(8)))
+
+    assert "goal_5" in message
+    assert "goal_6" not in message
+    assert "2 more" in message
+
+
+def test_exploratory_output_survives_missing_goals():
+    """The subprocess fallback carries no sorries."""
+    message = format_exploratory_output(())
+
+    assert "NOT accepted" in message
+    assert "no goal states available" in message
+
+
+async def test_a_sorried_body_that_compiles_gets_goals_not_acceptance(workspace, monkeypatch):
+    async def fake_compile(source, label="scratch"):
+        return type(
+            "Result",
+            (),
+            {"success": True, "output": "", "source": source, "sorries": (sorry_at("⊢ True"),)},
+        )()
+
+    monkeypatch.setattr(workspace, "compile_source", fake_compile)
+    tool = make_node_compile_tool(workspace, make_node("helper", signature=": True"), ())
+
+    message = await tool.ainvoke({"proof_body": "by\n  have h : True := sorry\n  exact h"})
+
+    assert "NOT accepted" in message
+    assert "⊢ True" in message
+    assert "This proof body is accepted" not in message
 
 
 async def test_node_compile_tool_rejects_an_empty_body(workspace):

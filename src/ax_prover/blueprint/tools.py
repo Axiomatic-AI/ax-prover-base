@@ -31,6 +31,15 @@ _TOP_LEVEL_COMMAND = re.compile(
 
 _COMPILE_SUCCESS = "Compiled successfully. This proof body is accepted."
 
+_COMPILE_EXPLORATORY = (
+    "Compiled, but the body still contains `sorry`, so it is NOT accepted. "
+    "Remaining goals at the `sorry` placeholders:"
+)
+
+#: Goal states rendered per exploratory compile; a heavily sorried body should not flood
+#: the transcript.
+_MAX_RENDERED_GOALS = 6
+
 #: Placeholders that make a compile exploratory rather than a candidate solve.
 EXPLORATORY_PLACEHOLDER = re.compile(r"(?<![\w.])(sorry|admit)(?![\w])")
 _NO_ERRORS = "(no compiler output)"
@@ -121,6 +130,22 @@ def format_compile_output(success: bool, output: str) -> str:
     return f"Compilation failed:\n{output or _NO_ERRORS}"
 
 
+def format_exploratory_output(sorries: tuple) -> str:
+    """Report a clean exploratory compile: not accepted, with the goal at each `sorry`.
+
+    Telling the model its sorried body was "accepted" contradicted the prompt's
+    compile-read-goals-patch loop; a measured run did it 25 times. The goals come free on
+    the warm REPL path and are empty on the subprocess fallback, hence the guard.
+    """
+    goals = [s.goal for s in sorries[:_MAX_RENDERED_GOALS] if getattr(s, "goal", "")]
+    if not goals:
+        return _COMPILE_EXPLORATORY + " (no goal states available)"
+    rendered = "\n\n".join(f"```\n{goal}\n```" for goal in goals)
+    elided = len(sorries) - len(goals)
+    suffix = f"\n\n({elided} more `sorry` goal(s) not shown)" if elided > 0 else ""
+    return f"{_COMPILE_EXPLORATORY}\n\n{rendered}{suffix}"
+
+
 def make_node_compile_tool(
     workspace: BlueprintWorkspace,
     node: BlueprintNode,
@@ -151,7 +176,10 @@ def make_node_compile_tool(
         if on_result is not None:
             on_result(body, result.success, result.output)
 
-        message = format_compile_output(result.success, result.output)
+        if result.success and exploring:
+            message = format_exploratory_output(result.sorries)
+        else:
+            message = format_compile_output(result.success, result.output)
         if notes:
             message = "Note: " + "; ".join(notes) + "\n" + message
         return message
