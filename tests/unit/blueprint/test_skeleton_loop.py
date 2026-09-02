@@ -256,3 +256,29 @@ async def test_lost_declarations_are_infrastructure_not_model_fault(workspace, m
 
     assert "declarations were lost" in str(err.value)
     assert "kept" in str(err.value)
+
+
+async def test_a_complete_extraction_does_not_trip_the_lost_declaration_guard(
+    workspace, monkeypatch
+):
+    """The rendered target adds a harness-owned metadata fence; the guard must count the
+    model's helpers only, or every healthy run raises."""
+    helpers = (
+        '/--\n```ax-blueprint\n{"version": 1, "id": "kept", "parents": []}\n```\ns\n-/\n'
+        "theorem kept : True := by sorry\n"
+    )
+
+    async def fake_compile(source, server):
+        return type("R", (), {"success": True, "output": ""})(), []
+
+    monkeypatch.setattr(workspace, "compile_and_extract", fake_compile, raising=False)
+    monkeypatch.setattr(
+        generation,
+        "extract_nodes",
+        lambda *a, **k: [make_node("kept"), make_node("target", ("kept",), is_target=True)],
+    )
+    monkeypatch.setattr(generation, "validate_blueprint", lambda nodes, **k: make_blueprint(*nodes))
+
+    blueprint = await generation.build_blueprint(workspace, None, helpers, ("kept",), "plan")
+
+    assert {n.id for n in blueprint.helpers} == {"kept"}
