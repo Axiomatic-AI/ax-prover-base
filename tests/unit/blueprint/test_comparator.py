@@ -12,6 +12,7 @@ from ax_prover.blueprint.comparator import (
     unavailable_reason,
 )
 from ax_prover.blueprint.models import ComparatorStatus
+from ax_prover.blueprint.provision import ProvisionError, read_project_toolchain
 from ax_prover.config import ComparatorConfig
 
 from .conftest import make_blueprint, make_node
@@ -36,21 +37,23 @@ def test_macos_reports_comparator_unavailable(monkeypatch):
     assert "requires Linux" in reason
 
 
-def test_missing_binary_is_reported_on_linux(monkeypatch):
+def test_missing_landrun_is_reported_on_linux(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr("shutil.which", lambda name: None)
-
-    assert "not found on PATH" in unavailable_reason(CONFIG)
-
-
-def test_missing_dependency_is_reported_on_linux(monkeypatch):
-    monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr("shutil.which", lambda name: None if name == "landrun" else "/usr/bin/x")
+    monkeypatch.delenv("COMPARATOR_LANDRUN", raising=False)
 
     assert "landrun" in unavailable_reason(CONFIG)
 
 
-def test_available_when_every_binary_is_present(monkeypatch):
+def test_landrun_env_override_counts_as_available(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setenv("COMPARATOR_LANDRUN", "/opt/landrun")
+
+    assert unavailable_reason(CONFIG) is None
+
+
+def test_available_when_landrun_is_present(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
@@ -86,7 +89,7 @@ async def test_run_comparator_passes_and_cleans_up(workspace, blueprint, monkeyp
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
     seen = {}
 
-    async def fake_subprocess(command, cwd, timeout):
+    async def fake_subprocess(command, cwd, timeout, env=None):
         seen["command"] = command
         seen["config"] = json.loads(open(command[-1]).read())
         return 0, "all good", ""
@@ -96,7 +99,7 @@ async def test_run_comparator_passes_and_cleans_up(workspace, blueprint, monkeyp
     report = await run_comparator(workspace, blueprint, CONFIG, "", "by simp")
 
     assert report.status is ComparatorStatus.PASSED
-    assert seen["command"][:3] == ["lake", "env", "comparator"]
+    assert seen["command"][:3] == ["lake", "env", "/usr/bin/comparator"]
     assert seen["config"]["theorem_names"] == ["my_target"]
     assert seen["config"]["permitted_axioms"] == ["propext", "Quot.sound", "Classical.choice"]
     assert not list(workspace.file_path.parent.glob("AxProverComparator*"))
@@ -106,7 +109,7 @@ async def test_run_comparator_reports_a_rejection(workspace, blueprint, monkeypa
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    async def fake_subprocess(command, cwd, timeout):
+    async def fake_subprocess(command, cwd, timeout, env=None):
         return 1, "", "axiom not permitted: myAxiom"
 
     monkeypatch.setattr("ax_prover.blueprint.comparator.run_lean_subprocess", fake_subprocess)
@@ -121,7 +124,7 @@ async def test_an_invocation_failure_is_pending_not_a_rejection(workspace, bluep
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    async def fake_subprocess(command, cwd, timeout):
+    async def fake_subprocess(command, cwd, timeout, env=None):
         raise OSError("lake is missing")
 
     monkeypatch.setattr("ax_prover.blueprint.comparator.run_lean_subprocess", fake_subprocess)
@@ -130,3 +133,68 @@ async def test_an_invocation_failure_is_pending_not_a_rejection(workspace, bluep
 
     assert report.status is ComparatorStatus.PENDING
     assert "lake is missing" in report.detail
+
+
+async def test_missing_binaries_are_provisioned(workspace, blueprint, monkeypatch, tmp_path):
+    """Off PATH, comparator and a toolchain-matched lean4export are built on demand."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(
+        "shutil.which", lambda name: "/usr/bin/landrun" if name == "landrun" else None
+    )
+    (tmp_path / "lean-toolchain").write_text("leanprover/lean4:v4.24.0\n")
+    monkeypatch.setattr(workspace, "base_folder", str(tmp_path))
+    seen = {}
+
+    async def fake_comparator():
+        return tmp_path / "bin" / "comparator"
+
+    async def fake_lean4export(version):
+        seen["version"] = version
+        return tmp_path / "bin" / "lean4export"
+
+    monkeypatch.setattr("ax_prover.blueprint.comparator.ensure_comparator", fake_comparator)
+    monkeypatch.setattr("ax_prover.blueprint.comparator.ensure_lean4export", fake_lean4export)
+
+    async def fake_subprocess(command, cwd, timeout, env=None):
+        seen["command"] = command
+        seen["env"] = env
+        return 0, "ok", ""
+
+    monkeypatch.setattr("ax_prover.blueprint.comparator.run_lean_subprocess", fake_subprocess)
+
+    report = await run_comparator(workspace, blueprint, CONFIG, "", "by simp")
+
+    assert report.status is ComparatorStatus.PASSED
+    assert seen["version"] == "v4.24.0"
+    assert seen["command"][2] == str(tmp_path / "bin" / "comparator")
+    assert seen["env"]["COMPARATOR_LEAN4EXPORT"] == str(tmp_path / "bin" / "lean4export")
+
+
+async def test_a_provision_failure_is_pending_not_a_crash(workspace, blueprint, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(
+        "shutil.which", lambda name: "/usr/bin/landrun" if name == "landrun" else None
+    )
+
+    async def fail():
+        raise ProvisionError("no network")
+
+    monkeypatch.setattr("ax_prover.blueprint.comparator.ensure_comparator", fail)
+
+    report = await run_comparator(workspace, blueprint, CONFIG, "", "by simp")
+
+    assert report.status is ComparatorStatus.PENDING
+    assert "no network" in report.detail
+
+
+def test_read_project_toolchain_parses_both_forms(tmp_path):
+    (tmp_path / "lean-toolchain").write_text("leanprover/lean4:v4.24.0\n")
+    assert read_project_toolchain(str(tmp_path)) == "v4.24.0"
+
+    (tmp_path / "lean-toolchain").write_text("v4.19.0\n")
+    assert read_project_toolchain(str(tmp_path)) == "v4.19.0"
+
+
+def test_read_project_toolchain_rejects_a_missing_file(tmp_path):
+    with pytest.raises(ProvisionError):
+        read_project_toolchain(str(tmp_path))

@@ -205,8 +205,11 @@ async def run_lean_subprocess(
     command: list[str],
     cwd: str,
     timeout: float,
+    env: dict[str, str] | None = None,
 ) -> tuple[int, str, str]:
     """Run a Lean/Lake subprocess with timeout and graceful cleanup.
+
+    `env`, when given, replaces the inherited environment entirely.
 
     Returns:
         Tuple of (returncode, stdout, stderr)
@@ -214,6 +217,7 @@ async def run_lean_subprocess(
     process = await asyncio.create_subprocess_exec(
         *command,
         cwd=cwd,
+        env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         start_new_session=True,

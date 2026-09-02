@@ -1,8 +1,10 @@
 """Final Comparator acceptance gate.
 
 Comparator is a judge, not a node-level tool: it runs once, on the fully assembled proof.
-It needs `landrun` (Linux-only) and `lean4export` on PATH, so on macOS a successful full
-Lean build yields `comparator_pending` and Linux CI remains authoritative.
+It needs `landrun` (Linux-only), so on macOS a successful full Lean build yields
+`comparator_pending` and Linux CI remains authoritative. The `comparator` and
+`lean4export` binaries are provisioned on demand when absent from PATH, with lean4export
+built at the target project's own toolchain version (see `provision.py`).
 
 The challenge and solution modules both reproduce the target file's trusted prefix, so the
 target's statement elaborates identically in each; Comparator then checks that the
@@ -14,6 +16,7 @@ exercised against a real Comparator installation, which requires Linux plus `lan
 """
 
 import json
+import os
 import shutil
 import sys
 from dataclasses import dataclass
@@ -23,13 +26,15 @@ from ..config import ComparatorConfig
 from ..utils.build import run_lean_subprocess
 from ..utils.logging import get_logger
 from .models import Blueprint, ComparatorStatus
+from .provision import (
+    ProvisionError,
+    ensure_comparator,
+    ensure_lean4export,
+    read_project_toolchain,
+)
 from .workspace import BlueprintWorkspace
 
 logger = get_logger(__name__)
-
-#: Binaries Comparator itself requires. Their paths may be overridden with the documented
-#: COMPARATOR_* environment variables, which is why a missing binary is only a hint.
-REQUIRED_BINARIES = ("landrun", "lean4export")
 
 
 @dataclass(frozen=True)
@@ -44,21 +49,42 @@ class ComparatorReport:
 def unavailable_reason(config: ComparatorConfig) -> str | None:
     """Why Comparator cannot run here, or None when it can.
 
-    Missing binaries are only checked on PATH; Comparator also accepts the
-    `COMPARATOR_LANDRUN` / `COMPARATOR_LEAN4EXPORT` overrides, so this is a best-effort
-    precheck rather than a guarantee.
+    Only the true system prerequisites are checked: Linux and `landrun` (respected via the
+    documented `COMPARATOR_LANDRUN` override too, so PATH absence is best-effort). The
+    `comparator` and `lean4export` binaries are provisioned on demand, matched to the
+    target project's toolchain, when they are not already on PATH.
     """
     if not sys.platform.startswith("linux"):
         return f"Comparator requires Linux (landrun); this host is {sys.platform}"
 
-    if shutil.which(config.binary) is None:
-        return f"Comparator binary {config.binary!r} not found on PATH"
-
-    missing = [name for name in REQUIRED_BINARIES if shutil.which(name) is None]
-    if missing:
-        return f"Comparator dependencies not found on PATH: {', '.join(missing)}"
+    if shutil.which("landrun") is None and not os.environ.get("COMPARATOR_LANDRUN"):
+        return "landrun not found on PATH (and COMPARATOR_LANDRUN is unset)"
 
     return None
+
+
+async def _resolve_binaries(
+    config: ComparatorConfig, base_folder: str
+) -> tuple[str, dict[str, str] | None]:
+    """The comparator binary to invoke, plus the env override when lean4export was built.
+
+    A PATH installation always wins; otherwise the binaries are cloned and built into the
+    per-version provision cache (see `provision.py`).
+
+    Raises:
+        ProvisionError: A needed binary is neither installed nor buildable.
+    """
+    binary = shutil.which(config.binary)
+    if binary is None:
+        binary = str(await ensure_comparator())
+
+    env = None
+    if shutil.which("lean4export") is None and not os.environ.get("COMPARATOR_LEAN4EXPORT"):
+        toolchain = read_project_toolchain(base_folder)
+        lean4export = await ensure_lean4export(toolchain)
+        env = {**os.environ, "COMPARATOR_LEAN4EXPORT": str(lean4export)}
+
+    return binary, env
 
 
 def render_challenge(workspace: BlueprintWorkspace) -> str:
@@ -98,6 +124,12 @@ async def run_comparator(
         logger.warning(f"Skipping Comparator: {reason}")
         return ComparatorReport(status=ComparatorStatus.PENDING, detail=reason)
 
+    try:
+        binary, env = await _resolve_binaries(config, workspace.base_folder)
+    except ProvisionError as e:
+        logger.warning(f"Skipping Comparator: {e}")
+        return ComparatorReport(status=ComparatorStatus.PENDING, detail=str(e))
+
     challenge_module = f"{config.module_prefix}Challenge"
     solution_module = f"{config.module_prefix}Solution"
 
@@ -124,9 +156,10 @@ async def run_comparator(
 
         logger.info(f"Running Comparator on {blueprint.target.lean_name}")
         returncode, stdout, stderr = await run_lean_subprocess(
-            ["lake", "env", config.binary, str(config_path)],
+            ["lake", "env", binary, str(config_path)],
             cwd=workspace.base_folder,
             timeout=config.timeout,
+            env=env,
         )
         output = (stdout + stderr).strip()
     except Exception as e:  # noqa: BLE001 - any failure here is infrastructure, not a verdict
