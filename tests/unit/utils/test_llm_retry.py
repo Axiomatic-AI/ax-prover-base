@@ -49,3 +49,34 @@ async def test_a_rate_limit_is_retried():
 
     assert response.content == "ok"
     assert calls["n"] == 2
+
+
+async def test_a_transient_provider_error_in_a_200_body_is_retried():
+    """OpenRouter reports provider failures inside HTTP 200 bodies; langchain-openai
+    raises them as bare ValueError. A 504 'Provider timed out' killed a run."""
+    error = ValueError({"message": "Provider timed out after 14939ms", "code": 504})
+    client, calls = client_raising([error])
+
+    response = await client.ainvoke([])
+
+    assert response.content == "ok"
+    assert calls["n"] == 2
+
+
+async def test_a_permanent_provider_error_in_a_200_body_fails_fast():
+    error = ValueError({"message": "No endpoints available", "code": 404})
+    client, calls = client_raising([error, error])
+
+    with pytest.raises(ValueError):
+        await client.ainvoke([])
+
+    assert calls["n"] == 1
+
+
+async def test_a_plain_value_error_fails_fast():
+    client, calls = client_raising([ValueError("not a provider payload")])
+
+    with pytest.raises(ValueError):
+        await client.ainvoke([])
+
+    assert calls["n"] == 1

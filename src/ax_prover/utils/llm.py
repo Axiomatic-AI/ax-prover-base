@@ -10,7 +10,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_core.tools import BaseTool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
@@ -46,6 +46,33 @@ REQUEST_TIMEOUT_SECONDS = 900.0
 MAX_REQUEST_RETRIES = 1
 
 
+class TransientProviderError(Exception):
+    """A transient provider failure OpenRouter reported inside an HTTP 200 body.
+
+    langchain-openai surfaces embedded provider errors as a bare ValueError, which the
+    retry allowlist cannot distinguish from a programming error; a 504 "Provider timed
+    out" killed a whole run that way. `_classify_value_error` re-raises the transient
+    ones as this type so the retry layer sees them; permanent ones fail fast unchanged.
+    """
+
+
+#: Embedded provider codes that are worth retrying (timeouts, rate limits, upstream 5xx).
+_TRANSIENT_PROVIDER_CODES = {408, 429, 500, 502, 503, 504, 524}
+
+
+def _classify_value_error(error: ValueError) -> BaseException:
+    """Map an embedded OpenRouter provider error to a retryable type when transient."""
+    payload = error.args[0] if error.args else None
+    code = payload.get("code") if isinstance(payload, dict) else None
+    try:
+        code = int(code)
+    except (TypeError, ValueError):
+        return error
+    if code in _TRANSIENT_PROVIDER_CODES:
+        return TransientProviderError(str(payload))
+    return error
+
+
 #: Transient failures worth retrying; anything else fails fast. The default retry config
 #: allows 10k attempts, which is right for rate limits and flaky upstreams but disastrous
 #: for permanent errors: a routing 404 (a provider pin excluded by the account's
@@ -58,6 +85,7 @@ RETRYABLE_LLM_EXCEPTIONS: tuple[type[BaseException], ...] = (
     anthropic.APIConnectionError,
     anthropic.RateLimitError,
     anthropic.InternalServerError,
+    TransientProviderError,
 )
 
 
@@ -259,7 +287,15 @@ class LLMClient:
             model = model.bind(**self._structured_output_bind_kwargs(output_schema))
 
         if retry_config:
-            model = model.with_retry(
+            inner = model
+
+            async def classify_embedded_errors(messages, config=None):
+                try:
+                    return await inner.ainvoke(messages, config=config)
+                except ValueError as e:
+                    raise _classify_value_error(e) from e
+
+            model = RunnableLambda(classify_embedded_errors).with_retry(
                 retry_if_exception_type=retry_config.get(
                     "retry_if_exception_type", RETRYABLE_LLM_EXCEPTIONS
                 ),
