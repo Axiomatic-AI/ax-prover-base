@@ -18,6 +18,7 @@ from ..utils.logging import get_logger
 from .extraction import extract_nodes
 from .graph import validate_blueprint
 from .lean_service import CompilePriority
+from .metadata import FENCE_LANGUAGE
 from .models import Blueprint, BlueprintError, BlueprintValidationError
 from .prompts import (
     ARCHITECT_REPAIR_PROMPT,
@@ -110,6 +111,20 @@ async def build_blueprint(
         workspace.target_lean_name,
         workspace.trusted_names,
     )
+
+    # The REPL can return an incomplete declaration list for a cleanly compiling module
+    # (a measured run omitted one helper), and validation then blames the model for a
+    # "missing" helper that sits in its file - one run burned 8 repair rounds on that
+    # lie. A metadata-block count mismatch is infrastructure, never model fault.
+    declared = source.count(f"```{FENCE_LANGUAGE}")
+    extracted = sum(1 for node in nodes if not node.is_target)
+    if extracted < declared:
+        found = sorted(node.id for node in nodes if not node.is_target)
+        raise BlueprintError(
+            f"the REPL reported {extracted} generated helper(s) but the compiled source "
+            f"declares {declared}; declarations were lost in extraction, not by the "
+            f"model. Extracted ids: {found}"
+        )
     return validate_blueprint(
         nodes,
         namespace=workspace.namespace_full,

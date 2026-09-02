@@ -1,5 +1,6 @@
 """The architect/refiner repair loop: a rejected skeleton must come back to the model."""
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ax_prover.blueprint import generation
@@ -226,3 +227,32 @@ async def test_without_a_verified_source_a_broken_submission_still_repairs(works
 
     assert candidate.helpers == SECOND
     assert FIRST in seen[1][-1].content
+
+
+async def test_lost_declarations_are_infrastructure_not_model_fault(workspace, monkeypatch):
+    """The REPL omitted a compiled helper from its declaration list; a run burned 8
+    repair rounds being told the helper was missing. The mismatch must raise loudly."""
+    from ax_prover.blueprint.models import BlueprintError
+
+    helpers = (
+        '/--\n```ax-blueprint\n{"version": 1, "id": "kept", "parents": []}\n```\ns\n-/\n'
+        "theorem kept : True := by sorry\n\n"
+        '/--\n```ax-blueprint\n{"version": 1, "id": "dropped", "parents": []}\n```\ns\n-/\n'
+        "theorem dropped : True := by sorry\n"
+    )
+
+    async def fake_compile(source, server):
+        return type("R", (), {"success": True, "output": ""})(), []
+
+    monkeypatch.setattr(workspace, "compile_and_extract", fake_compile, raising=False)
+    monkeypatch.setattr(
+        generation,
+        "extract_nodes",
+        lambda *a, **k: [make_node("kept")],
+    )
+
+    with pytest.raises(BlueprintError) as err:
+        await generation.build_blueprint(workspace, None, helpers, (), "plan")
+
+    assert "declarations were lost" in str(err.value)
+    assert "kept" in str(err.value)
