@@ -47,46 +47,43 @@ MAX_REQUEST_RETRIES = 1
 
 
 class TransientProviderError(Exception):
-    """A transient provider failure OpenRouter reported inside an HTTP 200 body.
+    """A retryable LLM-call failure, wrapping whatever shape the provider produced.
 
-    langchain-openai surfaces embedded provider errors as a bare ValueError, which the
-    retry allowlist cannot distinguish from a programming error; a 504 "Provider timed
-    out" killed a whole run that way. `_classify_value_error` re-raises the transient
-    ones as this type so the retry layer sees them; permanent ones fail fast unchanged.
+    Retry policy is a deny-list, not an allow-list. An allow-list of typed transient
+    exceptions was tried first and lost twice to OpenRouter's failure zoo: a 504
+    "Provider timed out" arrived as a bare ValueError inside an HTTP 200 body, and a
+    malformed response with `choices: null` crashed langchain-openai with a TypeError -
+    each killed a run because the type was not on the list. Now anything that is not
+    provably permanent is wrapped in this type and retried; only statuses that will fail
+    identically on every attempt (auth, bad request, the data-policy routing 404 that
+    once retried invisibly for 90 minutes) fail fast, as the original exception.
     """
 
 
-#: Embedded provider codes that are worth retrying (timeouts, rate limits, upstream 5xx).
-_TRANSIENT_PROVIDER_CODES = {408, 429, 500, 502, 503, 504, 524}
+#: HTTP statuses that fail identically on every retry. 408/429 are absent on purpose.
+_PERMANENT_STATUSES = {400, 401, 403, 404, 405, 409, 413, 422}
 
 
-def _classify_value_error(error: ValueError) -> BaseException:
-    """Map an embedded OpenRouter provider error to a retryable type when transient."""
-    payload = error.args[0] if error.args else None
-    code = payload.get("code") if isinstance(payload, dict) else None
+def _permanent_status(error: BaseException) -> int | None:
+    """The error's HTTP status if it is provably permanent, else None.
+
+    Reads `status_code` from typed openai/anthropic APIStatusError exceptions, and the
+    embedded `code` from the ValueError langchain-openai raises for an error payload
+    inside an HTTP 200 body.
+    """
+    status = getattr(error, "status_code", None)
+    if status is None and isinstance(error, ValueError) and error.args:
+        payload = error.args[0]
+        if isinstance(payload, dict):
+            status = payload.get("code")
     try:
-        code = int(code)
+        status = int(status)
     except (TypeError, ValueError):
-        return error
-    if code in _TRANSIENT_PROVIDER_CODES:
-        return TransientProviderError(str(payload))
-    return error
+        return None
+    return status if status in _PERMANENT_STATUSES else None
 
 
-#: Transient failures worth retrying; anything else fails fast. The default retry config
-#: allows 10k attempts, which is right for rate limits and flaky upstreams but disastrous
-#: for permanent errors: a routing 404 (a provider pin excluded by the account's
-#: OpenRouter data policy) was retried invisibly for 90 minutes. Client errors other than
-#: 429 will fail every time, so they fail once.
-RETRYABLE_LLM_EXCEPTIONS: tuple[type[BaseException], ...] = (
-    openai.APIConnectionError,  # includes APITimeoutError
-    openai.RateLimitError,
-    openai.InternalServerError,
-    anthropic.APIConnectionError,
-    anthropic.RateLimitError,
-    anthropic.InternalServerError,
-    TransientProviderError,
-)
+RETRYABLE_LLM_EXCEPTIONS: tuple[type[BaseException], ...] = (TransientProviderError,)
 
 
 def create_llm(config: LLMConfig) -> BaseChatModel:
@@ -289,13 +286,15 @@ class LLMClient:
         if retry_config:
             inner = model
 
-            async def classify_embedded_errors(messages, config=None):
+            async def classify_errors(messages, config=None):
                 try:
                     return await inner.ainvoke(messages, config=config)
-                except ValueError as e:
-                    raise _classify_value_error(e) from e
+                except Exception as e:
+                    if _permanent_status(e) is not None:
+                        raise
+                    raise TransientProviderError(f"{type(e).__name__}: {e}") from e
 
-            model = RunnableLambda(classify_embedded_errors).with_retry(
+            model = RunnableLambda(classify_errors).with_retry(
                 retry_if_exception_type=retry_config.get(
                     "retry_if_exception_type", RETRYABLE_LLM_EXCEPTIONS
                 ),

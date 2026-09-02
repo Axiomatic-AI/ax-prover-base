@@ -73,10 +73,22 @@ async def test_a_permanent_provider_error_in_a_200_body_fails_fast():
     assert calls["n"] == 1
 
 
-async def test_a_plain_value_error_fails_fast():
-    client, calls = client_raising([ValueError("not a provider payload")])
+async def test_a_malformed_response_crash_is_retried():
+    """A `choices: null` response crashes langchain-openai with a bare TypeError; it is
+    transient provider garbage, not a permanent error, so it retries."""
+    client, calls = client_raising([TypeError("'NoneType' object is not iterable")])
 
-    with pytest.raises(ValueError):
+    response = await client.ainvoke([])
+
+    assert response.content == "ok"
+    assert calls["n"] == 2
+
+
+async def test_an_auth_error_fails_fast():
+    error = _status_error(openai.AuthenticationError, 401)
+    client, calls = client_raising([error, error])
+
+    with pytest.raises(openai.AuthenticationError):
         await client.ainvoke([])
 
     assert calls["n"] == 1
