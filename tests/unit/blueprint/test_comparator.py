@@ -12,7 +12,11 @@ from ax_prover.blueprint.comparator import (
     unavailable_reason,
 )
 from ax_prover.blueprint.models import ComparatorStatus
-from ax_prover.blueprint.provision import ProvisionError, read_project_toolchain
+from ax_prover.blueprint.provision import (
+    ProvisionError,
+    read_project_toolchain,
+    select_comparator_tag,
+)
 from ax_prover.config import ComparatorConfig
 
 from .conftest import make_blueprint, make_node
@@ -147,7 +151,8 @@ async def test_missing_binaries_are_provisioned(workspace, blueprint, monkeypatc
     monkeypatch.setattr(workspace, "base_folder", str(tmp_path))
     seen = {}
 
-    async def fake_comparator():
+    async def fake_comparator(version):
+        seen["comparator_version"] = version
         return tmp_path / "bin" / "comparator"
 
     async def fake_lean4export(version):
@@ -168,6 +173,7 @@ async def test_missing_binaries_are_provisioned(workspace, blueprint, monkeypatc
 
     assert report.status is ComparatorStatus.PASSED
     assert seen["version"] == "v4.24.0"
+    assert seen["comparator_version"] == "v4.24.0"
     assert seen["command"][2] == str(tmp_path / "bin" / "comparator")
     assert seen["env"]["COMPARATOR_LEAN4EXPORT"] == str(tmp_path / "bin" / "lean4export")
 
@@ -177,8 +183,9 @@ async def test_a_provision_failure_is_pending_not_a_crash(workspace, blueprint, 
     monkeypatch.setattr(
         "shutil.which", lambda name: "/usr/bin/landrun" if name == "landrun" else None
     )
+    (workspace.file_path.parent / "lean-toolchain").write_text("leanprover/lean4:v4.24.0\n")
 
-    async def fail():
+    async def fail(version):
         raise ProvisionError("no network")
 
     monkeypatch.setattr("ax_prover.blueprint.comparator.ensure_comparator", fail)
@@ -229,3 +236,33 @@ async def test_modules_are_written_beside_a_nested_target(workspace, blueprint, 
     assert seen["config"]["solution_module"] == "Bench.Sub.AxProverComparatorSolution"
     assert str(nested) in seen["config_path"]
     assert not list(nested.glob("AxProverComparator*"))
+
+
+@pytest.mark.parametrize(
+    ("toolchain", "expected"),
+    [
+        ("v4.24.0", "v4.25.0-rc2"),  # older than every release: closest era wins
+        ("v4.29.1", "v4.29.0"),
+        ("v4.27.0", "v4.27.0"),
+        ("v4.99.0", "v4.34.0-rc2"),
+    ],
+)
+def test_comparator_tag_selection(toolchain, expected):
+    tags = [
+        "v4.34.0-rc2",
+        "v4.33.0",
+        "v4.31.0",
+        "v4.29.0",
+        "v4.28.0",
+        "v4.27.0",
+        "v4.25.0-rc2",
+        "nanoda",
+    ]
+    assert select_comparator_tag(tags, toolchain) == expected
+
+
+def test_comparator_tag_selection_rejects_junk():
+    with pytest.raises(ProvisionError):
+        select_comparator_tag(["nanoda", "pre-v25"], "v4.24.0")
+    with pytest.raises(ProvisionError):
+        select_comparator_tag(["v4.27.0"], "nightly-2026-01-01")

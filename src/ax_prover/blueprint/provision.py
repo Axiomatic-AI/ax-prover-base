@@ -11,6 +11,7 @@ on its own pinned toolchain) and is cached once.
 """
 
 import asyncio
+import re
 from pathlib import Path
 
 from platformdirs import user_cache_dir
@@ -102,10 +103,62 @@ async def ensure_lean4export(toolchain_version: str) -> Path:
         raise
 
 
-async def ensure_comparator() -> Path:
-    """The comparator binary, building it on first use.
+_VERSION_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(?:-rc(\d+))?$")
+
+
+def _version_key(tag: str) -> tuple | None:
+    """Sortable key for a `vX.Y.Z[-rcN]` tag; an rc orders below its final release."""
+    match = _VERSION_TAG.match(tag)
+    if match is None:
+        return None
+    major, minor, patch, rc = match.groups()
+    return (int(major), int(minor), int(patch), (0, int(rc)) if rc else (1, 0))
+
+
+def select_comparator_tag(tags: list[str], toolchain_version: str) -> str:
+    """The comparator release matched to the target toolchain.
+
+    Comparator's requested export constants grow with Lean core (its current Main.lean
+    asks for `String.ofList`, which a v4.24.0 environment lacks, and lean4export panics),
+    so the newest tag at or below the toolchain is the safe pick. A project older than
+    every release gets the oldest one, the closest era available.
 
     Raises:
-        ProvisionError: The clone or build failed.
+        ProvisionError: No version-shaped tags exist, or the toolchain is unparseable.
     """
-    return await _clone_and_build(COMPARATOR_REPO, None, CACHE_ROOT / "comparator", "comparator")
+    want = _version_key(toolchain_version)
+    if want is None:
+        raise ProvisionError(f"unrecognized toolchain version {toolchain_version!r}")
+
+    versioned = sorted((key, tag) for tag in tags if (key := _version_key(tag)) is not None)
+    if not versioned:
+        raise ProvisionError(f"comparator has no version tags among {tags!r}")
+
+    at_or_below = [tag for key, tag in versioned if key <= want]
+    return at_or_below[-1] if at_or_below else versioned[0][1]
+
+
+async def _list_remote_tags(repo: str) -> list[str]:
+    returncode, stdout, stderr = await run_lean_subprocess(
+        ["git", "ls-remote", "--tags", repo], cwd=str(Path.home()), timeout=120.0
+    )
+    if returncode != 0:
+        raise ProvisionError(f"`git ls-remote --tags {repo}` failed: {stderr.strip()[-500:]}")
+    tags = set()
+    for line in stdout.splitlines():
+        _, _, ref = line.partition("refs/tags/")
+        if ref:
+            tags.add(ref.removesuffix("^{}"))
+    return sorted(tags)
+
+
+async def ensure_comparator(toolchain_version: str) -> Path:
+    """The comparator binary era-matched to `toolchain_version`, building it on first use.
+
+    Raises:
+        ProvisionError: No usable release, or the clone or build failed.
+    """
+    tags = await _list_remote_tags(COMPARATOR_REPO)
+    tag = select_comparator_tag(tags, toolchain_version)
+    dest = CACHE_ROOT / f"comparator-{tag}"
+    return await _clone_and_build(COMPARATOR_REPO, tag, dest, "comparator")

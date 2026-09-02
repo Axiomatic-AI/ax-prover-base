@@ -76,7 +76,8 @@ async def _resolve_binaries(
     """
     binary = shutil.which(config.binary)
     if binary is None:
-        binary = str(await ensure_comparator())
+        toolchain = read_project_toolchain(base_folder)
+        binary = str(await ensure_comparator(toolchain))
 
     env = None
     if shutil.which("lean4export") is None and not os.environ.get("COMPARATOR_LEAN4EXPORT"):
