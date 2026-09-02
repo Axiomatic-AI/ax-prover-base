@@ -130,17 +130,23 @@ async def run_comparator(
         logger.warning(f"Skipping Comparator: {e}")
         return ComparatorReport(status=ComparatorStatus.PENDING, detail=str(e))
 
-    challenge_module = f"{config.module_prefix}Challenge"
-    solution_module = f"{config.module_prefix}Solution"
+    # The modules live beside the target file so Lake resolves them under the same
+    # library as the target itself: `lake build` addresses any module inside a declared
+    # lib's tree, while a root-level module belongs to no target at all (measured:
+    # "error: unknown target `AxProverComparatorChallenge`").
+    directory = workspace.file_path.parent
+    rel = directory.relative_to(Path(workspace.base_folder))
+    dotted = ".".join((*rel.parts, config.module_prefix))
+    challenge_module = f"{dotted}Challenge"
+    solution_module = f"{dotted}Solution"
 
-    # Root-level modules so `import`-free, self-contained challenge and solution files
-    # resolve under the project's default Lake target.
-    root = Path(workspace.base_folder)
     paths = {
-        root / f"{challenge_module}.lean": render_challenge(workspace),
-        root / f"{solution_module}.lean": render_solution(workspace, helper_block, target_body),
+        directory / f"{config.module_prefix}Challenge.lean": render_challenge(workspace),
+        directory / f"{config.module_prefix}Solution.lean": render_solution(
+            workspace, helper_block, target_body
+        ),
     }
-    config_path = root / f"{config.module_prefix}Config.json"
+    config_path = directory / f"{config.module_prefix}Config.json"
 
     payload = {
         "challenge_module": challenge_module,

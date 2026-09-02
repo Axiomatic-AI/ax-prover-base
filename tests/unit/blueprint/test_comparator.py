@@ -100,6 +100,8 @@ async def test_run_comparator_passes_and_cleans_up(workspace, blueprint, monkeyp
 
     assert report.status is ComparatorStatus.PASSED
     assert seen["command"][:3] == ["lake", "env", "/usr/bin/comparator"]
+    # The workspace fixture's target sits at the project root, so no dotted prefix.
+    assert seen["config"]["challenge_module"] == "AxProverComparatorChallenge"
     assert seen["config"]["theorem_names"] == ["my_target"]
     assert seen["config"]["permitted_axioms"] == ["propext", "Quot.sound", "Classical.choice"]
     assert not list(workspace.file_path.parent.glob("AxProverComparator*"))
@@ -198,3 +200,32 @@ def test_read_project_toolchain_parses_both_forms(tmp_path):
 def test_read_project_toolchain_rejects_a_missing_file(tmp_path):
     with pytest.raises(ProvisionError):
         read_project_toolchain(str(tmp_path))
+
+
+async def test_modules_are_written_beside_a_nested_target(workspace, blueprint, monkeypatch):
+    """A root-level module belongs to no Lake target; the modules must live in the
+    target's own directory with dotted module names."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
+    nested = workspace.file_path.parent / "Bench" / "Sub"
+    nested.mkdir(parents=True)
+    new_path = nested / workspace.file_path.name
+    new_path.write_text(workspace.original_source, encoding="utf-8")
+    monkeypatch.setattr(workspace, "file_path", new_path)
+    seen = {}
+
+    async def fake_subprocess(command, cwd, timeout, env=None):
+        seen["config"] = json.loads(open(command[-1]).read())
+        seen["config_path"] = command[-1]
+        return 0, "ok", ""
+
+    monkeypatch.setattr("ax_prover.blueprint.comparator.run_lean_subprocess", fake_subprocess)
+
+    report = await run_comparator(workspace, blueprint, CONFIG, "", "by simp")
+
+    assert report.status is ComparatorStatus.PASSED
+    assert seen["config"]["challenge_module"] == "Bench.Sub.AxProverComparatorChallenge"
+    assert seen["config"]["solution_module"] == "Bench.Sub.AxProverComparatorSolution"
+    assert str(nested) in seen["config_path"]
+    assert not list(nested.glob("AxProverComparator*"))
