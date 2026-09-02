@@ -1,0 +1,14 @@
+# Direct prover (the classic 4-node loop, no blueprint) on the same DeepSeek-V4-Flash
+# serving the blueprint runs use. Purpose: an architecture A/B with the model held fixed -
+# blueprint failures on problems this configuration solves are architect failures, not
+# model failures.
+#
+# Usage:
+#   ax-prover --config configs/direct_deepseek_flash.yaml experiment <dataset> \
+#     --folder ~/lean_benchmarks --skip-build
+
+import:
+  - default.yaml
+
+prover:
+  prover_llm: ${llm_configs.deepseek_v4_flash_bf16}
