@@ -266,3 +266,19 @@ def test_comparator_tag_selection_rejects_junk():
         select_comparator_tag(["nanoda", "pre-v25"], "v4.24.0")
     with pytest.raises(ProvisionError):
         select_comparator_tag(["v4.27.0"], "nightly-2026-01-01")
+
+
+async def test_a_landrun_failure_is_pending_not_a_rejection(workspace, blueprint, monkeypatch):
+    """A sandbox that cannot exec lean4export is infrastructure, not a proof verdict."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+
+    async def fake_subprocess(command, cwd, timeout, env=None):
+        return 1, "", '[landrun:error] Failed to find binary: exec: "lean4export"'
+
+    monkeypatch.setattr("ax_prover.blueprint.comparator.run_lean_subprocess", fake_subprocess)
+
+    report = await run_comparator(workspace, blueprint, CONFIG, "", "by simp")
+
+    assert report.status is ComparatorStatus.PENDING
+    assert "infrastructure" in report.detail

@@ -83,7 +83,13 @@ async def _resolve_binaries(
     if shutil.which("lean4export") is None and not os.environ.get("COMPARATOR_LEAN4EXPORT"):
         toolchain = read_project_toolchain(base_folder)
         lean4export = await ensure_lean4export(toolchain)
-        env = {**os.environ, "COMPARATOR_LEAN4EXPORT": str(lean4export)}
+        # Older comparator releases resolve lean4export from PATH only (the
+        # COMPARATOR_LEAN4EXPORT override is newer), so provide both.
+        env = {
+            **os.environ,
+            "COMPARATOR_LEAN4EXPORT": str(lean4export),
+            "PATH": f"{lean4export.parent}{os.pathsep}{os.environ.get('PATH', '')}",
+        }
 
     return binary, env
 
@@ -179,6 +185,16 @@ async def run_comparator(
 
     if returncode == 0:
         return ComparatorReport(status=ComparatorStatus.PASSED, output=output)
+
+    # A rejection is a verdict about the proof; a sandbox or binary-resolution failure is
+    # not. A run where landrun could not exec lean4export was reported as REJECTED and
+    # failed a sample whose every node had been proven.
+    if "landrun:error" in output or "executable file not found" in output:
+        return ComparatorReport(
+            status=ComparatorStatus.PENDING,
+            detail=f"Comparator infrastructure failure (exit {returncode})",
+            output=output,
+        )
 
     return ComparatorReport(
         status=ComparatorStatus.REJECTED,
