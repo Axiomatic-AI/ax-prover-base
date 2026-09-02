@@ -86,21 +86,47 @@ async def _clone_and_build(repo: str, ref: str | None, dest: Path, target: str) 
         return binary
 
 
+#: Comparator invokes `lean4export <module> -- <decls>` under landrun, and landrun
+#: swallows the bare `--` (measured: `landrun ... echo a -- b` prints `a b`), so the
+#: declaration names arrive as extra module arguments and the export dies with "unknown
+#: module prefix". The shim reinserts the separator, and passes through untouched if a
+#: fixed landrun ever preserves it.
+_LEAN4EXPORT_SHIM = """\
+#!/bin/sh
+if [ "$2" = "--" ]; then
+  exec "{real}" "$@"
+fi
+first="$1"
+shift
+exec "{real}" "$first" -- "$@"
+"""
+
+
+def write_lean4export_shim(real: Path, directory: Path) -> Path:
+    """Write the `--`-restoring wrapper for `real` into `directory` and return its path."""
+    directory.mkdir(parents=True, exist_ok=True)
+    shim = directory / "lean4export"
+    shim.write_text(_LEAN4EXPORT_SHIM.format(real=real), encoding="utf-8")
+    shim.chmod(0o755)
+    return shim
+
+
 async def ensure_lean4export(toolchain_version: str) -> Path:
-    """The lean4export binary matching `toolchain_version`, building it on first use.
+    """A lean4export for `toolchain_version`, built on first use, wrapped in the shim.
 
     Raises:
         ProvisionError: No release tag matches the toolchain, or the build failed.
     """
     dest = CACHE_ROOT / f"lean4export-{toolchain_version}"
     try:
-        return await _clone_and_build(LEAN4EXPORT_REPO, toolchain_version, dest, "lean4export")
+        binary = await _clone_and_build(LEAN4EXPORT_REPO, toolchain_version, dest, "lean4export")
     except ProvisionError as e:
         if "Remote branch" in str(e) or "not found" in str(e):
             raise ProvisionError(
                 f"lean4export has no release for toolchain {toolchain_version}: {e}"
             ) from e
         raise
+    return write_lean4export_shim(binary, dest / "shim")
 
 
 _VERSION_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(?:-rc(\d+))?$")

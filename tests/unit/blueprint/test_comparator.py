@@ -282,3 +282,26 @@ async def test_a_landrun_failure_is_pending_not_a_rejection(workspace, blueprint
 
     assert report.status is ComparatorStatus.PENDING
     assert "infrastructure" in report.detail
+
+
+def test_lean4export_shim_restores_the_separator(tmp_path):
+    """landrun swallows the bare `--` in the wrapped command, so comparator's decl names
+    arrive as module arguments; the shim reinserts the separator."""
+    import subprocess
+
+    from ax_prover.blueprint.provision import write_lean4export_shim
+
+    real = tmp_path / "real"
+    real.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
+    real.chmod(0o755)
+    shim = write_lean4export_shim(real, tmp_path / "shim")
+
+    stripped = subprocess.run(
+        [str(shim), "Mod", "thm1", "thm2"], capture_output=True, text=True
+    ).stdout.splitlines()
+    intact = subprocess.run(
+        [str(shim), "Mod", "--", "thm1"], capture_output=True, text=True
+    ).stdout.splitlines()
+
+    assert stripped == ["Mod", "--", "thm1", "thm2"]
+    assert intact == ["Mod", "--", "thm1"], "an already-present separator must not double"
