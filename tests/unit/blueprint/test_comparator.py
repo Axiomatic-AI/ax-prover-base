@@ -105,7 +105,8 @@ async def test_run_comparator_passes_and_cleans_up(workspace, blueprint, monkeyp
     assert report.status is ComparatorStatus.PASSED
     assert seen["command"][:3] == ["lake", "env", "/usr/bin/comparator"]
     # The workspace fixture's target sits at the project root, so no dotted prefix.
-    assert seen["config"]["challenge_module"] == "AxProverComparatorChallenge"
+    assert seen["config"]["challenge_module"].endswith("Challenge")
+    assert workspace.namespace in seen["config"]["challenge_module"]
     assert seen["config"]["theorem_names"] == ["my_target"]
     assert seen["config"]["permitted_axioms"] == ["propext", "Quot.sound", "Classical.choice"]
     assert not list(workspace.file_path.parent.glob("AxProverComparator*"))
@@ -232,8 +233,12 @@ async def test_modules_are_written_beside_a_nested_target(workspace, blueprint, 
     report = await run_comparator(workspace, blueprint, CONFIG, "", "by simp")
 
     assert report.status is ComparatorStatus.PASSED
-    assert seen["config"]["challenge_module"] == "Bench.Sub.AxProverComparatorChallenge"
-    assert seen["config"]["solution_module"] == "Bench.Sub.AxProverComparatorSolution"
+    assert seen["config"]["challenge_module"] == (
+        f"Bench.Sub.AxProverComparator_{workspace.namespace}Challenge"
+    )
+    assert seen["config"]["solution_module"] == (
+        f"Bench.Sub.AxProverComparator_{workspace.namespace}Solution"
+    )
     assert str(nested) in seen["config_path"]
     assert not list(nested.glob("AxProverComparator*"))
 
@@ -305,3 +310,24 @@ def test_lean4export_shim_restores_the_separator(tmp_path):
 
     assert stripped == ["Mod", "--", "thm1", "thm2"]
     assert intact == ["Mod", "--", "thm1"], "an already-present separator must not double"
+
+
+async def test_module_names_are_unique_per_target(workspace, blueprint, monkeypatch, tmp_path):
+    """Concurrent experiment samples share one project directory; a fixed module name had
+    ten samples clobbering the same two files mid-build."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    seen = []
+
+    async def fake_subprocess(command, cwd, timeout, env=None):
+        seen.append(json.loads(open(command[-1]).read())["challenge_module"])
+        return 0, "ok", ""
+
+    monkeypatch.setattr("ax_prover.blueprint.comparator.run_lean_subprocess", fake_subprocess)
+
+    await run_comparator(workspace, blueprint, CONFIG, "", "by simp")
+    monkeypatch.setattr(workspace, "namespace", "AxProverGenerated_other_deadbeef")
+    await run_comparator(workspace, blueprint, CONFIG, "", "by simp")
+
+    assert seen[0] != seen[1]
+    assert not list(workspace.file_path.parent.glob("AxProverComparator*"))

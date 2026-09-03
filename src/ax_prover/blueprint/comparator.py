@@ -141,19 +141,24 @@ async def run_comparator(
     # library as the target itself: `lake build` addresses any module inside a declared
     # lib's tree, while a root-level module belongs to no target at all (measured:
     # "error: unknown target `AxProverComparatorChallenge`").
+    #
+    # The names carry the target's generated-namespace digest because concurrent
+    # experiment samples share one project directory: a fixed name had ten samples
+    # writing, building, and deleting the same two modules, which surfaced as "Constant
+    # <target> not found in environment" and "no such file or directory" - and those were
+    # reported as proof rejections.
     directory = workspace.file_path.parent
     rel = directory.relative_to(Path(workspace.base_folder))
-    dotted = ".".join((*rel.parts, config.module_prefix))
+    stem = f"{config.module_prefix}_{workspace.namespace}"
+    dotted = ".".join((*rel.parts, stem))
     challenge_module = f"{dotted}Challenge"
     solution_module = f"{dotted}Solution"
 
     paths = {
-        directory / f"{config.module_prefix}Challenge.lean": render_challenge(workspace),
-        directory / f"{config.module_prefix}Solution.lean": render_solution(
-            workspace, helper_block, target_body
-        ),
+        directory / f"{stem}Challenge.lean": render_challenge(workspace),
+        directory / f"{stem}Solution.lean": render_solution(workspace, helper_block, target_body),
     }
-    config_path = directory / f"{config.module_prefix}Config.json"
+    config_path = directory / f"{stem}Config.json"
 
     payload = {
         "challenge_module": challenge_module,
