@@ -36,6 +36,24 @@ _PROVIDER_API_KEY_ENV = {
 }
 
 
+# Anthropic Messages-API concepts. `init_chat_model` forwards unknown kwargs into
+# `model_kwargs`, and the OpenAI / Google SDKs then reject them at call time
+# ("AsyncCompletions.parse() got an unexpected keyword argument 'betas'"). Since the
+# packaged defaults carry both, and a `--config` merge cannot remove a default key,
+# every non-Anthropic model used to crash on its first call (#45).
+_ANTHROPIC_ONLY_KWARGS = frozenset({"betas", "thinking"})
+
+
+def _provider_kwargs(provider: str | None, provider_config: dict) -> dict:
+    """Return the provider_config entries that this provider's SDK accepts."""
+    if provider == "anthropic":
+        return dict(provider_config)
+    dropped = sorted(k for k in provider_config if k in _ANTHROPIC_ONLY_KWARGS)
+    if dropped:
+        logger.debug(f"Dropping Anthropic-only kwargs {dropped} for provider {provider!r}")
+    return {k: v for k, v in provider_config.items() if k not in _ANTHROPIC_ONLY_KWARGS}
+
+
 def create_llm(config: LLMConfig) -> BaseChatModel:
     """Create an LLM instance from configuration."""
     provider = config.model.split(":")[0] if ":" in config.model else None
@@ -45,7 +63,7 @@ def create_llm(config: LLMConfig) -> BaseChatModel:
 
     return init_chat_model(
         config.model,
-        **config.provider_config,
+        **_provider_kwargs(provider, config.provider_config),
     )
 
 
@@ -122,6 +140,14 @@ def _is_transient_error(exc: BaseException) -> bool:
     return status == 429 or status >= 500
 
 
+def _uses_openai_platform(llm: BaseChatModel) -> bool:
+    """True only for OpenAI's own API, where `strict` tool schemas are required."""
+    if not isinstance(llm, ChatOpenAI):
+        return False
+    base_url = getattr(llm, "openai_api_base", None) or os.environ.get("OPENAI_BASE_URL", "")
+    return not base_url or "api.openai.com" in str(base_url)
+
+
 class LLMClient:
     """Dynamically create a Runnable to invoke LLMs with structured output, tool calling and retry.
 
@@ -151,6 +177,7 @@ class LLMClient:
         """Initialize the LLMClient with a configuration."""
         self._base_llm: BaseChatModel = create_llm(config)
         self._retry_config: dict = config.retry_config
+        self._strict_tools: bool = _uses_openai_platform(self._base_llm)
 
     @property
     def profile(self) -> dict:
@@ -196,9 +223,11 @@ class LLMClient:
         model: Runnable = self._base_llm
 
         if tools:
-            # OpenAI requires strict=True when combining tools with structured output
-            # other providers default to None (omit the field)
-            strict = True if isinstance(self._base_llm, ChatOpenAI) and output_schema else None
+            # api.openai.com requires strict=True when combining tools with structured output.
+            # OpenAI-*compatible* servers do not, and vLLM silently drops `response_format`
+            # when a tool is strict (measured with DeepSeek-V4-Pro, vLLM 0.29): every
+            # proposal then comes back as prose and fails schema validation.
+            strict = True if self._strict_tools else None
             model = self._base_llm.bind_tools(tools, strict=strict)
 
         if output_schema:
@@ -223,7 +252,7 @@ class LLMClient:
             return _google_structured_kwargs(schema.model_json_schema())
 
         if isinstance(self._base_llm, ChatOpenAI):
-            return _openai_structured_kwargs(schema)
+            return _openai_structured_kwargs(schema, platform=self._strict_tools)
 
         raise NotImplementedError(
             f"Structured output bind kwargs not implemented for {type(self._base_llm).__name__}."
@@ -251,5 +280,26 @@ def _google_structured_kwargs(schema: type[BaseModel]) -> dict:
     }
 
 
-def _openai_structured_kwargs(schema: type[BaseModel]) -> dict:
-    return {"response_format": schema}
+def _openai_structured_kwargs(schema: type[BaseModel], platform: bool = True) -> dict:
+    """Constrain output to a JSON schema.
+
+    On api.openai.com the pydantic class is passed through so langchain-openai uses the
+    SDK's `.parse()` path (which requires strict tools — see `_uses_openai_platform`). An
+    OpenAI-compatible server gets the plain `json_schema` dict instead: `.parse()` refuses
+    non-strict tools, and vLLM drops the schema when tools are strict. Callers validate
+    `response.text` themselves, so nothing is lost.
+    """
+    if platform:
+        return {"response_format": schema}
+    # Via `extra_body`, not `response_format`: langchain-openai routes any json_schema
+    # `response_format` (class or dict) through the SDK's `.parse()`, whose input validation
+    # rejects non-strict tools. `extra_body` is merged into the request JSON unseen by the SDK,
+    # so the server still receives `response_format` and enforces the schema.
+    return {
+        "extra_body": {
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": schema.__name__, "schema": schema.model_json_schema()},
+            }
+        }
+    }
