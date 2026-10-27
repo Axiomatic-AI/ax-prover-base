@@ -171,12 +171,11 @@ This project is licensed under the [AGPL-3.0](LICENSE).
 If you use ax-prover in your research, please cite:
 
 ```bibtex
-@article{axproverbase2026,
-  title={A Minimal Agent for Automated Theorem Proving},
-  author={Requena Pozo, Borja and Letson, Austin and Nowakowski, Krystian and Beltran Ferreiro, Izan and Sarra, Leopoldo},
-  year={2026},
-  eprint={2602.24273},
-  archivePrefix={arXiv},
-  url={https://arxiv.org/abs/2602.24273}
+@inproceedings{axproverbase2026,
+title={A Minimal Agent for Automated Theorem Proving},
+author={Borja Requena and Austin Letson and Krystian Nowakowski and Izan Beltran Ferreiro and Leopoldo Sarra},
+booktitle={Forty-third International Conference on Machine Learning},
+year={2026},
+url={https://openreview.net/forum?id=QGAOswfVvD}
 }
 ```
